@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "SelfControl",
+  "version": "0.1.0",
+  "description": "Activity-aware time limits for websites. The clock only runs while you are actually using the site.",
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "selfcontrol@jpmaior",
+      "strict_min_version": "154.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    },
+    "gecko_android": {
+      "strict_min_version": "154.0"
+    }
+  },
+
+  "permissions": ["storage", "tabs", "alarms"],
+
+  "background": {
+    "scripts": ["background/index.js"],
+    "type": "module"
+  },
+
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
+  }
+}

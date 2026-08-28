@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Placeholder icon: a clock whose remaining time is running out.
+       Firefox accepts SVG for extension icons, so one file covers every size. -->
+  <rect width="64" height="64" rx="14" fill="#2b3a55"/>
+  <circle cx="32" cy="34" r="17" fill="none" stroke="#f5f7fa" stroke-width="3.5"/>
+  <path d="M32 34 L32 20 A14 14 0 0 1 44.1 41 Z" fill="#e4572e" opacity="0.85"/>
+  <path d="M32 34 L32 22" stroke="#f5f7fa" stroke-width="3" stroke-linecap="round"/>
+  <path d="M32 34 L41 39" stroke="#f5f7fa" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="32" cy="34" r="2.4" fill="#f5f7fa"/>
+  <rect x="26" y="8" width="12" height="5" rx="2.5" fill="#f5f7fa"/>
+</svg>
