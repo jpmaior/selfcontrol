@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SelfControl — Firefox add-on</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f4f5f7;
+        --card: #fff;
+        --ink: #1d2433;
+        --muted: #5b6478;
+        --line: #dfe3ea;
+        --accent: #e4572e;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #171a21;
+          --card: #21252e;
+          --ink: #eef1f6;
+          --muted: #9aa3b5;
+          --line: #333947;
+          --accent: #ff7a52;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0 auto;
+        max-width: 40rem;
+        padding: 3rem 1.25rem 5rem;
+        background: var(--bg);
+        color: var(--ink);
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 { margin: 0 0 0.25rem; font-size: 1.75rem; letter-spacing: -0.01em; }
+      .tagline { margin: 0 0 2rem; color: var(--muted); text-wrap: pretty; }
+      .card {
+        padding: 1.25rem 1.5rem;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 0.75rem;
+        margin-bottom: 1.25rem;
+      }
+      h2 { margin: 0 0 0.5rem; font-size: 0.8rem; text-transform: uppercase;
+           letter-spacing: 0.08em; color: var(--muted); }
+      a { color: var(--accent); }
+      .cta {
+        display: inline-block; margin-top: 0.35rem; padding: 0.6rem 1.25rem;
+        border-radius: 999px; background: var(--accent); color: #fff;
+        font-weight: 600; text-decoration: none;
+      }
+      code {
+        background: color-mix(in srgb, var(--muted) 15%, transparent);
+        padding: 0.1em 0.35em; border-radius: 0.25rem; font-size: 0.9em;
+      }
+      ul { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+      li + li { margin-top: 0.3rem; }
+      footer { margin-top: 2rem; font-size: 0.85rem; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <h1>SelfControl</h1>
+    <p class="tagline">
+      A Firefox add-on that puts strict, activity-aware time limits on websites. The clock only
+      runs while you are actually consuming the site — YouTube counts while a video is playing,
+      not while it sits paused.
+    </p>
+
+    <div class="card">
+      <h2>Install</h2>
+      <p>
+        Self-distributed and signed by Mozilla. Download the latest <code>.xpi</code> and open it
+        with Firefox, or use <em>about:addons → gear → Install Add-on From File</em>.
+      </p>
+      <a class="cta" href="https://github.com/jpmaior/selfcontrol/releases/latest">Latest release</a>
+      <p style="margin-bottom: 0">
+        Updates after that are automatic, via
+        <a href="./updates.json">updates.json</a>.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>How it counts</h2>
+      <ul>
+        <li><strong>While playing</strong> — time accrues only while a tab is producing sound,
+            including in the background. Muted hover-previews do not count.</li>
+        <li><strong>While focused</strong> — time accrues only while the tab is the focused one.
+            Switch to another app and the clock stops.</li>
+      </ul>
+      <p style="margin-bottom: 0">
+        Budgets run over a rolling window, so time comes back gradually rather than resetting on
+        the hour.
+      </p>
+    </div>
+
+    <footer>
+      Source and documentation on
+      <a href="https://github.com/jpmaior/selfcontrol">GitHub</a>.
+    </footer>
+  </body>
+</html>
