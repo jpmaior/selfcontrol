@@ -16,4 +16,19 @@ export default {
   build: {
     overwriteDest: true,
   },
+
+  lint: {
+    // `update_url` is forbidden for AMO-LISTED add-ons and required for
+    // self-hosted ones. The linter assumes listed unless told otherwise, so
+    // without this the manifest fails with MANIFEST_UPDATE_URL.
+    selfHosted: true,
+  },
+
+  sign: {
+    // Self-distribution: Mozilla signs it and hands back an .xpi, but it never
+    // appears in AMO search and needs no listing metadata. Review is automated.
+    // Credentials come from WEB_EXT_API_KEY / WEB_EXT_API_SECRET — never put
+    // them in this file, it is committed.
+    channel: "unlisted",
+  },
 };
