@@ -248,13 +248,25 @@ Time is sliced into fixed 60-second buckets keyed by `Math.floor(epochMs / 60000
 splits an interval across the buckets it spans:
 
 ```js
-usage = { b: { "29384756": 60, "29384757": 60, "29384758": 23 } }
+usage = { b: { "29384756": 60000, "29384757": 60000, "29384758": 23400 } }
+//              ^ bucket index      ^ milliseconds accrued in that bucket
 ```
 
-- **Usage in window** = sum of buckets whose start is `>= now - windowSec`.
+Values are **milliseconds**, not seconds, so that many short intervals cannot accumulate
+rounding drift in the core ledger. The JSON is a few hundred bytes larger per rule, which is
+nothing.
+
+- **Usage in window** = sum of buckets whose start is `>= now - windowSec`. The boundary bucket
+  is counted *whole* rather than prorated — we know how much was used inside a bucket but not
+  *when* within it, so prorating would be a guess. Counting it whole over-counts by at most one
+  bucket, erring toward blocking slightly early, which is the right direction here.
 - **Pruning** = delete keys below that threshold, done on every commit, so it never grows.
-- A 20-minute budget can never produce more than ~20 non-zero buckets: **~500 bytes per rule**,
+- A 20-minute budget can never produce more than ~20 non-zero buckets: **under 1KB per rule**,
   naturally self-limiting.
+
+Live readings (popup, block page) are taken from a **non-destructive projection** that folds the
+currently open interval into a copy of the ledger. That keeps displayed numbers honest between
+checkpoints without writing anything.
 
 This representation also yields, for free, the thing the block page needs: the moment the
 *oldest* bucket falls out of the window is exactly when the next second of quota returns. So
@@ -365,6 +377,13 @@ regenerated.
 | `= budgetSec` | strict — stay blocked until the full budget is back |
 
 One knob spans every variant, so it is built in from the start rather than discovered later.
+
+> ⚠️ **Subtlety, caught by a unit test in Step 3.** "When will 0 ms of credit be available?" is
+> trivially satisfied *right now*, so passing `minUnlockCreditSec: 0` straight into
+> `creditAvailableAt` would mean the rule **never blocks at all** — the exact opposite of the
+> drip-feed. The threshold is therefore `max(minUnlockCreditSec, 1ms)`, and that clamp lives in
+> `accountant.unlockAt()`, the one function that owns rule semantics. `creditAvailableAt` stays
+> mathematically honest.
 
 ---
 

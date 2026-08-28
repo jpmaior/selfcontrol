@@ -64,9 +64,10 @@ exists.
 two-file background (`index.js` + `log.js`) — deliberately two files, so the checkpoint also
 proves **ES module imports work** in a Firefox event page, which every later step assumes.
 
-`web-ext lint` is already clean (0 errors, 0 warnings). Getting there surfaced two manifest
-floors now recorded in DESIGN.md §2: `data_collection_permissions` is mandatory for new
-extensions and requires Firefox **140** desktop / **142** Android.
+`web-ext lint` is already clean (0 errors, 0 warnings). Getting there surfaced a mandatory
+manifest key now recorded in DESIGN.md §2: `data_collection_permissions` is required for new
+extensions and forces a version floor. We pin **154** on both desktop and Android, matching the
+development browser.
 
 ### ✅ Checkpoint 1
 
@@ -155,16 +156,24 @@ second of credit arrive" calculation that the block page will depend on.
 ### ✅ Checkpoint 3
 
 ```bash
-node --test          # all green, no browser involved
+nix develop --command node --test    # 21 tests, no browser involved
 ```
 
-Then, in the browser, with a temporary `dumpUsage()` exposed on the background console:
+Then in the browser, with the extension's devtools console open:
 
-1. Play a video for ~90 seconds, pause. `dumpUsage("youtube")` → ~90s, spread across 2–3 buckets.
-2. Play another 30s → ~120s total.
-3. Confirm nothing accrues while paused, even after several minutes.
+1. Play a YouTube video ~90 seconds, pause. Run `dumpUsage()` → `youtube` shows ~1:30 used.
+2. Play another 30s, pause → ~2:00.
+3. Leave it paused several minutes and re-run `dumpUsage()` → **unchanged**. Nothing accrues
+   while paused; that is the whole point of the design.
+4. While a video is *playing*, run `dumpUsage()` twice a few seconds apart → the number moves
+   even though no interval has closed. That is the live projection (DESIGN.md §5) at work.
+5. Focus Instagram for ~30s, switch away → `instagram` shows ~0:30.
 
-Expect a second or two of drift from the event-page lifecycle. Anything larger is a bug.
+⚠️ **Keep the devtools console attached throughout.** Step 3 holds the ledger in memory only, so
+it resets whenever the event page unloads — and an attached console is what prevents that. Making
+these numbers survive is precisely what Step 4 does.
+
+A second or two of drift is expected. Anything larger is a bug.
 
 ---
 
@@ -273,7 +282,7 @@ logic ports unchanged.
 - [x] Step 0 — dev environment *(Checkpoint 0 verified)*
 - [x] Step 1 — loadable skeleton *(lint clean; Checkpoint 1 awaiting your run)*
 - [x] Step 2 — observers *(Checkpoint 2 verified — `tab.audible` holds up, see DESIGN.md §3)*
-- [ ] Step 3 — accountant
+- [x] Step 3 — accountant *(21 unit tests pass; Checkpoint 3 awaiting your run)*
 - [ ] Step 4 — persistence
 - [ ] Step 5 — enforcement
 - [ ] Step 6 — popup
