@@ -194,15 +194,25 @@ whole point of this step:
 | **Terminate Background Script** | unloads the event page only | **survives** |
 | **Reload** | restarts the whole extension | cleared |
 
-1. Accrue ~1 minute, pause, then **Reload** the extension → `dumpUsage` still reports that
+1. Accrue ~1 minute, pause, then **Reload** the extension → `dumpUsage()` still reports that
    minute (that is `storage.local` doing its job).
-2. **Kill the event page mid-playback:** start a video, then click **Terminate Background
-   Script** while it is still playing. The open interval must be recovered from
-   `storage.session` and keep counting. This is the exact MV3 failure mode we are defending
-   against, and *Terminate* — not *Reload* — is the button that reproduces it.
-3. Quit Firefox entirely, relaunch `web-ext run` with a persistent profile → usage survives
-   (`storage.local`), open intervals do not (`storage.session`, by design).
-4. Watch continuously for ~6 minutes and confirm exactly one checkpoint write lands, not 360.
+2. **Kill the event page mid-playback:** start a video, let it run ~30s, then click **Terminate
+   Background Script** while it is *still playing*. Reopen the console — the startup log should
+   say `1 interval(s) still open`, and the count keeps climbing from where it was rather than
+   restarting at zero. This is the exact MV3 failure mode we are defending against, and
+   *Terminate* — not *Reload* — is the button that reproduces it.
+3. **The leftover case:** start a video, Terminate the background script, then pause the video
+   *before* reopening the console. On the next start you should see a `reconciled youtube:`
+   line. It deliberately credits only up to the last proven flush rather than guessing, so
+   expect it to under-count slightly — that is the honest choice, not a bug.
+4. Quit Firefox entirely, relaunch `web-ext run` → usage survives (`storage.local`), open
+   intervals do not (`storage.session`, by design).
+5. **Write volume.** Watch continuously for ~6 minutes, then `dumpStats()`. `localWrites`
+   should be in the low single digits — one per checkpoint plus one per transition, not one
+   per second. This is the claim in DESIGN.md §6 that the whole no-tick design exists to make
+   true.
+6. `dumpRaw()` prints what is actually in both stores plus the JSON byte count. Expect
+   well under 1KB per rule.
 
 ---
 
@@ -283,7 +293,7 @@ logic ports unchanged.
 - [x] Step 1 — loadable skeleton *(lint clean; Checkpoint 1 awaiting your run)*
 - [x] Step 2 — observers *(Checkpoint 2 verified — `tab.audible` holds up, see DESIGN.md §3)*
 - [x] Step 3 — accountant *(21 unit tests pass; Checkpoint 3 awaiting your run)*
-- [ ] Step 4 — persistence
+- [x] Step 4 — persistence *(built; Checkpoint 4 awaiting your run)*
 - [ ] Step 5 — enforcement
 - [ ] Step 6 — popup
 - [ ] Step 7 — options

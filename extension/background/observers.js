@@ -141,6 +141,17 @@ function setFocusedRule(ruleId, why, generation) {
 
 // --- derivation ----------------------------------------------------------
 
+/**
+ * The observers' current view of a rule, as last reported.
+ *
+ * Step 4 reconciles against this on startup: the ledger may hold an interval
+ * left open when the event page was killed, and only the observers can say
+ * whether that interval is still live or is a leftover to be settled.
+ */
+export function isCountingNow(ruleId) {
+  return reported.get(ruleId) ?? false;
+}
+
 /** Is this rule being consumed right now, per its mode? */
 function isCounting(rule) {
   switch (rule.mode) {
