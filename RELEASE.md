@@ -39,6 +39,14 @@ Firefox fetches `updates.json` roughly daily and offers anything newer than what
 **Settings → Pages → Source: GitHub Actions.** Not "Deploy from a branch" — the workflow
 publishes directly, and the deploy step fails otherwise.
 
+**Settings → Environments → `github-pages` → Deployment branches and tags.** By default this
+environment only accepts deployments from the default branch, so a `v*` tag is rejected with:
+
+> Tag "v0.1.0" is not allowed to deploy to github-pages due to environment protection rules.
+
+Choose **Selected branches and tags**, then add a rule with ref type **Tag** and pattern `v*`.
+Everything before the deploy will have already succeeded when this bites, including signing.
+
 Nothing else to configure: `jpmaior.github.io` already has a valid certificate, which is all
 `update_url` requires.
 

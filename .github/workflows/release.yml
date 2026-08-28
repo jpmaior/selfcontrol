@@ -48,7 +48,8 @@ jobs:
       # download — so fail here rather than ship that.
       - name: Tag must match the manifest version
         run: |
-          manifest_version="$(node -p 'require("./extension/manifest.json").version')"
+          set -euo pipefail
+          manifest_version="$(nix develop --command node -p 'require("./extension/manifest.json").version')"
           tag_version="${GITHUB_REF_NAME#v}"
           if [ "$manifest_version" != "$tag_version" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match manifest version $manifest_version"
@@ -69,12 +70,32 @@ jobs:
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: nix develop --command web-ext sign
 
-      - name: Locate the signed .xpi
+      # AMO hands back the signed file under an opaque name — something like
+      # 21b637743d0840d7a6d6-0.1.0.xpi. Rename it so the download URL is
+      # readable and predictable. updates.json and the release asset both take
+      # their name from here, so the rename propagates on its own.
+      - name: Locate and rename the signed .xpi
         id: xpi
         run: |
-          path="$(ls web-ext-artifacts/*.xpi | head -1)"
-          echo "path=$path" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$path")" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          src="$(ls web-ext-artifacts/*.xpi | head -1)"
+          version="$(nix develop --command node -p 'require("./extension/manifest.json").version')"
+
+          # An empty version here would silently produce "selfcontrol-.xpi" and
+          # a download link that goes nowhere. Fail loudly instead.
+          if [ -z "$version" ]; then
+            echo "::error::could not read version from extension/manifest.json"
+            exit 1
+          fi
+          name="selfcontrol-${version}.xpi"
+
+          if [ "$(basename "$src")" != "$name" ]; then
+            mv "$src" "web-ext-artifacts/$name"
+            echo "renamed $(basename "$src") -> $name"
+          fi
+
+          echo "path=web-ext-artifacts/$name" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - name: Publish the release
         env:
