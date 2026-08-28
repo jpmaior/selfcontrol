@@ -9,7 +9,8 @@
 
 import { log } from "./log.js";
 import { ruleForUrl } from "./rules.js";
-import { clock, status } from "./store.js";
+import { status } from "./store.js";
+import { clock } from "../common/format.js";
 
 const EXHAUST_PREFIX = "exhaust:";
 

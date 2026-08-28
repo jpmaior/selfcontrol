@@ -21,6 +21,7 @@ import {
   windowOf,
 } from "./accountant.js";
 import { log, warn } from "./log.js";
+import { clock } from "../common/format.js";
 
 /**
  * How often an open interval is folded into the ledger and flushed
@@ -257,15 +258,6 @@ export function status(rule, nowMs) {
 export function describe(rule, nowMs) {
   const s = status(rule, nowMs);
   return `${s.id}: ${clock(s.usedMs)} / ${clock(s.budgetMs)} used (${s.counting ? "counting" : "idle"})`;
-}
-
-/** mm:ss, or h:mm:ss past an hour. */
-export function clock(ms) {
-  const total = Math.max(0, Math.round(ms / 1000));
-  const s = String(total % 60).padStart(2, "0");
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
 /** Raw ledger access, for the console. */

@@ -1,12 +1,13 @@
 // Background event page.
 //
-// Step 5 (PLAN.md): enforcement. A spent rule blocks or closes its tabs, stays
-// enforced against re-opening, and unblocks according to minUnlockCreditSec
-// (DESIGN.md §7, §8).
+// Wiring and lifecycle. The observers say when a rule is being consumed, the
+// store accrues and persists it, the enforcer acts when it runs out, and the
+// message channel serves the block page and the popup.
 
 import { log } from "./log.js";
 import { DEFAULT_RULES } from "./rules.js";
 import { isCountingNow, start } from "./observers.js";
+import { clock } from "../common/format.js";
 import {
   enforceRule,
   guardTab,
@@ -17,7 +18,6 @@ import {
   CHECKPOINT_MS,
   anyCounting,
   checkpointRule,
-  clock,
   describe,
   flush,
   load,

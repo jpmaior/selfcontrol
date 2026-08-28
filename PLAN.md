@@ -262,13 +262,23 @@ require it, but that is worth finding out here rather than assuming.
 
 ## Step 6 — Popup
 
-**Build:** `popup/` — per rule: used / budget, whether it is counting right now, time until
+**Build:** `popup/` plus `common/format.js`, a shared duration formatter now used by the
+background, the block page and the popup so the three cannot drift. Per rule: used / budget,
+whether it is counting right now, time until
 unlock if blocked. Read-only. Sized so it will survive the Android port later (DESIGN.md §11).
 
 ### ✅ Checkpoint 6
 
-Toolbar button shows live numbers; open it while a video plays and watch the counter move; the
-blocked state reads clearly.
+1. The toolbar button opens a panel listing both rules with used / budget and a meter.
+2. Open it **while a video is playing** → that rule shows a pulsing green `counting` dot and the
+   numbers move once a second. Opening the popup wakes the background if it had been unloaded,
+   so this works even after a long idle.
+3. Pause → the dot goes away, the row falls back to `counts while playing`, and the numbers hold.
+4. Focus Instagram → its row goes live instead, confirming the two modes are independent.
+5. Burn a budget → that row turns orange, reads `blocked`, and counts down `unlocks in …` in
+   step with the block page.
+6. Resize / zoom the panel → nothing overflows. It has no fixed width, because on Android the
+   same markup opens as a full-screen sheet from the ⋮ menu.
 
 ---
 
@@ -311,7 +321,7 @@ logic ports unchanged.
 - [x] Step 3 — accountant *(21 unit tests pass; Checkpoint 3 awaiting your run)*
 - [x] Step 4 — persistence *(built; Checkpoint 4 awaiting your run)*
 - [x] Step 5 — enforcement *(Checkpoint 5 verified)*
-- [ ] Step 6 — popup
+- [x] Step 6 — popup *(Checkpoint 6 verified)*
 - [ ] Step 7 — options
 - [ ] Step 8 — polish
 - [ ] Later — Android

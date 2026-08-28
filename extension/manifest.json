@@ -24,6 +24,15 @@
     "type": "module"
   },
 
+  "action": {
+    "default_title": "SelfControl",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "48": "icons/icon.svg",
+      "96": "icons/icon.svg"
+    }
+  },
+
   "icons": {
     "48": "icons/icon.svg",
     "96": "icons/icon.svg"

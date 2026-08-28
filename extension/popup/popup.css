@@ -1,0 +1,145 @@
+/* On desktop this is a ~20rem panel hanging off the toolbar button. On Android
+   there is no toolbar — the action opens from the ⋮ menu as a full-screen sheet
+   (DESIGN.md §11) — so nothing here may assume a fixed narrow width. */
+
+:root {
+  --bg: #ffffff;
+  --ink: #1d2433;
+  --muted: #5b6478;
+  --line: #e3e6ec;
+  --track: #eceef3;
+  --accent: #e4572e;
+  --live: #2e9e5b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #21252e;
+    --ink: #eef1f6;
+    --muted: #9aa3b5;
+    --line: #333947;
+    --track: #2b3039;
+    --accent: #ff7a52;
+    --live: #45c07c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  max-width: 100%;
+  padding: 0.85rem 1rem 1rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+header h1 {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.rule + .rule {
+  border-top: 1px solid var(--line);
+  padding-top: 0.9rem;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.state {
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.rule.live .state {
+  color: var(--live);
+  font-weight: 600;
+}
+
+.rule.spent .state {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The pulsing dot only appears while a rule is actually accruing time. */
+.rule.live .state::before {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.35rem;
+  border-radius: 50%;
+  background: var(--live);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rule.live .state::before {
+    animation: none;
+  }
+}
+
+.meter {
+  height: 0.4rem;
+  margin: 0.45rem 0 0.3rem;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--live);
+  transition: width 0.5s linear;
+}
+
+.rule.spent .meter-fill {
+  background: var(--accent);
+}
+
+.detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  margin: 0.9rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
