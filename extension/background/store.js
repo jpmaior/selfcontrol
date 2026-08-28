@@ -247,6 +247,7 @@ export function status(rule, nowMs) {
     counting: openSince.has(rule.id),
     usedMs: usedMs(usage, nowMs, limits.windowMs),
     budgetMs: limits.budgetMs,
+    windowMs: limits.windowMs,
     remainingMs: remaining,
     exhausted: remaining <= 0,
     unlockAtMs: remaining > 0 ? nowMs : unlockAt(usage, nowMs, rule),

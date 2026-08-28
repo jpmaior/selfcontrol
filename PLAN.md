@@ -224,23 +224,39 @@ The part with teeth.
 re-open guard, `blocked/blocked.html` with a live countdown and a funny message,
 `minUnlockCreditSec`.
 
-Test with an absurd config: `budgetSec: 30`, `windowSec: 120`, so a full cycle takes two minutes
-instead of an hour.
+Real budgets take an hour to test, so `setLimits()` is exposed on the console and persists an
+override. Shrink everything first:
+
+```js
+await setLimits("youtube",   { budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30 })
+await setLimits("instagram", { budgetSec: 20, windowSec: 120, minUnlockCreditSec: 20 })
+await resetUsage()     // then Reload the extension
+```
+
+`resetLimits()` puts the real numbers back.
 
 ### ✅ Checkpoint 5
 
-1. YouTube, 30s budget: play a video → at ~30s it redirects to the block page.
-2. The block page shows a countdown to unlock that actually ticks down.
-3. Navigate back to YouTube → blocked again, immediately.
-4. Open YouTube in a **new tab** → blocked immediately (the `onCreated` guard).
-5. Wait out the countdown → YouTube loads normally again.
-6. Switch Instagram to `onExceed: "close"`, burn its budget → the tab closes. Reopen it → closes
+1. Play a YouTube video → at ~30s the tab redirects to the block page, with a quip and a
+   countdown that actually ticks.
+2. Navigate back to YouTube → blocked again immediately (the `onUpdated` guard).
+3. Open YouTube in a **new tab** → blocked immediately (the `onCreated` guard).
+4. Wait out the countdown → the page flips to its unlocked state on its own, and YouTube loads
+   normally again.
+5. Instagram is `onExceed: "close"` — focus it for 20s → the tab closes. Reopen it → closes
    again immediately.
-7. **`minUnlockCreditSec: 0`** → confirm you get the drip-feed (brief unlock, immediate re-block)
-   — the behaviour you explicitly want available.
-8. **Resolve the open question:** log the gap between the scheduled exhaustion alarm and when it
-   actually fires. If Firefox clamps sub-minute alarms like Chrome does, we will see it here and
-   note it in DESIGN.md §5.
+6. **The drip-feed.** `await setLimits("youtube", { minUnlockCreditSec: 0 })`, then burn the
+   budget → you should unlock after a single bucket expires and get re-blocked almost at once.
+   Compare against `minUnlockCreditSec: 30`, which should wait noticeably longer. This is the
+   behaviour you asked to keep available, and the unit tests already pin its ordering.
+7. **Resolve the open question.** Every exhaustion alarm logs
+   `fired +Nms vs scheduled`. If Firefox honours sub-minute delays, N is small. If it clamps
+   like Chrome, expect the last alarm before a block to run up to a minute late. Report the
+   numbers and I will record the answer in DESIGN.md §5.
+
+If the block page fails to load with a security error, we need
+`web_accessible_resources` in the manifest — `tabs.update()` to an own-extension page should not
+require it, but that is worth finding out here rather than assuming.
 
 ---
 
@@ -294,7 +310,7 @@ logic ports unchanged.
 - [x] Step 2 — observers *(Checkpoint 2 verified — `tab.audible` holds up, see DESIGN.md §3)*
 - [x] Step 3 — accountant *(21 unit tests pass; Checkpoint 3 awaiting your run)*
 - [x] Step 4 — persistence *(built; Checkpoint 4 awaiting your run)*
-- [ ] Step 5 — enforcement
+- [x] Step 5 — enforcement *(Checkpoint 5 verified)*
 - [ ] Step 6 — popup
 - [ ] Step 7 — options
 - [ ] Step 8 — polish

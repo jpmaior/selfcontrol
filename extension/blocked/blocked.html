@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Time's up — SelfControl</title>
+    <link rel="stylesheet" href="blocked.css" />
+  </head>
+  <body>
+    <main class="card">
+      <div class="emoji" id="emoji" aria-hidden="true">⏳</div>
+
+      <h1 id="headline">Time's up</h1>
+      <p class="quip" id="quip"></p>
+
+      <div class="meter" role="img" aria-labelledby="countdown-label">
+        <div class="meter-fill" id="meter"></div>
+      </div>
+
+      <p class="countdown" id="countdown-label">
+        <span id="countdown-text">Unlocks in</span>
+        <strong id="countdown">—</strong>
+      </p>
+
+      <p class="detail" id="detail"></p>
+    </main>
+
+    <script src="blocked.js" type="module"></script>
+  </body>
+</html>

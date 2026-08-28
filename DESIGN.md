@@ -23,7 +23,7 @@ Everything is one concept with a swappable predicate:
   label: "YouTube",
   match: ["youtube.com"],       // hostname suffix match (covers m./www./music.)
   mode: "audible",              // clock runs while a matching tab produces sound
-  budgetSec: 1200,              // 20 minutes ...
+  budgetSec: 300,               // 5 minutes ...
   windowSec: 3600,              // ... per rolling hour
   onExceed: "block",            // "block" -> redirect to block page, "close" -> close tab
   minUnlockCreditSec: 300       // once blocked, stay blocked until 5 min of credit exist
@@ -283,9 +283,12 @@ late**, because a rolling window only ever regenerates quota in the user's favou
 fires, recompute; if not actually exhausted, reschedule. Correct without simulating the window
 forward.
 
-> ⚠️ **Open question, resolved at Checkpoint 5:** whether Firefox clamps sub-minute alarm delays
-> the way Chrome does (30s minimum). If it does, the final alarm before exhaustion can overshoot
-> by up to a minute. Cheap to test; worth knowing before relying on it.
+> **Status after Checkpoint 5:** enforcement lands correctly in practice — blocking, the re-open
+> guard and unlocking all verified by hand. What has *not* been measured is whether Firefox
+> clamps sub-minute alarm delays the way Chrome does (30s minimum). Every exhaustion alarm logs
+> `fired +Nms vs scheduled`, so the answer is one glance at the console away if it ever matters.
+> It would show up as a block landing up to a minute late, and only for the final alarm before
+> exhaustion.
 
 ### Crash and sleep resilience
 
@@ -362,8 +365,8 @@ rendered — deferred, because the rules must be added and removed as quota chan
 
 ## 8. `minUnlockCreditSec` — taming the drip-feed
 
-A naive rolling window behaves badly. Watch 20 minutes straight and get blocked. Sixty minutes
-after starting, the first minute of usage falls out of the window, so you get **exactly one
+A naive rolling window behaves badly. Spend the whole budget in one sitting and get blocked. An
+hour after starting, the first minute of usage falls out of the window, so you get **exactly one
 minute of YouTube, then blocked, then one more minute, forever.** Technically correct,
 behaviourally useless.
 

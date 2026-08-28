@@ -15,7 +15,7 @@ export const DEFAULT_RULES = [
     label: "YouTube",
     match: ["youtube.com"],
     mode: "audible", // clock runs while a matching tab produces sound
-    budgetSec: 20 * 60,
+    budgetSec: 5 * 60,
     windowSec: 60 * 60,
     onExceed: "block",
     minUnlockCreditSec: 5 * 60,
