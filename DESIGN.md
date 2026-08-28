@@ -161,10 +161,22 @@ Why this over a content script:
   the home page starts muted preview clips; a naive `<video>` detector would silently burn the
   budget. Muted playback produces no sound, so `audible` never sees it.
 
-Known blind spot: genuinely silent playback (tab muted, captions-only) does not count. For a
-self-control tool this is an acceptable — arguably correct — trade.
+### ✅ Validated at Checkpoint 2
 
-**This assumption is validated by hand at Checkpoint 2 before anything is built on it.**
+Confirmed by hand on Firefox 154 before anything was built on top of it:
+
+| Scenario | Result |
+|---|---|
+| Video plays / pauses | counting starts and stops reliably |
+| Playing in a background tab | keeps counting |
+| **YouTube home page, muted hover-previews** | **never counts** — the failure mode this design was chosen to avoid |
+| Two videos at once | one clock, stops only when both stop |
+| `focus` mode incl. alt-tab away from Firefox | behaves as designed |
+
+**Accepted loophole:** muting — either the `<video>` element or the tab's own speaker icon —
+stops the clock, so muted playback with captions is unlimited. Deliberately not closed: a silent
+video is punishment enough, and closing it would mean giving up the hover-preview immunity that
+makes `audible` worth using in the first place.
 
 ### Fallback if `tab.audible` proves inadequate: content script
 

@@ -272,7 +272,7 @@ logic ports unchanged.
 
 - [x] Step 0 — dev environment *(Checkpoint 0 verified)*
 - [x] Step 1 — loadable skeleton *(lint clean; Checkpoint 1 awaiting your run)*
-- [ ] Step 2 — observers ⚠️ validates `tab.audible`
+- [x] Step 2 — observers *(Checkpoint 2 verified — `tab.audible` holds up, see DESIGN.md §3)*
 - [ ] Step 3 — accountant
 - [ ] Step 4 — persistence
 - [ ] Step 5 — enforcement

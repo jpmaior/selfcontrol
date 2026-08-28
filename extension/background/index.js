@@ -1,23 +1,36 @@
 // Background event page.
 //
-// Step 1 (PLAN.md): prove the toolchain end to end — the manifest loads, the
-// MV3 event page runs, ES module imports resolve, and web-ext live-reloads on
-// save. No rules, no counting, no storage yet.
+// Step 2 (PLAN.md): observe tabs and windows and log when each rule starts and
+// stops being consumed. Nothing is counted, stored or blocked yet — this step
+// exists purely so Checkpoint 2 can validate by hand that `tab.audible` is a
+// trustworthy proxy for "a video is playing" (DESIGN.md §3) before five steps
+// of machinery are built on top of it.
 
 import { log } from "./log.js";
+import { DEFAULT_RULES } from "./rules.js";
+import { start } from "./observers.js";
 
-const { version } = browser.runtime.getManifest();
+log(`event page started — v${browser.runtime.getManifest().version}`);
 
-log(`event page started — v${version}`);
-log("ES module import resolved, so the multi-file background will work");
+// Deliberately not awaited. An MV3 event page is restarted *by* an event, and
+// the listener has to already exist for that event to be deliverable — so
+// listener registration must happen during synchronous module evaluation.
+// start() attaches all of its listeners before its first await; the promise it
+// returns only covers rebuilding derived state from the open tabs.
+start({
+  rules: DEFAULT_RULES,
+  trace: true, // Step 2 only: raw per-tab event trace for the checkpoint.
+  onChange(rule, counting, why) {
+    log(
+      counting ? "▶ COUNTING" : "■ stopped  ",
+      `${rule.id} (${rule.mode})`,
+      `— ${why}`,
+    );
+  },
+}).catch((error) => log("observer startup failed:", error));
 
-browser.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
-  log("onInstalled:", reason, previousVersion ? `(from ${previousVersion})` : "");
-});
-
-// Expect to see this a lot. MV3 unloads an idle event page aggressively, and
-// every design decision in DESIGN.md §5 exists because of it. Watching it fire
-// here is the cheapest way to get a feel for the lifecycle before it matters.
 browser.runtime.onSuspend.addListener(() => {
   log("event page suspending (normal — MV3 unloads us when idle)");
 });
+
+log("observers attached — rules:", DEFAULT_RULES.map((r) => `${r.id}:${r.mode}`).join(", "));
