@@ -1,0 +1,210 @@
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --ink: #1d2433;
+  --muted: #5b6478;
+  --line: #dfe3ea;
+  --accent: #e4572e;
+  --danger: #c8362a;
+  --field: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171a21;
+    --card: #21252e;
+    --ink: #eef1f6;
+    --muted: #9aa3b5;
+    --line: #333947;
+    --accent: #ff7a52;
+    --danger: #ff6b5c;
+    --field: #1a1d25;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 44rem;
+  padding: 2rem 1.25rem 4rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.page-head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.lede {
+  margin: 0.4rem 0 1.75rem;
+  color: var(--muted);
+  max-width: 42ch;
+  text-wrap: pretty;
+}
+
+.rules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1rem;
+}
+
+.rule {
+  padding: 1.1rem 1.25rem 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.rule.invalid {
+  border-color: var(--danger);
+}
+
+.rule-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.label-input {
+  flex: 1;
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 0.4rem 0.55rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.field > span:first-child {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.field small {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.9rem;
+}
+
+.with-unit {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.with-unit input {
+  width: 6rem;
+}
+
+input,
+select {
+  font: inherit;
+  color: inherit;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.errors {
+  margin: 0;
+  padding: 0.6rem 0.75rem 0.6rem 1.9rem;
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
+button {
+  font: inherit;
+  border-radius: 0.45rem;
+  border: 1px solid transparent;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.secondary {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.delete {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.82rem;
+}
+
+.delete:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+  padding: 0.9rem 0;
+  background: linear-gradient(to top, var(--bg) 70%, transparent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.status {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.status.ok {
+  color: #2e9e5b;
+}
+
+.status.bad {
+  color: var(--danger);
+}

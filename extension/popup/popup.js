@@ -98,9 +98,14 @@ async function refresh() {
   const now = Date.now();
   for (const status of statuses) render(status, now);
 
-  const windowMin = Math.round((statuses[0].windowMs ?? 0) / 60000);
-  setNote(windowMin ? `Limits apply over a rolling ${windowMin} minutes.` : null);
+  // Clears any error left over from a refresh that failed earlier.
+  setNote(null);
 }
+
+document.getElementById("edit").addEventListener("click", () => {
+  browser.runtime.openOptionsPage();
+  window.close();
+});
 
 refresh();
 setInterval(refresh, REFRESH_MS);

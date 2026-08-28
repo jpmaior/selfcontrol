@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SelfControl — Rules</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header class="page-head">
+      <h1>Rules</h1>
+      <p class="lede">
+        Each rule watches some domains and runs a clock while you are actually using them.
+        Time is counted over a rolling window, so budget comes back gradually rather than
+        resetting on the hour.
+      </p>
+    </header>
+
+    <ul class="rules" id="rules"></ul>
+
+    <div class="actions">
+      <button type="button" id="add" class="secondary">Add a rule</button>
+      <div class="spacer"></div>
+      <output id="status" class="status" role="status"></output>
+      <button type="button" id="save" class="primary">Save</button>
+    </div>
+
+    <template id="rule-template">
+      <li class="rule">
+        <div class="rule-head">
+          <input class="label-input" data-field="label" type="text" placeholder="Site name"
+                 aria-label="Rule name" />
+          <button type="button" class="delete" data-action="delete" aria-label="Delete rule">
+            Delete
+          </button>
+        </div>
+
+        <label class="field wide">
+          <span>Domains</span>
+          <input data-field="match" type="text" placeholder="youtube.com, vimeo.com" />
+          <small>Subdomains are included. A pasted URL works too.</small>
+        </label>
+
+        <label class="field wide">
+          <span>Count time</span>
+          <select data-field="mode"></select>
+        </label>
+
+        <div class="grid">
+          <label class="field">
+            <span>Budget</span>
+            <span class="with-unit">
+              <input data-field="budgetMin" type="number" min="1" step="1" />
+              <small>min</small>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>Per rolling window</span>
+            <span class="with-unit">
+              <input data-field="windowMin" type="number" min="2" step="1" />
+              <small>min</small>
+            </span>
+          </label>
+        </div>
+
+        <label class="field wide">
+          <span>When it runs out</span>
+          <select data-field="onExceed"></select>
+        </label>
+
+        <label class="field wide">
+          <span>Stay blocked until this much is free again</span>
+          <span class="with-unit">
+            <input data-field="unlockMin" type="number" min="0" step="1" />
+            <small>min</small>
+          </span>
+          <small>
+            0 unblocks the moment any time frees up, which on a rolling window means a
+            minute at a time. Set it higher to come back in usable chunks.
+          </small>
+        </label>
+
+        <ul class="errors" data-role="errors" hidden></ul>
+      </li>
+    </template>
+
+    <script src="options.js" type="module"></script>
+  </body>
+</html>

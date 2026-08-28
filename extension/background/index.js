@@ -5,21 +5,17 @@
 // message channel serves the block page and the popup.
 
 import { log } from "./log.js";
-import { DEFAULT_RULES } from "./rules.js";
-import { isCountingNow, start } from "./observers.js";
+import { isCountingNow, setRules, start } from "./observers.js";
 import { clock } from "../common/format.js";
-import {
-  enforceRule,
-  guardTab,
-  ruleIdFromAlarm,
-  syncExhaustionAlarm,
-} from "./enforcer.js";
+import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
+import { enforceRule, guardTab, ruleIdFromAlarm, syncExhaustionAlarm } from "./enforcer.js";
 import {
   CHECKPOINT_MS,
   anyCounting,
   checkpointRule,
   describe,
   flush,
+  forget,
   load,
   reconcile,
   settled,
@@ -30,21 +26,22 @@ import {
 } from "./store.js";
 
 const CHECKPOINT_ALARM = "checkpoint";
-const LIMITS_KEY = "debug:limits";
 
-let rules = DEFAULT_RULES;
+/** Replaced wholesale when the options page saves; never mutated in place. */
+let rules = [];
 
 log(`event page started — v${browser.runtime.getManifest().version}`);
 
 // Kicked off synchronously so the promise exists before any listener can fire.
 const loaded = (async () => {
-  await applyStoredLimits();
+  rules = await loadRules();
   await load(rules);
 })();
 
-// Not awaited: an MV3 event page is restarted *by* an event, so its listeners
-// must exist by the end of synchronous module evaluation. start() attaches all
-// of its listeners before its first await.
+// Not awaited, and deliberately started with an empty rule set: an MV3 event
+// page is restarted *by* an event, so its listeners must exist by the end of
+// synchronous module evaluation, which is sooner than storage can answer. The
+// real rules arrive via setRules() below, which re-primes.
 const primed = start({
   rules,
   async onChange(rule, counting, why) {
@@ -70,24 +67,64 @@ const primed = start({
 
 Promise.all([loaded, primed])
   .then(async () => {
-    const now = Date.now();
-    for (const rule of rules) {
-      const credited = reconcile(rule, now, isCountingNow(rule.id));
-      if (credited > 0) {
-        log(`reconciled ${rule.id}: credited ${clock(credited)} left open by a previous run`);
-      }
-    }
-    flush(now);
-
-    await syncCheckpointAlarm();
-    // A rule may have run out while we were unloaded; sweep before waiting.
-    for (const rule of rules) {
-      await enforceRule(rule, now);
-      await syncExhaustionAlarm(rule, now);
-    }
-    log("ready — dumpUsage(), dumpStats(), dumpRaw(), setLimits()");
+    await setRules(rules);
+    await settleAndArm("startup");
+    log(`ready — ${rules.length} rule(s). dumpUsage(), dumpStats(), dumpRaw(), setLimits()`);
   })
   .catch((error) => log("startup failed:", error));
+
+/**
+ * Settle any interval left open by a previous run, then bring alarms and
+ * enforcement back in step with reality. Shared by startup and by a settings
+ * change, since both leave the same question open: what is true right now?
+ */
+async function settleAndArm(why) {
+  const now = Date.now();
+
+  for (const rule of rules) {
+    const credited = reconcile(rule, now, isCountingNow(rule.id));
+    if (credited > 0) {
+      log(`reconciled ${rule.id}: credited ${clock(credited)} left open by a previous run`);
+    }
+  }
+  flush(now);
+
+  await syncCheckpointAlarm();
+  for (const rule of rules) {
+    // A rule may have run out while we were unloaded, or have just been given
+    // a smaller budget than it has already spent.
+    await enforceRule(rule, now);
+    await syncExhaustionAlarm(rule, now);
+  }
+  log(`state re-armed (${why})`);
+}
+
+// --- settings ------------------------------------------------------------
+
+// The options page writes storage; we react. No message protocol needed, and
+// it works the same whether the edit came from the options page or the console.
+onRulesChanged(async (next) => {
+  await loaded;
+  const now = Date.now();
+
+  // Close out the old set before swapping, or an open interval would be
+  // credited against a rule that no longer exists.
+  for (const rule of rules) stopCounting(rule, now);
+  flush(now);
+
+  for (const old of rules) {
+    if (!next.some((r) => r.id === old.id)) {
+      forget(old.id);
+      log(`rule removed: ${old.id} — usage discarded`);
+    }
+  }
+
+  rules = next;
+  await load(rules);
+  await setRules(rules);
+  await settleAndArm("settings changed");
+  log(`rules updated — now ${rules.length}: ${rules.map((r) => r.id).join(", ")}`);
+});
 
 // --- enforcement hooks ---------------------------------------------------
 
@@ -145,7 +182,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   const rule = rules.find((r) => r.id === ruleId);
   if (!rule) return;
 
-  // Resolves the open question in DESIGN.md §5: does Firefox honour sub-minute
+  // Measures the open question in DESIGN.md §5: does Firefox honour sub-minute
   // alarm delays, or clamp them the way Chrome does?
   const lateness = now - alarm.scheduledTime;
   log(`exhaustion alarm for ${ruleId} fired ${lateness >= 0 ? "+" : ""}${lateness}ms vs scheduled`);
@@ -164,7 +201,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 
 // --- messaging -----------------------------------------------------------
 
-// Serves the block page, and the popup in Step 6.
+// Serves the block page and the popup.
 browser.runtime.onMessage.addListener(async (message) => {
   await loaded;
   if (message?.type !== "status") return undefined;
@@ -178,39 +215,22 @@ browser.runtime.onSuspend.addListener(() => {
   return settled();
 });
 
-// --- limit overrides -----------------------------------------------------
+// --- console handles -----------------------------------------------------
 
-// Real budgets take an hour to test. setLimits() rewrites them in place and
-// persists the override, so Checkpoint 5 takes two minutes instead. Step 7
-// replaces this with a proper options page.
-async function applyStoredLimits() {
-  const stored = (await browser.storage.local.get(LIMITS_KEY))[LIMITS_KEY];
-  if (!stored) return;
-  for (const rule of rules) {
-    Object.assign(rule, stored[rule.id] ?? {});
-  }
-  log("limit overrides applied:", stored);
-}
-
+/**
+ * Quick budget tweaks without opening the options page. Writes the same
+ * `settings` key, so it travels the same onRulesChanged path an edit does.
+ */
 globalThis.setLimits = async (ruleId, patch) => {
-  const rule = rules.find((r) => r.id === ruleId);
-  if (!rule) return `no such rule: ${ruleId}`;
-
-  Object.assign(rule, patch);
-  const stored = (await browser.storage.local.get(LIMITS_KEY))[LIMITS_KEY] ?? {};
-  stored[ruleId] = { ...(stored[ruleId] ?? {}), ...patch };
-  await browser.storage.local.set({ [LIMITS_KEY]: stored });
-
-  const now = Date.now();
-  await enforceRule(rule, now);
-  await syncExhaustionAlarm(rule, now);
-  log(`limits for ${ruleId}:`, patch);
-  return status(rule, now);
+  await loaded;
+  if (!rules.some((r) => r.id === ruleId)) return `no such rule: ${ruleId}`;
+  await saveRules(rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)));
+  return `${ruleId} updated`;
 };
 
-globalThis.resetLimits = async () => {
-  await browser.storage.local.remove(LIMITS_KEY);
-  return "cleared — reload the extension to restore defaults";
+globalThis.resetRules = async () => {
+  await browser.storage.local.remove("settings");
+  return "settings cleared — reload the extension to re-seed the defaults";
 };
 
 globalThis.resetUsage = async () => {
@@ -218,8 +238,6 @@ globalThis.resetUsage = async () => {
   await browser.storage.session.clear();
   return "usage cleared — reload the extension";
 };
-
-// --- console handles -----------------------------------------------------
 
 globalThis.dumpUsage = (ruleId) => {
   const now = Date.now();

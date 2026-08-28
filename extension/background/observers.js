@@ -10,7 +10,7 @@
 // on every single event page start, not just on install.
 
 import { log, warn } from "./log.js";
-import { hostnameOf, ruleForUrl } from "./rules.js";
+import { hostnameOf, ruleForUrl } from "../common/rules.js";
 
 const NO_WINDOW = browser.windows.WINDOW_ID_NONE;
 
@@ -47,6 +47,20 @@ export async function start({ rules: ruleset, onChange, trace = false }) {
   browser.tabs.onActivated.addListener(() => resolveFocus("tab activated"));
   browser.windows.onFocusChanged.addListener(handleWindowFocusChanged);
 
+  await prime();
+}
+
+/**
+ * Swap in an edited rule set (options page saved) without restarting anything.
+ *
+ * `reported` is cleared so the new set is evaluated from scratch: a rule whose
+ * domains or mode changed may now be counting when it was not, or vice versa,
+ * and diffing against stale state would miss it. Rules that vanished simply
+ * stop being iterated; the caller settles their ledgers.
+ */
+export async function setRules(next) {
+  rules = next;
+  reported.clear();
   await prime();
 }
 

@@ -22,11 +22,15 @@ extension/
     accountant.js      # PURE: buckets, rolling sums, credit math
     store.js           # storage.local flush + storage.session open intervals
     enforcer.js        # block / close / re-open guard
-    rules.js           # rule defaults + hostname matching
+  common/              # shared by background and UI pages
+    rules.js           # PURE: rule shape, matching, domain parsing, validation
+    settings.js        # the `settings` key: load, save, watch
+    format.js          # duration formatting
   popup/    options/    blocked/
   icons/
 test/
   accountant.test.js   # node --test, no browser needed
+  rules.test.js
 ```
 
 ---
@@ -289,8 +293,25 @@ unlock if blocked. Read-only. Sized so it will survive the Android port later (D
 
 ### ✅ Checkpoint 7
 
-Add a rule for a throwaway site with a 20s budget, confirm it takes effect without reloading the
-extension; edit a budget and see it apply; delete it and confirm its usage data is cleaned up.
+Open it from the popup's **Edit rules** button, or `about:addons` → SelfControl → Preferences.
+Keep the background console open to watch it react.
+
+1. **Edits apply live.** Change YouTube's budget, Save → the console logs `rules updated` and
+   `state re-armed`, with no extension reload. The popup shows the new budget immediately.
+2. **Add a rule** for a throwaway site with a 1-minute budget and `focus` mode. Save, then sit on
+   that site → it blocks. No reload anywhere.
+3. **Paste a URL** into the Domains field — `https://www.reddit.com/r/all` — and tab out. It
+   should normalise to `reddit.com`, so you can see what was actually understood.
+4. **Validation.** Try a budget equal to the window → it refuses, because such a rule could never
+   trigger. Try an unlock credit larger than the budget → refused. Try two rules claiming the
+   same domain → the second is flagged as shadowed, since `ruleForUrl` returns the first match
+   and the second would be dead code.
+5. **Delete** the throwaway rule and Save → the console logs `usage discarded`, and `dumpRaw()`
+   confirms its `usage:` key is gone.
+6. **Renaming keeps history.** Rename an existing rule and Save → its used time survives, because
+   ids are minted once and never regenerated.
+
+`resetRules()` in the console clears settings and re-seeds the defaults on the next reload.
 
 ---
 
@@ -322,6 +343,6 @@ logic ports unchanged.
 - [x] Step 4 — persistence *(built; Checkpoint 4 awaiting your run)*
 - [x] Step 5 — enforcement *(Checkpoint 5 verified)*
 - [x] Step 6 — popup *(Checkpoint 6 verified)*
-- [ ] Step 7 — options
+- [x] Step 7 — options *(Checkpoint 7 verified)*
 - [ ] Step 8 — polish
 - [ ] Later — Android

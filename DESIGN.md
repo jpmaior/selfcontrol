@@ -406,18 +406,29 @@ One knob spans every variant, so it is built in from the start rather than disco
 
 ```
 background/ (event page — the only stateful component)
+  ├─ index.js       wiring, lifecycle, alarms, messaging
   ├─ observers.js   tabs/windows events  →  "is rule R counting right now?"
   ├─ accountant.js  pure: bucket commit / prune / rolling sum / time-until-credit
   ├─ enforcer.js    over-budget → block or close; guards new navigations
-  └─ store.js       in-memory hot state, debounced flush, storage.session for open intervals
+  └─ store.js       ledgers, debounced flush, storage.session for open intervals
+
+common/ (shared by the background and the UI pages)
+  ├─ rules.js       pure: rule shape, hostname matching, domain parsing, validation
+  ├─ settings.js    the `settings` key: load, save, and watch for edits
+  └─ format.js      duration formatting
 
 options/   edit rules
-popup/     "YouTube: 12:30 / 20:00 — unlocks in 8 min"
-blocked/   funny message + live countdown
+popup/     "YouTube: 2:30 / 5:00 — unlocks in 8 min"
+blocked/   message + live countdown
 ```
 
-`accountant.js` is deliberately pure (no `browser.*`, no `Date.now()` — time is an argument) so
-its fiddly arithmetic can be unit-tested with `node --test`.
+**Two pure modules carry the tricky logic**, with no `browser.*` and no `Date.now()` — time is
+always an argument. That is what lets `node --test` cover the rolling-window arithmetic and the
+whole options-page validation story without a browser.
+
+**The options page never messages the background.** It writes `settings`; the background listens
+via `storage.onChanged`, filtered hard to that one key, and re-arms itself. Edits apply without a
+reload, and a console tweak takes the same path a UI edit does.
 
 ---
 

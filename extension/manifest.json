@@ -24,6 +24,11 @@
     "type": "module"
   },
 
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+
   "action": {
     "default_title": "SelfControl",
     "default_popup": "popup/popup.html",

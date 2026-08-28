@@ -143,3 +143,21 @@ header h1 {
   font-size: 0.75rem;
   color: var(--muted);
 }
+
+.edit {
+  margin-top: 0.75rem;
+  width: 100%;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  padding: 0.45rem;
+  cursor: pointer;
+}
+
+.edit:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

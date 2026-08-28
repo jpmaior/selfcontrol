@@ -8,7 +8,7 @@
 // we simply reschedule. No forward simulation of the window is needed.
 
 import { log } from "./log.js";
-import { ruleForUrl } from "./rules.js";
+import { ruleForUrl } from "../common/rules.js";
 import { status } from "./store.js";
 import { clock } from "../common/format.js";
 
