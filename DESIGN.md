@@ -437,6 +437,61 @@ reload, and a console tweak takes the same path a UI edit does.
 1. `idle` integration for `focus` mode.
 2. Notifications at N minutes remaining.
 3. `declarativeNetRequest` for flash-free blocking.
-4. **Firefox for Android**: add `browser_specific_settings.gecko_android`, make the popup and
-   options page responsive (no toolbar on Android — the action opens from the ⋮ menu as a
-   full-screen sheet). The background logic ports unchanged.
+4. **Firefox for Android** — *prepared, not verified.* See §12.
+
+---
+
+## 12. Firefox for Android
+
+**Status: prepared, not verified.** The code no longer assumes a desktop browser, but none of
+this has been run on a device. Treat everything below as intent, not as tested behaviour.
+
+### What is already in place
+
+- `browser_specific_settings.gecko_android` declares Android support with a 154 floor. Without
+  that key AMO will not offer the add-on to Android at all.
+- **No API is assumed to exist.** `browser.windows` is feature-detected at module load in
+  `observers.js`, because reading `WINDOW_ID_NONE` off an absent namespace would throw before a
+  single listener was registered and take the whole background down. `platform.canTrackWindowFocus`
+  records the answer, and `dumpPlatform()` prints the full capability report from a real device.
+- **Every page is responsive.** The block page was sized for a phone from the start; the popup's
+  minimum width is `min(20rem, 100vw)` so the viewport wins on a narrow screen; the options page
+  uses an auto-fitting grid that collapses to one column.
+- The permissions we use — `storage`, `tabs`, `alarms` — are core APIs, and no host permissions
+  or content scripts are involved, which removes the largest class of Android differences.
+
+### The known gap: `focus` mode
+
+Android has one window, and there is no `windows.onFocusChanged` to say the *browser itself* went
+to the background. On desktop that event is exactly what stops a `focus` rule counting when you
+alt-tab to an editor (§4). Without it, a `focus` rule keeps accruing while you are in another app.
+
+The damage is bounded rather than unbounded: the sleep clamp caps any single commit at
+`1.5 × CHECKPOINT_MS`, so a phone left overnight credits minutes, not hours. But the rule is
+wrong, and on a phone — where app switching is constant — it is wrong often.
+
+`audible` mode has no such problem, and is arguably *more* correct on Android: media that keeps
+playing while you switch apps genuinely is still being consumed.
+
+Options if this matters, in rough order of preference:
+
+1. **`browser.idle`**, if Android provides it — `dumpPlatform()` answers that. Backgrounding the
+   app is not idleness, so this is a partial fix at best.
+2. **A content script** using the Page Visibility API, which does fire when the app is
+   backgrounded. Costs host permissions and their MV3 grant problem (§2) — the thing this design
+   has deliberately avoided throughout.
+3. **Use `audible` rules on Android and keep `focus` rules for desktop.** The rule set is per
+   device already, since `settings` lives in `storage.local`.
+
+### What testing it would involve
+
+```bash
+# add pkgs.android-tools to flake.nix for adb
+adb devices
+web-ext run -t firefox-android --adb-device <ID> --firefox-apk org.mozilla.firefox
+```
+
+Then `dumpPlatform()` from the remote console (`about:debugging` on desktop, connected over USB)
+answers the open questions in one shot: whether `windows` focus events exist, whether `idle` and
+`notifications` are available, and whether `storage.session` behaves. Enforcement, the ledger and
+the alarms should port unchanged; the popup opens from the ⋮ menu rather than a toolbar.

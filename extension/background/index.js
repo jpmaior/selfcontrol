@@ -5,7 +5,7 @@
 // message channel serves the block page and the popup.
 
 import { log } from "./log.js";
-import { isCountingNow, setRules, start } from "./observers.js";
+import { isCountingNow, platform, setRules, start } from "./observers.js";
 import { clock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { enforceRule, guardTab, ruleIdFromAlarm, syncExhaustionAlarm } from "./enforcer.js";
@@ -69,7 +69,12 @@ Promise.all([loaded, primed])
   .then(async () => {
     await setRules(rules);
     await settleAndArm("startup");
-    log(`ready — ${rules.length} rule(s). dumpUsage(), dumpStats(), dumpRaw(), setLimits()`);
+    const info = await browser.runtime.getPlatformInfo();
+    log(
+      `ready on ${info.os} — ${rules.length} rule(s),`,
+      `window focus events: ${platform.canTrackWindowFocus ? "yes" : "NO (Android)"}.`,
+      "dumpUsage(), dumpStats(), dumpPlatform(), dumpRaw(), setLimits()",
+    );
   })
   .catch((error) => log("startup failed:", error));
 
@@ -261,6 +266,29 @@ globalThis.dumpUsage = (ruleId) => {
 globalThis.dumpStats = () => {
   console.table({ ...stats, countingNow: anyCounting() });
   return { ...stats };
+};
+
+/**
+ * What this build of Firefox actually gives us. Android reduces or omits parts
+ * of the API surface, and MDN's compatibility tables are easier to trust once
+ * you have checked the device in front of you.
+ */
+globalThis.dumpPlatform = async () => {
+  const info = await browser.runtime.getPlatformInfo();
+  const report = {
+    os: info.os,
+    arch: info.arch,
+    windowFocusEvents: platform.canTrackWindowFocus,
+    "storage.session": Boolean(browser.storage?.session),
+    alarms: Boolean(browser.alarms),
+    idle: Boolean(browser.idle),
+    notifications: Boolean(browser.notifications),
+    "tabs.onUpdated filters": Boolean(browser.tabs?.onUpdated),
+    sidebarAction: Boolean(browser.sidebarAction),
+    commands: Boolean(browser.commands),
+  };
+  console.table(report);
+  return report;
 };
 
 globalThis.dumpRaw = async () => {

@@ -12,7 +12,15 @@
 import { log, warn } from "./log.js";
 import { hostnameOf, ruleForUrl } from "../common/rules.js";
 
-const NO_WINDOW = browser.windows.WINDOW_ID_NONE;
+// Firefox for Android has only ever one window, and its `windows` API is
+// reduced. Feature-detect rather than assume: reading WINDOW_ID_NONE off an
+// absent namespace at module scope would throw and take the whole background
+// down before a single listener was registered.
+const windowsApi = globalThis.browser?.windows ?? null;
+const canTrackWindowFocus = Boolean(windowsApi?.onFocusChanged && windowsApi?.getLastFocused);
+const NO_WINDOW = windowsApi?.WINDOW_ID_NONE ?? -1;
+
+export const platform = { canTrackWindowFocus };
 
 /** tabId -> ruleId, for tabs currently producing sound under an `audible` rule. */
 const audibleTabs = new Map();
@@ -45,7 +53,15 @@ export async function start({ rules: ruleset, onChange, trace = false }) {
   });
   browser.tabs.onRemoved.addListener(handleTabRemoved);
   browser.tabs.onActivated.addListener(() => resolveFocus("tab activated"));
-  browser.windows.onFocusChanged.addListener(handleWindowFocusChanged);
+
+  if (canTrackWindowFocus) {
+    windowsApi.onFocusChanged.addListener(handleWindowFocusChanged);
+  } else {
+    // Android. Without this event we cannot tell that the browser itself went
+    // to the background, so a `focus` rule keeps counting while the user is in
+    // another app. The sleep clamp in store.js bounds the damage.
+    log("no window focus events on this platform — focus rules count while the app is backgrounded");
+  }
 
   await prime();
 }
@@ -133,11 +149,16 @@ async function resolveFocus(why) {
   let nextRuleId = null;
 
   try {
-    const window = await browser.windows.getLastFocused();
-    if (window?.focused) {
-      const [tab] = await browser.tabs.query({ active: true, windowId: window.id });
-      nextRuleId = tab ? (ruleForUrl(rules, tab.url)?.id ?? null) : null;
+    let tab;
+    if (canTrackWindowFocus) {
+      const window = await windowsApi.getLastFocused();
+      // `focused` false means Firefox lost focus to another application.
+      if (window?.focused) [tab] = await browser.tabs.query({ active: true, windowId: window.id });
+    } else {
+      // Single-window platform: the active tab is the foreground, full stop.
+      [tab] = await browser.tabs.query({ active: true });
     }
+    nextRuleId = tab ? (ruleForUrl(rules, tab.url)?.id ?? null) : null;
   } catch (error) {
     warn("could not resolve focus:", error);
     return;

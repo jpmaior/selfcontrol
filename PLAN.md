@@ -326,11 +326,38 @@ set of block-page messages, real icons, `web-ext lint` clean for AMO submission.
 
 ---
 
-## Later — Firefox for Android
+## Step 9 — Firefox for Android *(prepared, not verified)*
 
-Add `browser_specific_settings.gecko_android`, make popup and options responsive, uncomment
-`android-tools` in `flake.nix`, and iterate with `web-ext run -t firefox-android`. The background
-logic ports unchanged.
+Device testing was deliberately skipped, so this step made the code **safe** on Android rather
+than **proven** on it. The distinction matters: nothing below has run on a phone.
+
+**Built:**
+- `browser.windows` is feature-detected at module load in `observers.js`. Reading
+  `WINDOW_ID_NONE` off an absent namespace would throw before any listener was registered and
+  take the whole background down — the single most likely way this port could have failed.
+- `dumpPlatform()` prints a capability report (`os`, window focus events, `idle`,
+  `notifications`, `storage.session`, `sidebarAction`, `commands`) so a device answers the open
+  questions in one shot instead of us guessing from compatibility tables.
+- The startup log now states plainly whether window focus events exist.
+- The popup's minimum width became `min(20rem, 100vw)` so the viewport wins on a narrow screen.
+
+**Known gap, documented in DESIGN.md §12:** Android has no `windows.onFocusChanged`, which on
+desktop is exactly what stops a `focus` rule counting while you are in another application. On a
+phone a `focus` rule will keep accruing while the browser is backgrounded. The sleep clamp bounds
+this to minutes rather than hours, but it is wrong, and on a phone it is wrong often. `audible`
+rules are unaffected.
+
+### Checkpoint 9 — *deferred*
+
+When you do want to run it on a device: add `pkgs.android-tools` to `flake.nix`, then
+
+```bash
+adb devices
+web-ext run -t firefox-android --adb-device <ID> --firefox-apk org.mozilla.firefox
+```
+
+and call `dumpPlatform()` from the remote console. DESIGN.md §12 lists what to check and the
+three options for closing the `focus` gap.
 
 ---
 
@@ -345,4 +372,4 @@ logic ports unchanged.
 - [x] Step 6 — popup *(Checkpoint 6 verified)*
 - [x] Step 7 — options *(Checkpoint 7 verified)*
 - [ ] Step 8 — polish
-- [ ] Later — Android
+- [x] Step 9 — Android *(code prepared; device testing deferred)*

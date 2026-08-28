@@ -30,7 +30,9 @@
 
 body {
   margin: 0;
-  min-width: 20rem;
+  /* Desktop wants a ~20rem panel; on a narrow phone, where this opens as a
+     full-screen sheet, the viewport wins so nothing overflows. */
+  min-width: min(20rem, 100vw);
   max-width: 100%;
   padding: 0.85rem 1rem 1rem;
   background: var(--bg);
