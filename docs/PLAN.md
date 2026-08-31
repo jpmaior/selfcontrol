@@ -13,7 +13,7 @@ something concrete you can see. If a checkpoint fails, we fix it before moving o
 ```
 flake.nix              # dev shell: web-ext, node
 web-ext-config.mjs     # so bare `web-ext run` works
-DESIGN.md  PLAN.md
+docs/                  # DESIGN.md, PLAN.md, RELEASE.md, TODO.md
 extension/
   manifest.json
   background/

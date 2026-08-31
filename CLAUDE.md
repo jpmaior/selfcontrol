@@ -3,7 +3,7 @@
 Firefox MV3 extension imposing activity-aware time limits on websites. Firefox only — Chrome
 support is an explicit non-goal, so use `browser.*` with promises throughout.
 
-Read [DESIGN.md](./DESIGN.md) before changing behaviour; it records *why* each decision was made,
+Read [DESIGN.md](./docs/DESIGN.md) before changing behaviour; it records *why* each decision was made,
 including several that were validated or corrected by testing.
 
 ## Commands
@@ -26,6 +26,7 @@ extension/background/   event page: index (wiring), observers, accountant, store
 extension/common/       shared with the UI: rules, settings, format
 extension/popup|options|blocked/
 test/                   node --test
+docs/                   DESIGN.md, PLAN.md, RELEASE.md, TODO.md (open findings)
 ```
 
 ## Invariants — breaking these causes subtle, hard-to-see bugs
@@ -65,7 +66,7 @@ silently does nothing. The whole design avoids them.
 ## Testing
 
 `node --test` covers the pure modules only. Browser behaviour is verified **by hand** against the
-checkpoints in [PLAN.md](./PLAN.md) — that is deliberate, and several design decisions came from
+checkpoints in [PLAN.md](./docs/PLAN.md) — that is deliberate, and several design decisions came from
 what those checkpoints revealed. When changing observer or enforcement behaviour, say what the
 user should check rather than claiming it works.
 
@@ -75,7 +76,7 @@ happens while you are watching. Force it with **Terminate Background Script** in
 
 ## Releasing
 
-Tag `vX.Y.Z` after bumping `extension/manifest.json`. See [RELEASE.md](./RELEASE.md).
+Tag `vX.Y.Z` after bumping `extension/manifest.json`. See [RELEASE.md](./docs/RELEASE.md).
 
 **AMO permanently claims a version number on a successful sign.** A failure in a later workflow
 step strands that tag — the version cannot be reused.

@@ -56,7 +56,7 @@ rolling window is a sum over the recent ones and pruning is deleting the rest.
 That design falls out of Manifest V3: Firefox unloads the background page whenever it is idle, so
 anything holding a counter in memory would lose it constantly.
 
-[DESIGN.md](./DESIGN.md) has the full reasoning, including the parts that turned out to be wrong
+[DESIGN.md](./docs/DESIGN.md) has the full reasoning, including the parts that turned out to be wrong
 and why.
 
 ## Permissions
@@ -77,7 +77,7 @@ web-ext lint       # AMO validation
 The rolling-window arithmetic (`accountant.js`) and the rule validation (`rules.js`) are pure —
 no `browser.*`, no `Date.now()`, the clock is always an argument — which is what makes them
 testable without a browser. Everything else is verified by hand against the checkpoints in
-[PLAN.md](./PLAN.md).
+[PLAN.md](./docs/PLAN.md).
 
 No bundler, no framework, no build step. Plain ES modules.
 
@@ -87,7 +87,7 @@ No bundler, no framework, no build step. Plain ES modules.
   unlimited. Deliberate: closing it would mean giving up the hover-preview immunity.
 - **Android is prepared, not verified.** The code is safe on Android but has never run there, and
   `while focused` rules would keep counting while the browser is backgrounded. See
-  [DESIGN.md §12](./DESIGN.md).
+  [DESIGN.md §12](./docs/DESIGN.md).
 - **It is a speed bump, not a lock.** Disabling the add-on is always two clicks away, and it does
   not run in private windows unless you allow it.
 
@@ -95,7 +95,7 @@ No bundler, no framework, no build step. Plain ES modules.
 
 | | |
 |---|---|
-| [DESIGN.md](./DESIGN.md) | Architecture and the reasoning behind every decision |
-| [PLAN.md](./PLAN.md) | How it was built, step by step, with the manual checkpoints |
-| [RELEASE.md](./RELEASE.md) | Signing and publishing a new version |
+| [DESIGN.md](./docs/DESIGN.md) | Architecture and the reasoning behind every decision |
+| [PLAN.md](./docs/PLAN.md) | How it was built, step by step, with the manual checkpoints |
+| [RELEASE.md](./docs/RELEASE.md) | Signing and publishing a new version |
 | [CLAUDE.md](./CLAUDE.md) | Conventions and invariants for AI-assisted work |
