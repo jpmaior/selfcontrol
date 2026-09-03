@@ -56,9 +56,11 @@ Once it succeeds, finish the release notes per RELEASE.md § Release notes:
   plain-language bullets. Many small fixes collapse to just "Bug fixes."
 - The bullets go **above** the auto-generated `**Full Changelog**` compare link, which must
   stay at the bottom.
-- Give the user the draft and the release URL to paste it into
-  (`https://github.com/jpmaior/selfcontrol/releases/tag/vX.Y.Z`), or use `gh release edit`
-  if available — remembering `--notes` replaces the whole body, so re-include the link.
+- **Show the user the exact text before it goes anywhere** — the notes are published,
+  user-facing copy, and only the user approves them. Once approved, give them the release URL
+  to paste it into (`https://github.com/jpmaior/selfcontrol/releases/tag/vX.Y.Z`), or use
+  `gh release edit` if available — remembering `--notes` replaces the whole body, so
+  re-include the link.
 
 Existing installs pick the release up within about a day; a manual check is
 **about:addons → gear → Check for Updates**.
