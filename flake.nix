@@ -24,8 +24,11 @@
             if [ -z "''${WEB_EXT_FIREFOX:-}" ] && command -v firefox >/dev/null; then
               export WEB_EXT_FIREFOX="$(command -v firefox)"
             fi
-            echo "selfcontrol: web-ext $(web-ext --version), node $(node --version)"
-            echo "  web-ext run   # desktop dev: Firefox with the extension, live reload"
+            # To stderr: the release workflow reads the manifest version by
+            # capturing `nix develop --command` stdout, and the shellHook runs
+            # even then — hints on stdout would contaminate the capture.
+            echo "selfcontrol: web-ext $(web-ext --version), node $(node --version)" >&2
+            echo "  web-ext run   # desktop dev: Firefox with the extension, live reload" >&2
           '';
         };
       });
