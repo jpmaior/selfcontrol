@@ -77,6 +77,22 @@ The `release` workflow then:
 Existing installs pick it up on their next check. Force one with **about:addons → gear → Check
 for Updates**.
 
+### Release notes
+
+The workflow creates the release with `--generate-notes`, which yields only the
+**Full Changelog** compare link. Once it finishes, edit the release and add a short changelist
+above that line — a few plain-language bullets of what changed. A pile of small fixes does not
+need itemising; "Bug fixes." is enough. Keep the auto-generated **Full Changelog** link at the
+bottom, as in v0.1.0. Note that `gh release edit --notes` replaces the whole body, so re-include
+the link when editing from the CLI:
+
+```markdown
+- Rules can now be deleted without the defaults coming back
+- Bug fixes.
+
+**Full Changelog**: https://github.com/jpmaior/selfcontrol/compare/v0.1.0...v0.2.0
+```
+
 ### Doing it by hand
 
 ```bash

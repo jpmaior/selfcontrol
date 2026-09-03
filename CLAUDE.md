@@ -76,7 +76,8 @@ happens while you are watching. Force it with **Terminate Background Script** in
 
 ## Releasing
 
-Tag `vX.Y.Z` after bumping `extension/manifest.json`. See [RELEASE.md](./docs/RELEASE.md).
+Tag `vX.Y.Z` after bumping `extension/manifest.json`. See [RELEASE.md](./docs/RELEASE.md),
+or run the `/release` skill, which walks the checklist with the guardrails.
 
 **AMO permanently claims a version number on a successful sign.** A failure in a later workflow
 step strands that tag — the version cannot be reused.

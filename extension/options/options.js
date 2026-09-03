@@ -171,6 +171,11 @@ document.getElementById("add").addEventListener("click", () => {
 
 document.getElementById("save").addEventListener("click", save);
 
+// Read at runtime from the manifest, so it can never drift from what is
+// actually installed.
+document.getElementById("version").textContent =
+  `SelfControl v${browser.runtime.getManifest().version}`;
+
 drafts = (await loadRules()).map((rule) => ({ ...rule, match: [...rule.match] }));
 reservedIds = drafts.map((rule) => rule.id);
 render();

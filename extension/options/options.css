@@ -208,3 +208,10 @@ button:focus-visible {
 .status.bad {
   color: var(--danger);
 }
+
+.version {
+  text-align: right;
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding-bottom: 1rem;
+}
