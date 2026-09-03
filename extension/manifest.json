@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SelfControl",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Activity-aware time limits for websites. The clock only runs while you are actually using the site.",
 
   "browser_specific_settings": {
