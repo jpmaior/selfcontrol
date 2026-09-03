@@ -51,7 +51,9 @@ export function hostnameOf(url) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-    return parsed.hostname;
+    // "youtube.com." (fully-qualified, trailing dot) is the same site but would
+    // match no pattern — a one-character bypass of every rule.
+    return parsed.hostname.replace(/\.$/, "");
   } catch {
     return null;
   }
@@ -182,10 +184,15 @@ export function validateRule(rule, allRules = []) {
   }
 
   // A domain claimed by an earlier rule would never reach this one, since
-  // ruleForUrl returns the first match.
+  // ruleForUrl returns the first match. Match the way ruleForUrl matches —
+  // suffix, not equality — or "music.youtube.com" after a "youtube.com" rule
+  // would validate cleanly and be dead code.
   for (const domain of rule.match ?? []) {
     const shadowing = allRules.find(
-      (other) => other !== rule && other.match?.includes(domain) && allRules.indexOf(other) < allRules.indexOf(rule),
+      (other) =>
+        other !== rule &&
+        other.match?.some((pattern) => hostMatches(domain, pattern)) &&
+        allRules.indexOf(other) < allRules.indexOf(rule),
     );
     if (shadowing) errors.push(`"${domain}" is already claimed by ${shadowing.label || shadowing.id}.`);
   }

@@ -318,9 +318,12 @@ mean every counter update also rewrites the settings.
 
 ```
 settings          → { version, rules: [...] }        // cold: written when a rule is edited
-usage:youtube     → { b: {...}, blockedUntil }       // hot: flushed on transitions + checkpoints
-usage:instagram   → { b: {...}, blockedUntil }
+usage:youtube     → { b: {...} }                     // hot: flushed on transitions + checkpoints
+usage:instagram   → { b: {...} }
 ```
+
+The unlock instant is deliberately *not* stored: it is derived on demand by
+`accountant.unlockAt()` from the buckets, so it can never go stale as the window rolls.
 
 ### Ephemeral state lives in `storage.session`
 
@@ -346,8 +349,9 @@ never the concern; write amplification was, and the transition model eliminates 
 
 ## 7. Enforcement
 
-React to `tabs.onCreated`, `tabs.onUpdated`, and `tabs.onActivated`: if a tab's URL matches a
-rule that is currently over budget, act immediately.
+React to `tabs.onCreated` and `tabs.onUpdated`: if a tab's URL matches a rule that is
+currently over budget, act immediately. `tabs.onActivated` needs no guard — the moment a rule
+runs out, every matching tab is swept, so a spent rule has no tab left to activate.
 
 - **`onExceed: "block"`** → `tabs.update(tabId, { url: runtime.getURL("blocked.html?...") })`.
   The default. The message lands, the countdown is visible, and Back does not rescue you because

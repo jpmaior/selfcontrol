@@ -78,6 +78,11 @@ function isUsageShape(value) {
  * install — that is the whole point.
  */
 export async function load(rules) {
+  // A settings save enqueues stopCounting/flush writes just before reloading;
+  // reading around the queue would rebuild the ledger from pre-flush data and
+  // the next flush would overwrite the interval that was settling.
+  await settled();
+
   const local = await browser.storage.local.get([
     ...rules.map((rule) => usageKey(rule.id)),
     LAST_FLUSH_KEY,

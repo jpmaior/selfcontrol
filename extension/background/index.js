@@ -8,6 +8,7 @@ import { log } from "./log.js";
 import { isCountingNow, platform, setRules, start } from "./observers.js";
 import { clock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
+import { validateRule } from "../common/rules.js";
 import { enforceRule, guardTab, ruleIdFromAlarm, syncExhaustionAlarm } from "./enforcer.js";
 import {
   CHECKPOINT_MS,
@@ -206,12 +207,16 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 
 // --- messaging -----------------------------------------------------------
 
-// Serves the block page and the popup.
-browser.runtime.onMessage.addListener(async (message) => {
-  await loaded;
+// Serves the block page and the popup. Deliberately NOT an async listener: a
+// listener that returns a promise claims the response channel for every
+// message, so only the branch we actually answer returns one.
+browser.runtime.onMessage.addListener((message) => {
   if (message?.type !== "status") return undefined;
-  const now = Date.now();
-  return rules.map((rule) => status(rule, now));
+  return (async () => {
+    await loaded;
+    const now = Date.now();
+    return rules.map((rule) => status(rule, now));
+  })();
 });
 
 browser.runtime.onSuspend.addListener(() => {
@@ -224,12 +229,17 @@ browser.runtime.onSuspend.addListener(() => {
 
 /**
  * Quick budget tweaks without opening the options page. Writes the same
- * `settings` key, so it travels the same onRulesChanged path an edit does.
+ * `settings` key, so it travels the same onRulesChanged path an edit does —
+ * and passes the same validation, or a console typo like `budgetSec: 0` would
+ * persist a rule the options page refuses to save.
  */
 globalThis.setLimits = async (ruleId, patch) => {
   await loaded;
   if (!rules.some((r) => r.id === ruleId)) return `no such rule: ${ruleId}`;
-  await saveRules(rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)));
+  const next = rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r));
+  const errors = validateRule(next.find((r) => r.id === ruleId), next);
+  if (errors.length > 0) return errors;
+  await saveRules(next);
   return `${ruleId} updated`;
 };
 

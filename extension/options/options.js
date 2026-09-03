@@ -21,6 +21,13 @@ const statusEl = document.getElementById("status");
 /** The working copy. Never the same objects as what is in storage. */
 let drafts = [];
 
+/**
+ * Ids that existed when the page loaded (or was last saved). A deleted rule's
+ * id must not be re-minted in the same save: the background would see it
+ * survive and the new rule would inherit the dead rule's usage history.
+ */
+let reservedIds = [];
+
 // --- draft <-> form ------------------------------------------------------
 
 const toMin = (sec) => Math.round(sec / 60);
@@ -126,7 +133,7 @@ async function save() {
   // rule's usage data hangs off, so regenerating one for an existing rule would
   // silently orphan its history — which is why this keys off "has no id" rather
   // than trying to recognise a generated one.
-  const taken = drafts.filter((d) => d.id).map((d) => d.id);
+  const taken = [...new Set([...reservedIds, ...drafts.filter((d) => d.id).map((d) => d.id)])];
   for (const draft of drafts) {
     if (draft.id) continue;
     draft.id = makeRuleId(draft.label, taken);
@@ -134,6 +141,9 @@ async function save() {
   }
 
   await saveRules(drafts.map(strip));
+  // The background has now forgotten any deleted rule's usage, so its id is
+  // genuinely free again from here on.
+  reservedIds = drafts.map((d) => d.id);
   setStatus("Saved — applied immediately.", "ok");
 }
 
@@ -162,4 +172,5 @@ document.getElementById("add").addEventListener("click", () => {
 document.getElementById("save").addEventListener("click", save);
 
 drafts = (await loadRules()).map((rule) => ({ ...rule, match: [...rule.match] }));
+reservedIds = drafts.map((rule) => rule.id);
 render();

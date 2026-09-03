@@ -19,7 +19,10 @@ const LEGACY_LIMITS_KEY = "debug:limits";
 export async function loadRules() {
   const stored = (await browser.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
 
-  if (Array.isArray(stored?.rules) && stored.rules.length > 0) {
+  // An empty array is a legitimate configuration — the user deleted every rule.
+  // Only a MISSING settings key means first run; checking length here would
+  // resurrect the defaults on the next event page start.
+  if (Array.isArray(stored?.rules)) {
     await browser.storage.local.remove(LEGACY_LIMITS_KEY);
     return stored.rules.map(withDefaults);
   }

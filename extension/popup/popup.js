@@ -6,6 +6,7 @@
 // transitions and make the meters stutter.
 
 import { clock, countdown } from "../common/format.js";
+import { MODES } from "../common/rules.js";
 
 const REFRESH_MS = 1000;
 
@@ -15,10 +16,7 @@ const noteEl = document.getElementById("note");
 /** ruleId -> the elements of its row */
 const rows = new Map();
 
-const MODE_HINT = {
-  audible: "counts while playing",
-  focus: "counts while focused",
-};
+const MODE_HINT = Object.fromEntries(MODES.map((mode) => [mode.value, mode.hint]));
 
 function createRow(status) {
   const li = document.createElement("li");

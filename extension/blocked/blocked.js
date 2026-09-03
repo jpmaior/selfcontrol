@@ -5,6 +5,8 @@
 // re-reads its status periodically rather than trusting the timestamp it was
 // opened with.
 
+import { clock, countdown } from "../common/format.js";
+
 const params = new URLSearchParams(location.search);
 const ruleId = params.get("rule");
 const label = params.get("label") || ruleId || "this site";
@@ -33,14 +35,6 @@ const QUIPS = [
 function pickQuip() {
   const seed = [...`${ruleId}${new Date().getHours()}`].reduce((a, c) => a + c.charCodeAt(0), 0);
   return QUIPS[seed % QUIPS.length];
-}
-
-function clock(ms) {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const s = String(total % 60).padStart(2, "0");
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
 let unlockAtMs = Number(params.get("until")) || Date.now();
@@ -83,7 +77,7 @@ function tick() {
     return;
   }
 
-  el.countdown.textContent = clock(remaining);
+  el.countdown.textContent = countdown(remaining);
 
   const span = Math.max(1, unlockAtMs - blockedAtMs);
   el.meter.style.width = `${Math.min(100, ((now - blockedAtMs) / span) * 100)}%`;
@@ -94,5 +88,13 @@ el.quip.textContent = pickQuip();
 tick();
 setInterval(tick, 1000);
 
+// Polling wakes the event page, so only do it while someone is actually
+// looking — a block tab parked in the background must not pin the background
+// alive. The visibilitychange refresh keeps the page honest on return.
 refresh();
-setInterval(refresh, 5000);
+setInterval(() => {
+  if (document.visibilityState === "visible") refresh();
+}, 5000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refresh();
+});

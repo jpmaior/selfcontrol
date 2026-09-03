@@ -56,6 +56,11 @@ test("ruleForUrl: returns the first matching rule", () => {
   assert.equal(ruleForUrl(rules, "https://example.com/x").id, "first");
 });
 
+test("ruleForUrl: a fully-qualified trailing dot is not a bypass", () => {
+  assert.equal(ruleForUrl(DEFAULT_RULES, "https://youtube.com./watch").id, "youtube");
+  assert.equal(ruleForUrl(DEFAULT_RULES, "https://www.youtube.com./watch").id, "youtube");
+});
+
 // --- domain parsing ------------------------------------------------------
 
 test("parseDomain: accepts what a person would actually paste", () => {
@@ -141,6 +146,19 @@ test("validateRule: flags a domain already claimed by an earlier rule", () => {
   assert.ok(
     validateRule(second, all).some((e) => /already claimed by First/.test(e)),
     "the shadowed rule is flagged",
+  );
+});
+
+test("validateRule: flags a subdomain shadowed by an earlier rule's suffix match", () => {
+  // ruleForUrl matches by suffix, so "youtube.com" claims music.youtube.com too.
+  const first = rule({ id: "a", label: "First", match: ["youtube.com"] });
+  const second = rule({ id: "b", label: "Second", match: ["music.youtube.com"] });
+  const all = [first, second];
+
+  assert.deepEqual(validateRule(first, all), [], "the earlier rule is fine");
+  assert.ok(
+    validateRule(second, all).some((e) => /already claimed by First/.test(e)),
+    "the shadowed subdomain rule is flagged",
   );
 });
 

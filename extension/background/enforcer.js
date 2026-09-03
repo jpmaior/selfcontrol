@@ -36,6 +36,14 @@ export function blockedUrlFor(rule, snapshot) {
 async function act(rule, tab, snapshot) {
   try {
     if (rule.onExceed === "close") {
+      // Removing a window's only tab closes the window — and closing the last
+      // window closes Firefox (closeWindowWithLastTab). Open a fresh tab first
+      // so the window survives; tabs.update to about:newtab is not an option,
+      // Firefox rejects privileged about: URLs from extensions as illegal.
+      const siblings = await browser.tabs.query({ windowId: tab.windowId });
+      if (siblings.length <= 1) {
+        await browser.tabs.create({ windowId: tab.windowId, active: false });
+      }
       await browser.tabs.remove(tab.id);
       return "closed";
     }

@@ -25,6 +25,7 @@
               export WEB_EXT_FIREFOX="$(command -v firefox)"
             fi
             echo "selfcontrol: web-ext $(web-ext --version), node $(node --version)"
+            echo "  web-ext run   # desktop dev: Firefox with the extension, live reload"
           '';
         };
       });
