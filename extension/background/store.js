@@ -33,7 +33,6 @@ export const MAX_CHUNK_MS = 1.5 * CHECKPOINT_MS;
 
 const usageKey = (ruleId) => `usage:${ruleId}`;
 const openKey = (ruleId) => `open:${ruleId}`;
-const LAST_FLUSH_KEY = "meta:lastFlush";
 
 /** ruleId -> usage ledger */
 const ledgers = new Map();
@@ -43,9 +42,6 @@ const openSince = new Map();
 
 /** Rules whose ledger has changed since the last flush. */
 const dirty = new Set();
-
-/** Last instant we can prove we were alive and flushing. */
-let lastFlushMs = 0;
 
 /** Observable counters, so Checkpoint 4 can verify writes are actually rare. */
 export const stats = { localWrites: 0, sessionWrites: 0, keysWritten: 0 };
@@ -83,12 +79,7 @@ export async function load(rules) {
   // the next flush would overwrite the interval that was settling.
   await settled();
 
-  const local = await browser.storage.local.get([
-    ...rules.map((rule) => usageKey(rule.id)),
-    LAST_FLUSH_KEY,
-  ]);
-  lastFlushMs = local[LAST_FLUSH_KEY] ?? 0;
-
+  const local = await browser.storage.local.get(rules.map((rule) => usageKey(rule.id)));
   for (const rule of rules) {
     const stored = local[usageKey(rule.id)];
     ledgers.set(rule.id, isUsageShape(stored) ? stored : createUsage());
@@ -111,9 +102,18 @@ export async function load(rules) {
  * Settle an interval that was left open when the event page died.
  *
  * If the observers confirm the rule is still being consumed, the interval is a
- * legitimate resume and is kept untouched. Otherwise playback stopped while we
- * were unloaded and we have no idea when — so we credit only up to the last
- * instant we can prove we were alive and flushing, rather than guessing.
+ * legitimate resume and is kept untouched. Otherwise the stop happened while we
+ * were unloaded — and the stop is what woke us, so `now` is within startup
+ * latency of the truth. Credit right up to it.
+ *
+ * An earlier version credited only up to the last flush, reasoning that the
+ * stop time was unknown. It is not: a browser exit clears storage.session (so
+ * there is no interval left to settle), and every other stop — pause, ending,
+ * tab closed, a quiet stretch dropping `audible` — is itself the waking event.
+ * The cautious version discarded up to a whole checkpoint per stop, and a video
+ * with silent gaps stops many times; a 7-minute video showed as exactly 5:00
+ * (2026-09-05). settle() applies the sleep clamp, so a suspended machine still
+ * cannot credit more than MAX_CHUNK_MS here.
  *
  * Returns the milliseconds credited, or 0 if there was nothing to settle.
  */
@@ -125,8 +125,7 @@ export function reconcile(rule, nowMs, stillCounting) {
   openSince.delete(rule.id);
   enqueue(() => browser.storage.session.remove(openKey(rule.id)));
 
-  const until = Math.min(Math.max(since, lastFlushMs), nowMs);
-  return settle(rule, since, until);
+  return settle(rule, since, nowMs);
 }
 
 // --- counting ------------------------------------------------------------
@@ -201,11 +200,10 @@ function settle(rule, fromMs, toMs) {
 export function flush(nowMs) {
   if (dirty.size === 0) return 0;
 
-  const payload = { [LAST_FLUSH_KEY]: nowMs };
+  const payload = {};
   for (const ruleId of dirty) payload[usageKey(ruleId)] = ledgerFor(ruleId);
   const count = dirty.size;
   dirty.clear();
-  lastFlushMs = nowMs;
 
   stats.localWrites++;
   stats.keysWritten += count;

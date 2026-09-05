@@ -86,34 +86,37 @@ test("reconcile: a still-counting rule keeps its open interval untouched", async
   assert.ok(hasOpenInterval(r.id), "the interval survives as a legitimate resume");
 });
 
-test("reconcile: a dead interval settles only up to the last proven flush", async () => {
+test("reconcile: a dead interval is credited up to now", async () => {
   const r = rule("dead");
   await session.set({ "open:dead": T0 });
-  await local.set({ "meta:lastFlush": T0 + 2 * MIN });
   await load([r]);
 
-  // Playback stopped at an unknown moment while we were unloaded; credit only
-  // what we can prove, not the whole stretch to now.
-  assert.equal(reconcile(r, T0 + 30 * MIN, false), 2 * MIN);
+  // The stop is what woke the event page, so `now` is within startup latency
+  // of when playback actually stopped. A 5-minute checkpoint opened this
+  // interval; 2 more minutes were watched before the pause landed on an
+  // unloaded page. Crediting only up to the checkpoint lost those 2 minutes —
+  // a 7-minute video showed as exactly 5:00 (TODO.md, 2026-09-05).
+  assert.equal(reconcile(r, T0 + 2 * MIN, false), 2 * MIN);
   assert.ok(!hasOpenInterval(r.id));
-  assert.equal(status(r, T0 + 30 * MIN).usedMs, 2 * MIN);
+  assert.equal(status(r, T0 + 2 * MIN).usedMs, 2 * MIN);
 
   await settled();
   assert.ok(!session.data.has("open:dead"), "the session key is cleaned up");
 });
 
-test("reconcile: a last flush before the interval opened credits nothing", async () => {
-  const r = rule("stale");
-  await session.set({ "open:stale": T0 });
-  await local.set({ "meta:lastFlush": T0 - 10 * MIN });
+test("reconcile: a dead interval is still clamped to 1.5 checkpoints", async () => {
+  const r = rule("slept-then-paused");
+  await session.set({ "open:slept-then-paused": T0 });
   await load([r]);
 
-  assert.equal(reconcile(r, T0 + 30 * MIN, false), 0);
+  // Play, unload, suspend the laptop for half an hour, resume, pause. The
+  // clamp is what makes crediting up to `now` safe.
+  assert.equal(reconcile(r, T0 + 30 * MIN, false), MAX_CHUNK_MS);
+  assert.equal(status(r, T0 + 30 * MIN).usedMs, MAX_CHUNK_MS);
 });
 
 test("checkpoint clamps a sleep gap to 1.5 checkpoints", async () => {
   const r = rule("sleeper");
-  await local.set({ "meta:lastFlush": 0 });
   await session.remove("open:sleeper");
   await load([r]);
 
@@ -126,7 +129,7 @@ test("checkpoint clamps a sleep gap to 1.5 checkpoints", async () => {
   assert.equal(status(r, T0 + 3 * 60 * MIN).usedMs, MAX_CHUNK_MS);
 });
 
-test("flush persists ledgers and the last-flush marker through the queue", async () => {
+test("flush persists ledgers through the queue", async () => {
   const r = rule("flushed");
   await load([r]);
 
@@ -135,7 +138,6 @@ test("flush persists ledgers and the last-flush marker through the queue", async
   flush(T0 + 3 * MIN);
   await settled();
 
-  assert.equal(local.data.get("meta:lastFlush"), T0 + 3 * MIN);
   const stored = local.data.get("usage:flushed");
   const total = Object.values(stored.b).reduce((a, ms) => a + ms, 0);
   assert.equal(total, 3 * MIN);

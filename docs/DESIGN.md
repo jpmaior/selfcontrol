@@ -303,6 +303,22 @@ counts as 7.5 minutes, not 180.
 The checkpoint interval is the single tuning knob, trading write volume against crash loss and
 sleep over-count. Default: 5 minutes.
 
+### A leftover interval is credited up to *now*
+
+The event page is unloaded during hands-off playback, so a pause or ending usually lands on a
+dead page. The `tabs.onUpdated` event that reports it is the very thing that restarts the page,
+which then finds an interval in `storage.session` that the observers say is no longer live. That
+interval is settled up to `now`: the stop happened within startup latency of it.
+
+This looks less cautious than crediting only up to the last checkpoint, and an earlier build did
+exactly that, on the theory that the stop time was unknown. It is not. The one case where it
+truly is — a browser crash or quit — clears `storage.session`, so there is no interval left to
+settle. Every other stop is itself the wake-up. The cautious version discarded everything since
+the last checkpoint on every such stop, up to 5 minutes each time; a 7-minute video registered
+as exactly 5:00, and anything with quiet gaps (which drop `audible` for a second or more) lost
+time on every gap. The sleep clamp above is what makes crediting up to `now` safe: a laptop
+suspended mid-interval still cannot credit more than 7.5 minutes.
+
 ---
 
 ## 6. Storage

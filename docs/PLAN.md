@@ -207,8 +207,10 @@ whole point of this step:
    *Terminate* — not *Reload* — is the button that reproduces it.
 3. **The leftover case:** start a video, Terminate the background script, then pause the video
    *before* reopening the console. On the next start you should see a `reconciled youtube:`
-   line. It deliberately credits only up to the last proven flush rather than guessing, so
-   expect it to under-count slightly — that is the honest choice, not a bug.
+   line crediting the full stretch up to the pause. The pause is the event that woke the page,
+   so its timestamp is trustworthy. *(An earlier build credited only up to the last flush and
+   called the resulting under-count "honest"; it lost up to a whole checkpoint per stop and was
+   corrected on 2026-09-05 — see DESIGN.md §5.)*
 4. Quit Firefox entirely, relaunch `web-ext run` → usage survives (`storage.local`), open
    intervals do not (`storage.session`, by design).
 5. **Write volume.** Watch continuously for ~6 minutes, then `dumpStats()`. `localWrites`
