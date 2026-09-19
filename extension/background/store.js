@@ -11,18 +11,9 @@
 // Keys are split per rule so a counter update never rewrites the settings, and
 // writes are batched: nothing is written during playback except at checkpoints.
 
-import {
-  commit,
-  createUsage,
-  fold,
-  normalizeUsage,
-  remainingMs,
-  unlockAt,
-  usedInPeriod,
-  usedMs,
-  windowOf,
-} from "./accountant.js";
+import { commit, createUsage, fold, normalizeUsage, usedInPeriod, windowOf } from "./accountant.js";
 import { startOfDay, startOfWeek } from "../common/calendar.js";
+import { evaluate } from "../common/policy.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
 
@@ -246,23 +237,25 @@ function period(usage, startMs) {
   return { usedMs: used, passMs: all - used };
 }
 
-/** Everything a popup, block page or enforcer needs to know about one rule. */
+/**
+ * Everything a popup, block page or enforcer needs to know about one rule.
+ * The decision itself is policy.evaluate(); this adds identity, the rolling
+ * meter's numbers and the calendar totals.
+ */
 export function status(rule, nowMs) {
   const usage = projected(rule, nowMs);
-  const limits = windowOf(rule);
-  const remaining = remainingMs(usage, nowMs, limits);
+  const counting = openSince.has(rule.id);
+  const decision = evaluate(rule, usage, nowMs, { counting });
 
   return {
     id: rule.id,
     label: rule.label,
     mode: rule.mode,
-    counting: openSince.has(rule.id),
-    usedMs: usedMs(usage, nowMs, limits.windowMs),
-    budgetMs: limits.budgetMs,
-    windowMs: limits.windowMs,
-    remainingMs: remaining,
-    exhausted: remaining <= 0,
-    unlockAtMs: remaining > 0 ? nowMs : unlockAt(usage, nowMs, rule),
+    counting,
+    usedMs: decision.caps.rolling.usedMs,
+    budgetMs: decision.caps.rolling.budgetMs,
+    windowMs: windowOf(rule).windowMs,
+    ...decision,
     today: period(usage, startOfDay(nowMs)),
     week: period(usage, startOfWeek(nowMs)),
   };

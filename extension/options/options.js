@@ -10,6 +10,7 @@ import {
   blankRule,
   makeRuleId,
   parseDomain,
+  strip,
   validateRule,
 } from "../common/rules.js";
 import { loadRules, saveRules } from "../common/settings.js";
@@ -46,6 +47,10 @@ let reservedIds = [];
 const toMin = (sec) => Math.round(sec / 60);
 const toSec = (min) => Math.max(0, Math.round(Number(min) || 0) * 60);
 
+/** For the optional caps: blank is "none" (null), anything else is minutes. */
+const toMinOrBlank = (sec) => (sec === null || sec === undefined ? "" : toMin(sec));
+const toSecOrNull = (min) => (String(min).trim() === "" ? null : Math.round(Number(min)) * 60);
+
 function fillOptions(select, items, selected) {
   for (const item of items) {
     const option = document.createElement("option");
@@ -65,6 +70,8 @@ function buildCard(draft) {
   field("budgetMin").value = toMin(draft.budgetSec);
   field("windowMin").value = toMin(draft.windowSec);
   field("unlockMin").value = toMin(draft.minUnlockCreditSec);
+  field("dailyMin").value = toMinOrBlank(draft.dailyBudgetSec);
+  field("weeklyMin").value = toMinOrBlank(draft.weeklyBudgetSec);
 
   fillOptions(field("mode"), MODES, draft.mode);
   fillOptions(field("onExceed"), ON_EXCEED, draft.onExceed);
@@ -82,6 +89,8 @@ function buildCard(draft) {
     draft.budgetSec = toSec(field("budgetMin").value);
     draft.windowSec = toSec(field("windowMin").value);
     draft.minUnlockCreditSec = toSec(field("unlockMin").value);
+    draft.dailyBudgetSec = toSecOrNull(field("dailyMin").value);
+    draft.weeklyBudgetSec = toSecOrNull(field("weeklyMin").value);
     clearStatus();
   });
 
@@ -348,20 +357,6 @@ async function save() {
   // genuinely free again from here on.
   reservedIds = drafts.map((d) => d.id);
   setStatus("Saved — applied immediately.", "ok");
-}
-
-/** Only the fields a rule is made of; drop anything the form left lying around. */
-function strip(draft) {
-  return {
-    id: draft.id,
-    label: draft.label.trim(),
-    match: draft.match,
-    mode: draft.mode,
-    budgetSec: draft.budgetSec,
-    windowSec: draft.windowSec,
-    onExceed: draft.onExceed,
-    minUnlockCreditSec: draft.minUnlockCreditSec,
-  };
 }
 
 // --- wiring --------------------------------------------------------------

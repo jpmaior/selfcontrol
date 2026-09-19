@@ -140,6 +140,11 @@ header h1 {
   font-variant-numeric: tabular-nums;
 }
 
+.detail.calendar {
+  justify-content: flex-start;
+  margin-top: 0.15rem;
+}
+
 .note {
   margin: 0.9rem 0 0;
   font-size: 0.75rem;

@@ -118,9 +118,6 @@ function foldMap(usage, map, field, oldestBucket) {
   }
 }
 
-/** The old name, kept for one step so nothing that imports it breaks. */
-export const prune = fold;
-
 /**
  * Milliseconds used since `periodStartMs`, a local day or week start: folded
  * days on or after it plus live buckets that start on or after it. A live

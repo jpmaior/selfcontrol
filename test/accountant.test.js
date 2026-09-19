@@ -20,7 +20,6 @@ import {
   creditAvailableAt,
   fold,
   normalizeUsage,
-  prune,
   remainingMs,
   unlockAt,
   usedByDay,
@@ -114,27 +113,27 @@ test("usedMs: the boundary bucket is counted whole (deliberately strict)", () =>
   assert.equal(usedMs(u, now + 1, HOUR), 0);
 });
 
-test("prune: drops expired buckets and keeps live ones", () => {
+test("fold: drops expired buckets and keeps live ones", () => {
   const u = createUsage();
   commit(u, T0, T0 + MIN); // bucket 1000
   commit(u, T0 + 30 * MIN, T0 + 31 * MIN); // bucket 1030
   commit(u, T0 + 59 * MIN, T0 + 60 * MIN); // bucket 1059
 
-  prune(u, T0 + 61 * MIN, HOUR);
+  fold(u, T0 + 61 * MIN, HOUR);
 
   assert.equal(u.b[1000], undefined, "expired bucket removed");
   assert.equal(u.b[1030], MIN, "live bucket kept");
   assert.equal(u.b[1059], MIN, "live bucket kept");
 });
 
-test("prune: does not change what usedMs reports", () => {
+test("fold: does not change what usedMs reports", () => {
   const u = createUsage();
   commit(u, T0, T0 + MIN);
   commit(u, T0 + 45 * MIN, T0 + 50 * MIN);
   const now = T0 + 70 * MIN;
 
   const before = usedMs(u, now, HOUR);
-  prune(u, now, HOUR);
+  fold(u, now, HOUR);
   assert.equal(usedMs(u, now, HOUR), before);
 });
 
@@ -307,10 +306,6 @@ test("fold: pass buckets fold into the day's pass component", () => {
 
   assert.deepEqual(u.p, {});
   assert.deepEqual(u.d[KEY0], { used: MIN, pass: 4 * MIN });
-});
-
-test("prune is fold: the old name still works for one step", () => {
-  assert.equal(prune, fold);
 });
 
 // --- calendar periods ----------------------------------------------------

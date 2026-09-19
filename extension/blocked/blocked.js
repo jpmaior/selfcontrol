@@ -39,6 +39,31 @@ function pickQuip() {
 
 let unlockAtMs = Number(params.get("until")) || Date.now();
 let blockedAtMs = Date.now();
+let reason = params.get("reason") || "rolling";
+
+/** The headline names the period that ran out, so "until midnight" makes sense. */
+const HEADLINE = {
+  rolling: (name) => `${name} is done for now`,
+  daily: (name) => `${name} is done for today`,
+  weekly: (name) => `${name} is done for the week`,
+};
+
+function setHeadline() {
+  el.headline.textContent = (HEADLINE[reason] ?? HEADLINE.rolling)(label);
+}
+
+function describeCap(mine) {
+  const windowMin = Math.round(mine.windowMs / 60000);
+  const cap = mine.caps?.[reason];
+  switch (cap && reason) {
+    case "daily":
+      return `${label}: ${clock(cap.usedMs)} of ${clock(cap.budgetMs)} used today.`;
+    case "weekly":
+      return `${label}: ${clock(cap.usedMs)} of ${clock(cap.budgetMs)} used this week.`;
+    default:
+      return `${label}: ${clock(mine.usedMs)} of ${clock(mine.budgetMs)} used in the last ${windowMin} minutes.`;
+  }
+}
 
 async function refresh() {
   try {
@@ -47,9 +72,14 @@ async function refresh() {
     if (!mine) return;
 
     unlockAtMs = mine.unlockAtMs;
-    el.detail.textContent =
-      `${label}: ${clock(mine.usedMs)} of ${clock(mine.budgetMs)} used in the last ` +
-      `${Math.round(mine.windowMs / 60000)} minutes.`;
+    if (mine.exhausted && mine.reason !== reason) {
+      // A different constraint took over (say the daily cap filled while the
+      // rolling one was blocking): retitle rather than count down to the
+      // wrong instant.
+      reason = mine.reason;
+      setHeadline();
+    }
+    el.detail.textContent = describeCap(mine);
 
     if (!mine.exhausted) unlock();
   } catch {
@@ -83,7 +113,7 @@ function tick() {
   el.meter.style.width = `${Math.min(100, ((now - blockedAtMs) / span) * 100)}%`;
 }
 
-el.headline.textContent = `${label} is done for now`;
+setHeadline();
 el.quip.textContent = pickQuip();
 tick();
 setInterval(tick, 1000);

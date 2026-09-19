@@ -213,7 +213,12 @@ min of remaining, one alarm per rule.
 
 ---
 
-### Step 3: Schedules
+### Step 3: Schedules — dropped (2026-09-19)
+
+Built as PR #3, tried, and not wanted: closed without merging. The later steps were rebuilt
+without it, so nothing below depends on it any more; the references to schedules that
+remain in this file are the original plan, kept for the record. If it ever comes back,
+`calendar.js` still has `atMinute()` and `minuteOfDay()`, which were its footing.
 
 A rule carries blocked spans in local time. During a span the rule is exhausted with
 `reason: "schedule"` and unlocks when the span ends. A pass does not override a schedule.
