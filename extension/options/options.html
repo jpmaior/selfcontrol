@@ -18,8 +18,19 @@
 
     <ul class="rules" id="rules"></ul>
 
+    <div class="transfer-panel" id="transfer" hidden>
+      <p id="transfer-summary"></p>
+      <div class="transfer-buttons">
+        <button type="button" id="transfer-confirm" class="primary">Replace my rules</button>
+        <button type="button" id="transfer-cancel" class="secondary">Cancel</button>
+      </div>
+    </div>
+
     <div class="actions">
       <button type="button" id="add" class="secondary">Add a rule</button>
+      <button type="button" id="export" class="secondary">Export</button>
+      <button type="button" id="import" class="secondary">Import</button>
+      <input type="file" id="import-file" accept="application/json,.json" hidden />
       <div class="spacer"></div>
       <output id="status" class="status" role="status"></output>
       <button type="button" id="save" class="primary">Save</button>
