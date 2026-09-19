@@ -9,6 +9,7 @@ import { isCountingNow, platform, setRules, start } from "./observers.js";
 import { clock, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { validateRule } from "../common/rules.js";
+import { applyBadge, badgeFor } from "../common/badge.js";
 import { enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
 import {
   CHECKPOINT_MS,
@@ -65,8 +66,18 @@ const primed = start({
 
     log("   ", describe(rule, now));
     await Promise.all([syncCheckpointAlarm(), syncRuleAlarm(rule, now)]);
+    await syncBadge();
   },
 });
+
+/**
+ * The badge is derived from status() for every rule, so it needs no state of
+ * its own and is right again after a restart as soon as prime() has run.
+ */
+async function syncBadge() {
+  const now = Date.now();
+  await applyBadge(badgeFor(rules.map((rule) => status(rule, now))));
+}
 
 Promise.all([loaded, primed])
   .then(async () => {
@@ -104,6 +115,7 @@ async function settleAndArm(why) {
     await enforceRule(rule, now);
     await syncRuleAlarm(rule, now);
   }
+  await syncBadge();
   log(`state re-armed (${why})`);
 }
 
@@ -182,6 +194,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
     if (written > 0) log(`flushed ${written} ledger(s) — ${stats.localWrites} local writes total`);
     await syncCheckpointAlarm();
     for (const rule of rules) await syncRuleAlarm(rule, now);
+    await syncBadge();
     return;
   }
 
@@ -204,6 +217,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   const acted = await enforceRule(rule, now);
   if (acted === 0) log(`${ruleId}: ${describe(rule, now)}`);
   await syncRuleAlarm(rule, now);
+  await syncBadge();
 });
 
 // --- messaging -----------------------------------------------------------
@@ -234,6 +248,7 @@ const handlers = {
     );
     await enforceRule(rule, now);
     await syncRuleAlarm(rule, now);
+    await syncBadge();
     return { ok: true, ms };
   },
 
@@ -254,6 +269,7 @@ const handlers = {
     // The pass ending is just nextChangeAtMs firing; the alarm handler then
     // finds the rolling cap spent and sweeps.
     await syncRuleAlarm(rule, now);
+    await syncBadge();
     return { ok: true, endsAtMs: snapshot.pass.endsAtMs };
   },
 };

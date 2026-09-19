@@ -717,3 +717,20 @@ Lock-in (§16) stays available during a pass and ends it.
 `usePass` is a message like `lockIn`. The block page says "You have 2 passes left this
 week, in the toolbar popup" and nothing more, so the block page never carries an unlock
 control; a button there would be the drip-feed with extra steps.
+
+---
+
+## 18. Toolbar badge
+
+A state indicator, not a countdown: `●` while any rule is counting (an active pass
+counts, since the site is open on borrowed time), `!` while a rule is blocked and nothing
+is counting, nothing otherwise. Counting wins over blocked because it is the thing
+happening right now.
+
+It is set only on transitions: after `settleAndArm`, in the observers' `onChange`, at the
+end of every alarm handler, and after a lock-in or a pass. Nothing ticks. The unlock
+alarm from §14 is what lets the `!` clear at the unlock instant without a user event.
+The decision (`badgeFor`) is pure and reads `status()` for every rule, so there is no
+badge state to persist; after a restart it is right again as soon as `prime()` has run.
+`applyBadge` feature-detects `browser.action.setBadgeText` and swallows errors, because
+Android may not draw badges at all.
