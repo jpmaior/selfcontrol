@@ -623,3 +623,54 @@ A calendar cap's usage is `usedInPeriod()` from §13: folded days in the period 
 buckets that start in it. No new state, no migration of usage data. `SETTINGS_VERSION`
 went to 2 because this is the first step that stores a new rule field; `withDefaults` fills
 `null` into rules from a version-1 file, and later additive fields keep version 2.
+
+---
+
+## 15. Schedules
+
+A rule can carry blocked spans in local time. During a span the rule is exhausted with
+`reason: "schedule"` and unlocks when the span ends, whatever the caps say.
+
+```js
+schedule: [{ day: 0, fromMin: 540, toMin: 1080 }]   // Monday 09:00–18:00; Mon = 0
+```
+
+### Spans per day, never wrapping
+
+A span lives on one weekday, `fromMin` inclusive to `toMin` exclusive, with 1440 meaning
+the end of the day. An overnight block is two spans, 22:00–24:00 and 00:00–07:00 the next
+day. That is what the grid editor produces without any special casing, it keeps every
+function in `schedule.js` a plain per-day lookup, and `blockEndsAt()` joins a span that
+reaches midnight to a span starting at 0 the next day, so the block page says "until
+07:00" rather than "until 00:00". A schedule that paints the whole week never ends; the
+walk stops a week out.
+
+### Local time
+
+Minutes of the day are wall-clock minutes. `atMinute(dayStart, 1440)` on the 25-hour day
+is still the next midnight, because the span was written against the clock on the wall
+and that is what the user will look at. The DST days are pinned in `test/schedule.test.js`.
+
+### An idle rule now has an alarm
+
+Until now an alarm existed only while a rule was counting or blocked. A scheduled rule
+needs one while it is idle and open, at the next span start, or a tab left open at 08:59
+would sail through 09:00 untouched until some other event woke the page. `nextChangeAtMs`
+already carries the next span start, so `syncRuleAlarm` sets it without knowing why. A
+rule with a schedule and no open tab therefore holds one alarm that may be days away,
+which is harmless: it fires, finds nothing to enforce, and re-arms for the next span.
+
+### A pass does not override a schedule
+
+A pass (§17) is for the video that runs longer than the rolling window allows. It buys
+time; it does not buy a different calendar. The schedule is the user's decision about
+*when*, and nothing rationed per week should be able to spend it.
+
+### The editor
+
+A 7 × 48 grid of `<button aria-pressed>` cells, painted with the pointer. The grid
+captures the pointer on `pointerdown`, so a stroke that leaves it still ends on release,
+and cells under the moving pointer are found with `elementFromPoint`, since capture
+routes every event to the grid and `pointerenter` on the cells would never fire. Clicks
+are only honoured when synthesised from the keyboard (`event.detail === 0`); a pointer
+click was already the stroke. The summary line comes from the pure `describeSpans()`.

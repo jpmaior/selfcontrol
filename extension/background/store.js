@@ -14,6 +14,7 @@
 import { commit, createUsage, fold, normalizeUsage, usedInPeriod, windowOf } from "./accountant.js";
 import { startOfDay, startOfWeek } from "../common/calendar.js";
 import { evaluate } from "../common/policy.js";
+import { describeSpans } from "../common/schedule.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
 
@@ -255,6 +256,7 @@ export function status(rule, nowMs) {
     usedMs: decision.caps.rolling.usedMs,
     budgetMs: decision.caps.rolling.budgetMs,
     windowMs: windowOf(rule).windowMs,
+    scheduleText: describeSpans(rule.schedule),
     ...decision,
     today: period(usage, startOfDay(nowMs)),
     week: period(usage, startOfWeek(nowMs)),

@@ -15,11 +15,15 @@ import {
 } from "../common/rules.js";
 import { loadRules, saveRules } from "../common/settings.js";
 import { normalizeUsage, usedByDay } from "../background/accountant.js";
+import { DAY_NAMES, PRESETS, describeSpans, gridToSpans, spansToGrid } from "../common/schedule.js";
 import { addDays, dayKey, startOfDay } from "../common/calendar.js";
 import { clock } from "../common/format.js";
 
 /** Days drawn in the history strip; the ledger keeps more (HISTORY_DAYS). */
 const HISTORY_SHOWN = 30;
+
+/** One grid cell is this many minutes. 48 columns a day. */
+const SLOT_MIN = 30;
 
 const listEl = document.getElementById("rules");
 const templateEl = document.getElementById("rule-template");
@@ -101,6 +105,7 @@ function buildCard(draft) {
     event.target.value = draft.match.join(", ");
   });
 
+  buildScheduleEditor(card, draft);
   renderHistory(card, draft);
 
   card.querySelector('[data-action="delete"]').addEventListener("click", () => {
@@ -115,6 +120,132 @@ function buildCard(draft) {
 function render() {
   listEl.replaceChildren(...drafts.map(buildCard));
 }
+
+// --- schedule editor -----------------------------------------------------
+
+/**
+ * A 7 × 48 grid of toggle buttons painted with the pointer. The stroke's
+ * value comes from the first cell's opposite state, the grid captures the
+ * pointer so a stroke that leaves it still ends on release, and cells under
+ * the moving pointer are found with elementFromPoint (capture routes every
+ * event to the grid, so pointerenter on the cells would never fire).
+ */
+function buildScheduleEditor(card, draft) {
+  const gridEl = card.querySelector('[data-role="grid"]');
+  const summaryEl = card.querySelector('[data-role="schedule-summary"]');
+  const slots = (24 * 60) / SLOT_MIN;
+  let grid = spansToGrid(draft.schedule, SLOT_MIN);
+
+  // Header: an hour label every two hours, spanning four cells.
+  gridEl.append(corner());
+  for (let hour = 0; hour < 24; hour += 2) {
+    const h = document.createElement("div");
+    h.className = "hour";
+    h.textContent = String(hour).padStart(2, "0");
+    gridEl.append(h);
+  }
+
+  const cells = [];
+  for (let day = 0; day < 7; day++) {
+    const label = document.createElement("div");
+    label.className = "day";
+    label.textContent = DAY_NAMES[day];
+    gridEl.append(label);
+    cells[day] = [];
+    for (let slot = 0; slot < slots; slot++) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "cell";
+      cell.dataset.day = day;
+      cell.dataset.slot = slot;
+      const from = slot * SLOT_MIN;
+      cell.setAttribute("aria-label", `${DAY_NAMES[day]} ${hhmm(from)}–${hhmm(from + SLOT_MIN)}`);
+      gridEl.append(cell);
+      cells[day][slot] = cell;
+    }
+  }
+
+  function paintCells() {
+    for (let day = 0; day < 7; day++) {
+      for (let slot = 0; slot < slots; slot++) {
+        cells[day][slot].setAttribute("aria-pressed", String(grid[day][slot]));
+      }
+    }
+  }
+
+  function commitGrid() {
+    draft.schedule = gridToSpans(grid, SLOT_MIN);
+    summaryEl.textContent = describeSpans(draft.schedule);
+    clearStatus();
+  }
+
+  function cellAt(event) {
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    return target?.classList.contains("cell") && gridEl.contains(target) ? target : null;
+  }
+
+  let stroke = null; // the value being painted, while the button is held
+
+  function applyStroke(cell) {
+    const { day, slot } = cell.dataset;
+    if (grid[day][slot] === stroke) return;
+    grid[day][slot] = stroke;
+    cell.setAttribute("aria-pressed", String(stroke));
+  }
+
+  gridEl.addEventListener("pointerdown", (event) => {
+    const cell = cellAt(event);
+    if (!cell || event.button !== 0) return;
+    event.preventDefault(); // no text selection, no focus jump mid-stroke
+    stroke = !grid[cell.dataset.day][cell.dataset.slot];
+    gridEl.setPointerCapture(event.pointerId);
+    applyStroke(cell);
+  });
+
+  gridEl.addEventListener("pointermove", (event) => {
+    if (stroke === null) return;
+    const cell = cellAt(event);
+    if (cell) applyStroke(cell);
+  });
+
+  const endStroke = () => {
+    if (stroke === null) return;
+    stroke = null;
+    commitGrid();
+  };
+  gridEl.addEventListener("pointerup", endStroke);
+  gridEl.addEventListener("pointercancel", endStroke);
+
+  // Keyboard activation only: a pointer click was already handled by the
+  // stroke, and `detail` is 0 for clicks synthesised from Enter or Space.
+  gridEl.addEventListener("click", (event) => {
+    const cell = event.target.closest(".cell");
+    if (!cell || event.detail !== 0) return;
+    const { day, slot } = cell.dataset;
+    grid[day][slot] = !grid[day][slot];
+    cell.setAttribute("aria-pressed", String(grid[day][slot]));
+    commitGrid();
+  });
+
+  for (const button of card.querySelectorAll("[data-preset]")) {
+    button.addEventListener("click", () => {
+      grid = spansToGrid(PRESETS[button.dataset.preset] ?? [], SLOT_MIN);
+      paintCells();
+      commitGrid();
+    });
+  }
+
+  paintCells();
+  summaryEl.textContent = describeSpans(draft.schedule);
+}
+
+function corner() {
+  const c = document.createElement("div");
+  c.className = "corner";
+  return c;
+}
+
+const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 
 // --- history -------------------------------------------------------------
 

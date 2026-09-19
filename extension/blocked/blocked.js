@@ -46,15 +46,27 @@ const HEADLINE = {
   rolling: (name) => `${name} is done for now`,
   daily: (name) => `${name} is done for today`,
   weekly: (name) => `${name} is done for the week`,
-  schedule: (name) => `${name} is off right now`,
+  schedule: (name) => `${name} is off until ${wallClock(unlockAtMs)}`,
 };
+
+/** "18:00", or "Tue 09:00" when the instant is not today. */
+function wallClock(ms) {
+  const at = new Date(ms);
+  const time = at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const sameDay = at.toDateString() === new Date().toDateString();
+  return sameDay ? time : `${at.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
+}
 
 function setHeadline() {
   el.headline.textContent = (HEADLINE[reason] ?? HEADLINE.rolling)(label);
+  // A scheduled block is not the user running out of anything, so no quip
+  // about it.
+  el.quip.textContent = reason === "schedule" ? "" : pickQuip();
 }
 
 function describeCap(mine) {
   const windowMin = Math.round(mine.windowMs / 60000);
+  if (reason === "schedule") return mine.scheduleText ?? "Blocked by your schedule.";
   const cap = mine.caps?.[reason];
   switch (cap && reason) {
     case "daily":
@@ -72,11 +84,12 @@ async function refresh() {
     const mine = statuses?.find((s) => s.id === ruleId);
     if (!mine) return;
 
+    const retitle = mine.exhausted && (mine.reason !== reason || mine.unlockAtMs !== unlockAtMs);
     unlockAtMs = mine.unlockAtMs;
-    if (mine.exhausted && mine.reason !== reason) {
+    if (retitle) {
       // A different constraint took over (say the daily cap filled while the
-      // rolling one was blocking): retitle rather than count down to the
-      // wrong instant.
+      // rolling one was blocking), or the instant moved: retitle rather than
+      // count down to the wrong thing.
       reason = mine.reason;
       setHeadline();
     }
@@ -115,7 +128,6 @@ function tick() {
 }
 
 setHeadline();
-el.quip.textContent = pickQuip();
 tick();
 setInterval(tick, 1000);
 

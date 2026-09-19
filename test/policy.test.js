@@ -176,3 +176,50 @@ test("evaluate: schedule and pass sections exist and are inert without configura
   assert.deepEqual(e.schedule, { blocked: false, untilMs: null, nextStartMs: null });
   assert.equal(e.pass.active, false);
 });
+
+// --- schedules ----------------------------------------------------------
+
+const MON10 = new Date(2026, 8, 14, 10, 0).getTime(); // Monday 10:00
+const WORK = [0, 1, 2, 3, 4].map((day) => ({ day, fromMin: 9 * 60, toMin: 18 * 60 }));
+
+test("evaluate: a scheduled block wins over an unspent rolling cap", () => {
+  const e = evaluate(rule({ schedule: WORK }), createUsage(), MON10);
+  assert.equal(e.exhausted, true);
+  assert.equal(e.reason, "schedule");
+  assert.equal(e.unlockAtMs, new Date(2026, 8, 14, 18, 0).getTime());
+  assert.equal(e.schedule.blocked, true);
+  assert.equal(e.schedule.untilMs, e.unlockAtMs);
+  assert.equal(e.caps.rolling.exhausted, false);
+});
+
+test("nextChangeAtMs: idle and open, the next span start; blocked, the span end", () => {
+  const before = new Date(2026, 8, 14, 8, 0).getTime();
+  const idle = evaluate(rule({ schedule: WORK }), createUsage(), before);
+  assert.equal(idle.exhausted, false);
+  assert.equal(idle.nextChangeAtMs, new Date(2026, 8, 14, 9, 0).getTime());
+  assert.equal(idle.schedule.nextStartMs, idle.nextChangeAtMs);
+
+  const blocked = evaluate(rule({ schedule: WORK }), createUsage(), MON10);
+  assert.equal(blocked.nextChangeAtMs, new Date(2026, 8, 14, 18, 0).getTime());
+});
+
+test("nextChangeAtMs: counting before a span starts is the sooner of cap and span", () => {
+  const before = new Date(2026, 8, 14, 8, 50).getTime();
+  const e = evaluate(rule({ schedule: WORK }), spent(15 * MIN, before - 15 * MIN), before, { counting: true });
+  assert.equal(e.nextChangeAtMs, before + 5 * MIN, "5 min of budget left, span in 10");
+  const e2 = evaluate(rule({ schedule: WORK }), createUsage(), before, { counting: true });
+  assert.equal(e2.nextChangeAtMs, new Date(2026, 8, 14, 9, 0).getTime(), "20 min left, span in 10");
+});
+
+test("evaluate: schedule and a cap both exhausted gives the later unlock", () => {
+  // Blocked by schedule until 18:00, and the daily cap until midnight.
+  const r = rule({ schedule: WORK, dailyBudgetSec: 5 * 60 });
+  const e = evaluate(r, spent(5 * MIN, MON10 - 5 * MIN), MON10);
+  assert.equal(e.reason, "daily");
+  assert.equal(e.unlockAtMs, startOfNextDay(MON10));
+
+  // Rolling exhausted, returning within the hour; the schedule holds longer.
+  const e2 = evaluate(rule({ schedule: WORK }), spent(20 * MIN, MON10 - 20 * MIN), MON10);
+  assert.equal(e2.reason, "schedule");
+  assert.equal(e2.unlockAtMs, new Date(2026, 8, 14, 18, 0).getTime());
+});

@@ -7,6 +7,8 @@
 // domains, a counting mode that decides when the clock runs, a budget over a
 // rolling window, and what to do when the budget is spent.
 
+import { isValidSpan } from "./schedule.js";
+
 export const MODES = [
   { value: "audible", label: "While media is playing", hint: "counts while playing" },
   { value: "focus", label: "While the tab is focused", hint: "counts while focused" },
@@ -29,6 +31,7 @@ export const DEFAULT_RULES = [
     minUnlockCreditSec: 5 * 60,
     dailyBudgetSec: null, // calendar day, local time; null = no daily cap
     weeklyBudgetSec: null, // calendar week from Monday, local time; null = none
+    schedule: [], // blocked spans, see schedule.js
   },
   {
     id: "instagram",
@@ -41,6 +44,7 @@ export const DEFAULT_RULES = [
     minUnlockCreditSec: 5 * 60,
     dailyBudgetSec: null,
     weeklyBudgetSec: null,
+    schedule: [],
   },
 ];
 
@@ -141,6 +145,7 @@ export function blankRule() {
     minUnlockCreditSec: 5 * 60,
     dailyBudgetSec: null,
     weeklyBudgetSec: null,
+    schedule: [],
   };
 }
 
@@ -158,6 +163,7 @@ export function withDefaults(rule) {
     match: [],
     dailyBudgetSec: null,
     weeklyBudgetSec: null,
+    schedule: [],
     ...rule,
   };
 }
@@ -179,6 +185,7 @@ export function strip(draft) {
     minUnlockCreditSec: draft.minUnlockCreditSec,
     dailyBudgetSec: draft.dailyBudgetSec ?? null,
     weeklyBudgetSec: draft.weeklyBudgetSec ?? null,
+    schedule: Array.isArray(draft.schedule) ? draft.schedule : [],
   };
 }
 
@@ -225,6 +232,13 @@ export function validateRule(rule, allRules = []) {
 
   validateCap(rule.dailyBudgetSec, MAX_DAILY_SEC, "Daily cap", errors);
   validateCap(rule.weeklyBudgetSec, MAX_WEEKLY_SEC, "Weekly cap", errors);
+
+  // Absent means "no schedule" (withDefaults fills it); present must be a list.
+  if (rule.schedule !== undefined && !Array.isArray(rule.schedule)) {
+    errors.push("Schedule must be a list of spans.");
+  } else if (rule.schedule && !rule.schedule.every(isValidSpan)) {
+    errors.push("Schedule has a span with a bad day or time.");
+  }
 
   // Unsaved rules have no id yet, so two of them are not "duplicates".
   if (rule.id) {

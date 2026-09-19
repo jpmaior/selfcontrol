@@ -235,3 +235,36 @@ test("strip: keeps only the fields a rule is made of", () => {
   assert.equal(stripped.dailyBudgetSec, 60);
   assert.equal(stripped.weeklyBudgetSec, null);
 });
+
+// --- schedules -----------------------------------------------------------
+
+test("validateRule: a well-formed schedule passes, an empty one too", () => {
+  assert.deepEqual(validateRule(rule({ schedule: [] })), []);
+  assert.deepEqual(validateRule(rule({ schedule: [{ day: 0, fromMin: 540, toMin: 1080 }] })), []);
+  assert.deepEqual(validateRule(rule({ schedule: [{ day: 6, fromMin: 0, toMin: 1440 }] })), []);
+});
+
+test("validateRule: rejects malformed spans", () => {
+  const bad = [
+    [{ day: 7, fromMin: 0, toMin: 60 }],
+    [{ day: -1, fromMin: 0, toMin: 60 }],
+    [{ day: 0, fromMin: 60, toMin: 60 }],
+    [{ day: 0, fromMin: 120, toMin: 60 }],
+    [{ day: 0, fromMin: 0, toMin: 1441 }],
+    [{ day: 0, fromMin: -5, toMin: 60 }],
+    [{ day: 0, fromMin: 0.5, toMin: 60 }],
+    [{ day: "0", fromMin: 0, toMin: 60 }],
+    "not an array",
+    [null],
+  ];
+  for (const schedule of bad) {
+    assert.ok(validateRule(rule({ schedule })).length > 0, JSON.stringify(schedule));
+  }
+});
+
+test("withDefaults and strip: the schedule defaults to empty and survives strip", () => {
+  assert.deepEqual(withDefaults({ id: "x" }).schedule, []);
+  const spans = [{ day: 0, fromMin: 540, toMin: 1080 }];
+  assert.deepEqual(strip(rule({ schedule: spans })).schedule, spans);
+  assert.deepEqual(strip(rule()).schedule, []);
+});

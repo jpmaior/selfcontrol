@@ -105,6 +105,27 @@
           </small>
         </label>
 
+        <details class="schedule" data-role="schedule">
+          <summary>
+            <span>Schedule</span>
+            <span class="schedule-summary" data-role="schedule-summary"></span>
+          </summary>
+          <div class="schedule-body">
+            <p class="schedule-hint">
+              Paint the half hours when the site is off, whatever the budget says. Drag to
+              paint several; each cell is also a button you can toggle with the keyboard.
+            </p>
+            <div class="presets">
+              <button type="button" class="secondary small" data-preset="work">Work hours</button>
+              <button type="button" class="secondary small" data-preset="evenings">Evenings</button>
+              <button type="button" class="secondary small" data-preset="clear">Clear</button>
+            </div>
+            <div class="grid-scroll">
+              <div class="sched-grid" data-role="grid" role="group" aria-label="Blocked half hours"></div>
+            </div>
+          </div>
+        </details>
+
         <ul class="errors" data-role="errors" hidden></ul>
 
         <details class="history" data-role="history">

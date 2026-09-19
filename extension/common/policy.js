@@ -6,7 +6,7 @@
 //   rolling   the budget over the rolling window (DESIGN.md §5, §8)
 //   daily     a calendar-day cap, local time, back at midnight
 //   weekly    a calendar-week cap, local time, back on Monday
-//   schedule  blocked spans, arriving in §15
+//   schedule  blocked spans in local time (DESIGN.md §15)
 //
 // Exhausted = any constraint says so. The unlock instant is the MAX over the
 // exhausted constraints, because the site is usable only once all of them
@@ -22,6 +22,7 @@ import {
   windowOf,
 } from "../background/accountant.js";
 import { startOfDay, startOfNextDay, startOfNextWeek, startOfWeek } from "./calendar.js";
+import { blockEndsAt, blockedAt, nextBlockStartsAt } from "./schedule.js";
 
 /** Tie-break order when several constraints release at the same instant: the
  * longer period is the more useful thing to tell the user. */
@@ -92,7 +93,12 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
     ),
   };
 
-  const schedule = { blocked: false, untilMs: null, nextStartMs: null };
+  const blocked = blockedAt(rule.schedule, nowMs);
+  const schedule = {
+    blocked,
+    untilMs: blocked ? blockEndsAt(rule.schedule, nowMs) : null,
+    nextStartMs: nextBlockStartsAt(rule.schedule, nowMs),
+  };
   const pass = { active: false, endsAtMs: null, leftThisWeek: 0 };
 
   // --- exhausted: any constraint, released when the last of them releases
