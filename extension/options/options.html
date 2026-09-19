@@ -105,6 +105,31 @@
           </small>
         </label>
 
+        <div class="grid">
+          <label class="field">
+            <span>Passes per week</span>
+            <input data-field="passesPerWeek" type="number" min="0" step="1" />
+          </label>
+
+          <label class="field">
+            <span>Pass length</span>
+            <span class="with-unit">
+              <input data-field="passMin" type="number" min="1" step="1" />
+              <small>min</small>
+            </span>
+          </label>
+
+          <label class="check grid-hint">
+            <input data-field="passCounts" type="checkbox" />
+            <span>Pass time counts toward the daily and weekly caps</span>
+          </label>
+          <small class="grid-hint">
+            A pass suspends the rolling window for one long session, for the video that is
+            longer than the window allows. The time still goes into the window afterwards,
+            so a pass is followed by the usual cool-down. 0 passes disables them.
+          </small>
+        </div>
+
         <ul class="errors" data-role="errors" hidden></ul>
 
         <details class="history" data-role="history">

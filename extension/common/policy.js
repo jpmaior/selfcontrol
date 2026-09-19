@@ -6,6 +6,7 @@
 //   rolling   the budget over the rolling window (DESIGN.md §5, §8)
 //   daily     a calendar-day cap, local time, back at midnight
 //   weekly    a calendar-week cap, local time, back on Monday
+//   pass      a single-use unlock that suspends the rolling cap (DESIGN.md §17)
 //
 // Exhausted = any constraint says so. The unlock instant is the MAX over the
 // exhausted constraints, because the site is usable only once all of them
@@ -15,6 +16,8 @@
 
 import {
   lockIn,
+  passActive,
+  passesLeft,
   remainingMs as rollingRemaining,
   unlockAt,
   usedInPeriod,
@@ -29,6 +32,12 @@ const RELEASE_ORDER = ["weekly", "daily", "rolling"];
 
 /** Tie-break order for "which cap has the least left". */
 const CAP_ORDER = ["rolling", "daily", "weekly"];
+
+const NAME = {
+  rolling: "already blocked",
+  daily: "done for today",
+  weekly: "done for the week",
+};
 
 function rollingCap(rule, usage, nowMs) {
   const limits = windowOf(rule);
@@ -92,11 +101,20 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
     ),
   };
 
-  const pass = { active: false, endsAtMs: null, leftThisWeek: 0 };
+  const active = passActive(usage, nowMs);
+  const pass = {
+    active,
+    endsAtMs: active ? usage.pass.to : null,
+    leftThisWeek: passesLeft(rule, usage, nowMs),
+  };
 
-  // --- exhausted: any constraint, released when the last of them releases
+  // --- exhausted: any constraint, released when the last of them releases.
+  // A pass suspends the rolling cap and nothing else.
   const releases = {};
-  for (const name of CAP_ORDER) if (caps[name]?.exhausted) releases[name] = caps[name].unlockAtMs;
+  for (const name of CAP_ORDER) {
+    if (name === "rolling" && active) continue;
+    if (caps[name]?.exhausted) releases[name] = caps[name].unlockAtMs;
+  }
 
   let reason = null;
   for (const name of RELEASE_ORDER) {
@@ -106,13 +124,22 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
   const exhausted = reason !== null;
   const unlockAtMs = exhausted ? releases[reason] : nowMs;
 
-  // --- remaining: the cap with the least left is the one that will bind
-  let binding = null;
+  // --- remaining: whatever will bind first. During a pass that is one of the
+  // calendar caps or the pass itself, never the suspended rolling cap; and
+  // when pass time does not count toward the caps, they are not draining
+  // either, so only the pass itself can run out.
+  const left = {};
   for (const name of CAP_ORDER) {
-    if (!caps[name]) continue;
-    if (binding === null || caps[name].remainingMs < caps[binding].remainingMs) binding = name;
+    if (active && (name === "rolling" || !includePass)) continue;
+    if (caps[name]) left[name] = caps[name].remainingMs;
   }
-  const remainingMs = exhausted ? 0 : caps[binding].remainingMs;
+  if (active) left.pass = pass.endsAtMs - nowMs;
+  let binding = null;
+  for (const name of [...CAP_ORDER, "pass"]) {
+    if (!(name in left)) continue;
+    if (binding === null || left[name] < left[binding]) binding = name;
+  }
+  const remainingMs = exhausted ? 0 : left[binding];
 
   // --- the earliest instant the answer could flip; null means never on its own
   let nextChangeAtMs = null;
@@ -121,25 +148,37 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
   } else {
     const candidates = [];
     if (counting) candidates.push(nowMs + remainingMs);
-    if (pass.active) candidates.push(pass.endsAtMs);
+    if (active) candidates.push(pass.endsAtMs);
     if (candidates.length > 0) nextChangeAtMs = Math.min(...candidates);
   }
 
   return { exhausted, reason, binding, remainingMs, unlockAtMs, nextChangeAtMs, caps, pass };
 }
 
-// --- lock in (DESIGN.md §16) ---------------------------------------------
+// --- passes (DESIGN.md §17) -------------------------------------------------
 
-const BLOCKED_TEXT = {
-  rolling: "already blocked",
-  daily: "done for today",
-  weekly: "done for the week",
-};
+/**
+ * Why a pass cannot be used right now, or null when it can. The rolling cap
+ * being spent is deliberately NOT a refusal: that is what a pass is for. A
+ * spent calendar cap is, whether or not pass time counts toward the caps,
+ * because the cap is already spent.
+ */
+export function canUsePass(rule, usage, nowMs) {
+  if (!(rule.passes?.perWeek > 0)) return "no passes on this rule";
+  if (passActive(usage, nowMs)) return "a pass is already active";
+  if (passesLeft(rule, usage, nowMs) <= 0) return "no passes left this week";
+  const e = evaluate(rule, usage, nowMs);
+  if (e.caps.weekly?.exhausted) return NAME.weekly;
+  if (e.caps.daily?.exhausted) return NAME.daily;
+  return null;
+}
+
+// --- lock in (DESIGN.md §16) ---------------------------------------------
 
 /** Why lock-in is not offered right now, or null when it is. */
 export function canLockIn(rule, usage, nowMs) {
   const e = evaluate(rule, usage, nowMs);
-  return e.exhausted ? BLOCKED_TEXT[e.reason] ?? "blocked" : null;
+  return e.exhausted ? NAME[e.reason] ?? "blocked" : null;
 }
 
 /**

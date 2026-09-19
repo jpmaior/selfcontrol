@@ -21,7 +21,10 @@ import {
   fold,
   lockIn,
   normalizeUsage,
+  passActive,
+  passesLeft,
   remainingMs,
+  startPass,
   unlockAt,
   usedByDay,
   usedInPeriod,
@@ -381,10 +384,6 @@ test("normalizeUsage: a malformed member is reset without touching the others", 
   assert.deepEqual(u, { b: { 1: 1 }, p: {}, d: {}, pass: null, passUses: [] });
 });
 
-function total(usage) {
-  return Object.values(usage.b).reduce((sum, ms) => sum + ms, 0);
-}
-
 test("usedByDay: folded days and live buckets, per local day", () => {
   const u = createUsage();
   u.d["2026-09-18"] = { used: 10 * MIN, pass: MIN };
@@ -429,3 +428,132 @@ test("lockIn: zero or negative amounts change nothing", () => {
   lockIn(u, T0 + 2 * MIN, -5);
   assert.deepEqual(u, before);
 });
+
+// --- passes ----------------------------------------------------------------
+
+const PASS = { from: T0 + 10 * MIN, to: T0 + 20 * MIN };
+
+test("commit with a pass: an interval inside the pass lands in p", () => {
+  const u = commit(createUsage(), T0 + 12 * MIN, T0 + 15 * MIN, { pass: PASS });
+  assert.deepEqual(u.b, {});
+  assert.equal(total(u, "p"), 3 * MIN);
+});
+
+test("commit with a pass: an interval straddling the pass end splits at the boundary", () => {
+  const u = commit(createUsage(), T0 + 18 * MIN, T0 + 23 * MIN, { pass: PASS });
+  assert.equal(total(u, "p"), 2 * MIN, "18..20 under the pass");
+  assert.equal(total(u), 3 * MIN, "20..23 after it");
+  assert.equal(u.p[1019], MIN);
+  assert.equal(u.b[1020], MIN);
+});
+
+test("commit with a pass: an interval straddling the pass start splits too", () => {
+  const u = commit(createUsage(), T0 + 8 * MIN, T0 + 12 * MIN, { pass: PASS });
+  assert.equal(total(u), 2 * MIN, "8..10 before the pass");
+  assert.equal(total(u, "p"), 2 * MIN, "10..12 under it");
+});
+
+test("commit with a pass: an interval covering the whole pass splits three ways", () => {
+  const u = commit(createUsage(), T0 + 9 * MIN, T0 + 21 * MIN, { pass: PASS });
+  assert.equal(total(u), 2 * MIN);
+  assert.equal(total(u, "p"), 10 * MIN);
+});
+
+test("commit with a pass: no pass, or an interval outside it, is b only", () => {
+  const u = commit(createUsage(), T0, T0 + 5 * MIN, { pass: null });
+  assert.equal(total(u), 5 * MIN);
+  assert.deepEqual(u.p, {});
+  const v = commit(createUsage(), T0, T0 + 5 * MIN, { pass: PASS });
+  assert.equal(total(v), 5 * MIN);
+  assert.deepEqual(v.p, {});
+});
+
+test("commit with a pass: the sleep clamp still applies before the split", () => {
+  const u = commit(createUsage(), T0, T0 + 3 * HOUR, { pass: PASS, maxChunkMs: 7.5 * MIN });
+  assert.equal(total(u) + total(u, "p"), 7.5 * MIN);
+  assert.deepEqual(u.p, {}, "the clamped stretch is after the pass");
+});
+
+test("usedMs, remainingMs and creditAvailableAt count b and p together", () => {
+  const u = createUsage();
+  commit(u, T0, T0 + 5 * MIN);
+  commit(u, T0 + 10 * MIN, T0 + 20 * MIN, { pass: PASS });
+  const now = T0 + 20 * MIN;
+
+  assert.equal(usedMs(u, now, HOUR), 15 * MIN);
+  assert.equal(remainingMs(u, now, RULE), 5 * MIN);
+
+  commit(u, T0 + 20 * MIN, T0 + 25 * MIN); // spent
+  assert.equal(remainingMs(u, T0 + 25 * MIN, RULE), 0);
+  // The first 5 minutes are in b at 1000..1004, so 5 min of credit needs
+  // bucket 1004 gone, exactly as without a pass.
+  assert.equal(creditAvailableAt(u, T0 + 25 * MIN, RULE, 5 * MIN), bucketExpiresAt(1004, HOUR));
+  // 10 minutes needs the pass buckets 1010..1014 gone too.
+  assert.equal(creditAvailableAt(u, T0 + 25 * MIN, RULE, 10 * MIN), bucketExpiresAt(1014, HOUR));
+});
+
+test("startPass: sets the pass window and records the use", () => {
+  const u = createUsage();
+  const r = { passes: { perWeek: 2, durationSec: 30 * 60, countsTowardCaps: true } };
+  startPass(u, r, T0);
+  assert.deepEqual(u.pass, { from: T0, to: T0 + 30 * MIN });
+  assert.deepEqual(u.passUses, [T0]);
+  startPass(u, r, T0 + HOUR);
+  assert.deepEqual(u.passUses, [T0, T0 + HOUR]);
+});
+
+test("passActive: only between from and to", () => {
+  const u = createUsage();
+  u.pass = PASS;
+  assert.equal(passActive(u, PASS.from - 1), false);
+  assert.equal(passActive(u, PASS.from), true);
+  assert.equal(passActive(u, PASS.to - 1), true);
+  assert.equal(passActive(u, PASS.to), false);
+  assert.equal(passActive(createUsage(), T0), false);
+});
+
+test("passesLeft: this week's uses count, last week's do not, zero allowance is zero", () => {
+  const r = { passes: { perWeek: 2, durationSec: 60, countsTowardCaps: true } };
+  const monday = new Date(2026, 8, 14, 9, 0).getTime();
+  const u = createUsage();
+  assert.equal(passesLeft(r, u, monday), 2);
+
+  u.passUses = [monday - 12 * HOUR]; // Sunday night
+  assert.equal(passesLeft(r, u, monday), 2, "last week");
+
+  u.passUses = [monday - 12 * HOUR, monday + HOUR];
+  assert.equal(passesLeft(r, u, monday + 2 * HOUR), 1);
+
+  u.passUses = [monday, monday + HOUR, monday + 2 * HOUR];
+  assert.equal(passesLeft(r, u, monday + 3 * HOUR), 0, "never negative");
+
+  assert.equal(passesLeft({ passes: { perWeek: 0 } }, createUsage(), monday), 0);
+  assert.equal(passesLeft({}, createUsage(), monday), 0, "no passes configured");
+});
+
+test("fold: prunes pass uses from before this week", () => {
+  const monday = new Date(2026, 8, 14, 9, 0).getTime();
+  const u = createUsage();
+  u.passUses = [monday - 12 * HOUR, monday + HOUR];
+  fold(u, monday + 2 * HOUR, HOUR);
+  assert.deepEqual(u.passUses, [monday + HOUR]);
+});
+
+test("lockIn: ends an active pass at now before spending", () => {
+  const u = createUsage();
+  u.pass = PASS;
+  const now = T0 + 15 * MIN;
+  lockIn(u, now, MIN);
+  assert.deepEqual(u.pass, { from: PASS.from, to: now });
+  assert.equal(u.b[bucketOf(now)], MIN);
+
+  // Not active: untouched.
+  const v = createUsage();
+  v.pass = PASS;
+  lockIn(v, T0 + 25 * MIN, MIN);
+  assert.deepEqual(v.pass, PASS);
+});
+
+function total(usage, map = "b") {
+  return Object.values(usage[map]).reduce((sum, ms) => sum + ms, 0);
+}

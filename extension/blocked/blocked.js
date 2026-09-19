@@ -19,6 +19,7 @@ const el = {
   countdown: document.getElementById("countdown"),
   countdownText: document.getElementById("countdown-text"),
   detail: document.getElementById("detail"),
+  passes: document.getElementById("passes"),
 };
 
 const QUIPS = [
@@ -81,6 +82,15 @@ async function refresh() {
     }
     el.detail.textContent = describeCap(mine);
 
+    // The pass control lives in the popup on purpose: this page never gets
+    // an unlock button. It only says that one exists.
+    const left = mine.passOffer?.left ?? 0;
+    el.passes.hidden = !(mine.exhausted && mine.reason === "rolling" && left > 0);
+    el.passes.textContent =
+      left === 1
+        ? "You have 1 pass left this week, in the toolbar popup."
+        : `You have ${left} passes left this week, in the toolbar popup.`;
+
     if (!mine.exhausted) unlock();
   } catch {
     // Background asleep or mid-restart; the local tick carries us until the
@@ -96,6 +106,7 @@ function unlock() {
   el.countdownText.textContent = "Unlocked";
   el.countdown.textContent = "";
   el.meter.style.width = "100%";
+  el.passes.hidden = true;
 }
 
 function tick() {

@@ -235,3 +235,35 @@ test("strip: keeps only the fields a rule is made of", () => {
   assert.equal(stripped.dailyBudgetSec, 60);
   assert.equal(stripped.weeklyBudgetSec, null);
 });
+
+// --- passes ----------------------------------------------------------------
+
+test("withDefaults: passes default to disabled, an hour long, counting toward the caps", () => {
+  assert.deepEqual(withDefaults({ id: "x" }).passes, { perWeek: 0, durationSec: 60 * 60, countsTowardCaps: true });
+  const stored = { id: "x", passes: { perWeek: 2, durationSec: 600, countsTowardCaps: false } };
+  assert.deepEqual(withDefaults(stored).passes, stored.passes);
+  assert.deepEqual(
+    withDefaults({ id: "x", passes: { perWeek: 1 } }).passes,
+    { perWeek: 1, durationSec: 60 * 60, countsTowardCaps: true },
+    "a partial passes object is filled in",
+  );
+});
+
+test("validateRule: passes need a whole non-negative count, a positive length, a boolean", () => {
+  const ok = (passes) => validateRule(rule({ passes }));
+  assert.deepEqual(ok({ perWeek: 0, durationSec: 60, countsTowardCaps: true }), []);
+  assert.deepEqual(ok({ perWeek: 3, durationSec: 60, countsTowardCaps: false }), []);
+  assert.deepEqual(ok({ perWeek: 0, durationSec: 0, countsTowardCaps: true }), [], "length is irrelevant when disabled");
+
+  assert.ok(ok({ perWeek: -1, durationSec: 60, countsTowardCaps: true }).length > 0);
+  assert.ok(ok({ perWeek: 1.5, durationSec: 60, countsTowardCaps: true }).length > 0);
+  assert.ok(ok({ perWeek: 1, durationSec: 0, countsTowardCaps: true }).length > 0);
+  assert.ok(ok({ perWeek: 1, durationSec: -5, countsTowardCaps: true }).length > 0);
+  assert.ok(ok({ perWeek: 1, durationSec: 60, countsTowardCaps: "yes" }).length > 0);
+  assert.ok(ok("two").length > 0);
+});
+
+test("strip: keeps passes in their canonical shape", () => {
+  const stripped = strip(rule({ passes: { perWeek: 2, durationSec: 600, countsTowardCaps: false, junk: 1 } }));
+  assert.deepEqual(stripped.passes, { perWeek: 2, durationSec: 600, countsTowardCaps: false });
+});

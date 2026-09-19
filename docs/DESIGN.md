@@ -664,3 +664,56 @@ Lock-in acts on usage, which is hot state owned by the background, so it goes th
 the button becomes "Blocks YouTube until 14:32. Confirm" for five seconds, then reverts.
 `status()` carries `lockIn: { ms, unlockAtMs, reason }` (or `null` when blocked) so the
 popup shows the real consequence, computed by the same `evaluate` that will enforce it.
+
+---
+
+## 17. Passes
+
+For the video that is longer than the rolling window allows. A pass suspends the rolling
+cap for `durationSec` from the moment it is used, and nothing else.
+
+```js
+passes: { perWeek: 0, durationSec: 3600, countsTowardCaps: true }   // perWeek 0 = disabled
+```
+
+### Rationed, and the only "unlock now"
+
+Every other path that loosens a rule (editing it, importing a rule set) is a change to
+the configuration. A pass is the one thing that opens a blocked site *now*, and it is
+allowed because it is rationed: `perWeek` of them, counted over the same Monday-start
+week as the weekly cap, and each one single-use. `passUses` in the ledger holds the start
+instants of this week's uses; `fold()` prunes last week's.
+
+### Pass time always goes into the rolling window
+
+Time under a pass accrues into the `p` map, which `usedMs`, `remainingMs` and
+`creditAvailableAt` count together with `b`. So a pass is one long session followed by
+the usual cool-down: the moment it ends, the rolling window is full of the pass's own
+minutes and the rule blocks until they age out. A pass can never leave a rule looser than
+it was; it only changes *when* the block lands.
+
+`commit()` splits an interval at the pass boundaries, which is why the store checkpoints
+before starting a pass: the minutes before the click stay in `b`, and only what follows
+is pass time.
+
+### `p` exists so the calendar caps can leave it out
+
+`countsTowardCaps` decides whether pass time also counts against the daily and weekly
+caps. `true` (the default) means a pass is an exception to the rolling window only, and a
+daily cap can fill mid-pass; `false` makes it an exception to the calendar caps as well.
+Keeping pass minutes in their own map, and their own `d[day].pass` once folded, is what
+lets `usedInPeriod()` answer either way, and lets the history show them as a separate
+segment.
+
+### What a pass does not do
+
+It cannot be used while a daily or weekly cap is blocking, whichever way
+`countsTowardCaps` is set: the cap is already spent. The rolling
+cap being spent is deliberately *not* a refusal; that is the case the pass exists for.
+Lock-in (§16) stays available during a pass and ends it.
+
+### The control is in the popup
+
+`usePass` is a message like `lockIn`. The block page says "You have 2 passes left this
+week, in the toolbar popup" and nothing more, so the block page never carries an unlock
+control; a button there would be the drip-feed with extra steps.

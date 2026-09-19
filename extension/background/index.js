@@ -25,6 +25,7 @@ import {
   stats,
   status,
   stopCounting,
+  usePassOnRule,
 } from "./store.js";
 
 const CHECKPOINT_ALARM = "checkpoint";
@@ -234,6 +235,26 @@ const handlers = {
     await enforceRule(rule, now);
     await syncRuleAlarm(rule, now);
     return { ok: true, ms };
+  },
+
+  async usePass({ ruleId }) {
+    const rule = rules.find((r) => r.id === ruleId);
+    if (!rule) return { ok: false, error: `no such rule: ${ruleId}` };
+    const now = Date.now();
+    if (!usePassOnRule(rule, now)) {
+      flush(now);
+      return { ok: false, error: "That pass is not available right now." };
+    }
+    flush(now);
+    const snapshot = status(rule, now);
+    log(
+      `🎟 pass used on ${rule.id}: open until ${wallClock(snapshot.pass.endsAtMs, now)},`,
+      `${snapshot.pass.leftThisWeek} left this week`,
+    );
+    // The pass ending is just nextChangeAtMs firing; the alarm handler then
+    // finds the rolling cap spent and sweeps.
+    await syncRuleAlarm(rule, now);
+    return { ok: true, endsAtMs: snapshot.pass.endsAtMs };
   },
 };
 

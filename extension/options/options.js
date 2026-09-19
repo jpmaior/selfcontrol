@@ -72,6 +72,9 @@ function buildCard(draft) {
   field("unlockMin").value = toMin(draft.minUnlockCreditSec);
   field("dailyMin").value = toMinOrBlank(draft.dailyBudgetSec);
   field("weeklyMin").value = toMinOrBlank(draft.weeklyBudgetSec);
+  field("passesPerWeek").value = draft.passes.perWeek;
+  field("passMin").value = toMin(draft.passes.durationSec);
+  field("passCounts").checked = draft.passes.countsTowardCaps;
 
   fillOptions(field("mode"), MODES, draft.mode);
   fillOptions(field("onExceed"), ON_EXCEED, draft.onExceed);
@@ -91,6 +94,11 @@ function buildCard(draft) {
     draft.minUnlockCreditSec = toSec(field("unlockMin").value);
     draft.dailyBudgetSec = toSecOrNull(field("dailyMin").value);
     draft.weeklyBudgetSec = toSecOrNull(field("weeklyMin").value);
+    draft.passes = {
+      perWeek: Math.max(0, Math.round(Number(field("passesPerWeek").value) || 0)),
+      durationSec: toSec(field("passMin").value),
+      countsTowardCaps: field("passCounts").checked,
+    };
     clearStatus();
   });
 
