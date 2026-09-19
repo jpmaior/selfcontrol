@@ -54,6 +54,11 @@ Nothing else to configure: `jpmaior.github.io` already has a valid certificate, 
 
 ## Each release
 
+**Features land through pull requests.** Work happens on a branch and merges into `main` via a
+PR; nothing but the release commit below goes to `main` directly. The release notes are built
+from the merged PRs, so write each PR's title and description for the person reading the notes,
+not for the reviewer: what changed for them, in plain language.
+
 ```bash
 # 1. Bump the version. AMO permanently rejects a version it has already seen,
 #    including from a submission that failed review.
@@ -63,6 +68,9 @@ git commit -am "Release 0.2.0"
 git tag v0.2.0
 git push origin main --tags
 ```
+
+Watch the run with `gh run watch` — `gh` is installed and authenticated on the dev machine
+(system-wide, outside the nix shell, so it works from any terminal).
 
 The `release` workflow then:
 
@@ -79,18 +87,36 @@ for Updates**.
 
 ### Release notes
 
-The workflow creates the release with `--generate-notes`, which yields only the
-**Full Changelog** compare link. Once it finishes, edit the release and add a short changelist
-above that line — a few plain-language bullets of what changed. A pile of small fixes does not
-need itemising; "Bug fixes." is enough. Keep the auto-generated **Full Changelog** link at the
-bottom, as in v0.1.0. Note that `gh release edit --notes` replaces the whole body, so re-include
-the link when editing from the CLI:
+The workflow creates the release with `--generate-notes`, which yields GitHub's auto-generated
+body: a **What's Changed** list of merged PRs when there are any, and the **Full Changelog**
+compare link. Once it finishes, replace the body with a curated changelist:
 
-```markdown
-- Rules can now be deleted without the defaults coming back
-- Bug fixes.
+- **Every relevant PR merged since the previous tag gets a bullet** that names it (`#N`), so a
+  reader can follow the bullet to the discussion and the diff. Relevant means it changed what
+  ships or how the user experiences it. A PR that touched only docs, CI or tooling may be left
+  out.
+- Bullets are plain language, one line each, written for the user. The PR title is the starting
+  point; rewrite it if it reads like a commit message.
+- Direct commits to `main` (the release bump) do not need bullets.
+- The **Full Changelog** link stays at the bottom, as in v0.1.0.
+
+List the candidates with the previous tag's date as the cut-off:
+
+```bash
+gh pr list --state merged --base main --search "merged:>=$(git log -1 --format=%cs v0.1.0)" \
+  --json number,title,url
+```
+
+`gh release edit --notes` replaces the whole body, so re-include the link:
+
+```bash
+gh release edit v0.2.0 --notes "$(cat <<'EOF'
+- Rules can now be deleted without the defaults coming back (#12)
+- Fixed the popup showing stale usage after a laptop suspend (#14)
 
 **Full Changelog**: https://github.com/jpmaior/selfcontrol/compare/v0.1.0...v0.2.0
+EOF
+)"
 ```
 
 ### Doing it by hand

@@ -22,6 +22,10 @@ Abort and report if any fails:
 - `nix develop --command web-ext lint` shows 0 errors, 0 warnings.
 - The target tag `vX.Y.Z` does not already exist, locally or on origin.
 - The target version is greater than the current `version` in `extension/manifest.json`.
+- Nothing meant for this release is still open: run `gh pr list --base main` and, if any PR
+  is listed, show it to the user and ask whether it belongs in the release before going on.
+  Features land through PRs (RELEASE.md § Each release); the release bump is the only direct
+  commit to `main`.
 
 ⚠️ **AMO permanently burns a version number on a successful sign, even if a later workflow
 step fails.** A stranded version can never be reused — the only way forward is another bump.
@@ -47,20 +51,28 @@ git push origin main --tags
 ## 4. After the workflow
 
 The `release` workflow signs the .xpi, attaches it to a GitHub Release, and publishes
-`updates.json`. Tell the user to watch it under the repo's Actions tab (`gh` is not in the
-dev shell).
+`updates.json`. Watch it with `gh run watch` — `gh` is installed and authenticated on the dev
+machine, system-wide rather than in the nix shell, so call it from a plain shell.
 
 Once it succeeds, finish the release notes per RELEASE.md § Release notes:
 
-- Draft a short changelist from `git log <previous-tag>..vX.Y.Z --oneline` — a few
-  plain-language bullets. Many small fixes collapse to just "Bug fixes."
-- The bullets go **above** the auto-generated `**Full Changelog**` compare link, which must
-  stay at the bottom.
+- List the PRs merged since the previous tag:
+  ```bash
+  gh pr list --state merged --base main \
+    --search "merged:>=$(git log -1 --format=%cs <previous-tag>)" --json number,title,url
+  ```
+  Cross-check against `git log <previous-tag>..vX.Y.Z --oneline` so nothing is missed.
+- **Every relevant PR gets one plain-language bullet ending in its number, `(#N)`.** Relevant
+  means it changed what ships or what the user sees; docs-, CI- or tooling-only PRs may be
+  omitted, and the release bump commit needs no bullet. Start from the PR title and rewrite it
+  for the user if it reads like a commit message.
+- The bullets go **above** the `**Full Changelog**` compare link, which must stay at the
+  bottom.
 - **Show the user the exact text before it goes anywhere** — the notes are published,
-  user-facing copy, and only the user approves them. Once approved, give them the release URL
-  to paste it into (`https://github.com/jpmaior/selfcontrol/releases/tag/vX.Y.Z`), or use
-  `gh release edit` if available — remembering `--notes` replaces the whole body, so
-  re-include the link.
+  user-facing copy, and only the user approves them. Once approved, publish with
+  `gh release edit vX.Y.Z --notes "..."` — `--notes` replaces the whole body, so the text must
+  include the link — then read it back with `gh release view vX.Y.Z --json body -q .body`
+  and confirm it matches.
 
 Existing installs pick the release up within about a day; a manual check is
 **about:addons → gear → Check for Updates**.

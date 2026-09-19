@@ -10,7 +10,7 @@ including several that were validated or corrected by testing.
 
 ```bash
 nix develop                  # required — web-ext and node are pinned here, not global
-node --test                  # 40 tests over the pure modules
+node --test                  # the pure modules and store.js, milliseconds, no browser
 web-ext lint                 # must stay at 0 errors, 0 warnings
 web-ext run                  # Firefox with live reload
 web-ext build                # unsigned zip, for inspecting what would ship
@@ -23,7 +23,8 @@ it.
 
 ```
 extension/background/   event page: index (wiring), observers, accountant, store, enforcer
-extension/common/       shared with the UI: rules, settings, format
+extension/common/       shared with the UI: rules, settings, format; policy, calendar,
+                        schedule, transfer and badge arrive with the roadmap in TODO.md
 extension/popup|options|blocked/
 test/                   node --test
 docs/                   DESIGN.md, PLAN.md, RELEASE.md, TODO.md (open findings)
@@ -31,9 +32,11 @@ docs/                   DESIGN.md, PLAN.md, RELEASE.md, TODO.md (open findings)
 
 ## Invariants — breaking these causes subtle, hard-to-see bugs
 
-**`accountant.js` and `rules.js` are pure.** No `browser.*`, no `Date.now()` — time is always an
-argument. This is what makes 40 tests run in milliseconds with no browser. Do not import browser
-APIs into them; put that in `store.js` or `settings.js`.
+**The pure modules stay pure.** `accountant.js`, `rules.js`, and every module the roadmap adds
+for decisions (`policy`, `calendar`, `schedule`, `transfer`, the badge decision) take no
+`browser.*` and no `Date.now()` — time is always an argument. This is what makes the whole
+test suite run in milliseconds with no browser. Do not import browser APIs into them; put that
+in `store.js`, `settings.js` or the page scripts.
 
 **Never tick.** Time is accrued by committing intervals between state transitions, never by a
 timer incrementing a counter. A playing video should cost zero writes and zero wake-ups.
@@ -65,19 +68,39 @@ silently does nothing. The whole design avoids them.
 
 ## Testing
 
-`node --test` covers the pure modules only. Browser behaviour is verified **by hand** against the
-checkpoints in [PLAN.md](./docs/PLAN.md) — that is deliberate, and several design decisions came from
-what those checkpoints revealed. When changing observer or enforcement behaviour, say what the
-user should check rather than claiming it works.
+**Tests come before the code.** For any behaviour that `node --test` can reach — the pure
+modules and `store.js` — write the test cases for the new or changed behaviour first, run
+`node --test` and see them fail for the right reason, and only then implement until they pass.
+Do not write the implementation and back-fill tests afterwards; a test written after the code
+tends to describe what the code does rather than what it must do. If a change makes an existing
+test fail, that is a design question to raise, not a test to edit into silence. Each step in
+[TODO.md](./docs/TODO.md) lists its tests first for this reason.
+
+Browser behaviour (observers, enforcement, alarms, the pages) is verified **by hand** against
+checkpoints — [PLAN.md](./docs/PLAN.md) for v1, the "Check by hand" lists in TODO.md for the
+roadmap. That is deliberate, and several design decisions came from what those checkpoints
+revealed. The tests-first rule applies here too, in its only possible form: write the checkpoint
+(what the user does, what they should see) into the PR description before writing the code, and
+when changing observer or enforcement behaviour, say what the user should check rather than
+claiming it works.
 
 ⚠️ **An attached devtools console pins the event page alive**, so the suspend/restart cycle never
 happens while you are watching. Force it with **Terminate Background Script** in `about:debugging`
 (*Terminate* keeps `storage.session`; *Reload* clears it).
 
+## Workflow
+
+Feature work goes on a branch and lands on `main` through a pull request. The release notes
+are built from the merged PRs, so a PR's title and description are user-facing copy: say what
+changed for the user, in plain language. `gh` is installed and authenticated on this machine
+(system-wide, not in the nix shell) for PRs, watching runs and editing releases.
+
 ## Releasing
 
-Tag `vX.Y.Z` after bumping `extension/manifest.json`. See [RELEASE.md](./docs/RELEASE.md),
-or run the `/release` skill, which walks the checklist with the guardrails.
+Tag `vX.Y.Z` after bumping `extension/manifest.json`; the bump is the one commit that goes to
+`main` directly. See [RELEASE.md](./docs/RELEASE.md), or run the `/release` skill, which walks
+the checklist with the guardrails. Every relevant PR merged since the previous tag gets a bullet
+in the release notes.
 
 **AMO permanently claims a version number on a successful sign.** A failure in a later workflow
 step strands that tag — the version cannot be reused.
