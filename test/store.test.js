@@ -129,6 +129,51 @@ test("checkpoint clamps a sleep gap to 1.5 checkpoints", async () => {
   assert.equal(status(r, T0 + 3 * 60 * MIN).usedMs, MAX_CHUNK_MS);
 });
 
+test("a settle that folds writes the day history with the ledger", async () => {
+  const r = rule("folder");
+  await load([r]);
+
+  // Three minutes long ago, then a moment now: the old buckets have left the
+  // window, so settling now folds them into their day.
+  startCounting(r, T0);
+  stopCounting(r, T0 + 3 * MIN);
+  startCounting(r, T0 + 2 * 60 * MIN);
+  stopCounting(r, T0 + 2 * 60 * MIN + MIN);
+  flush(T0 + 2 * 60 * MIN + MIN);
+  await settled();
+
+  const stored = local.data.get("usage:folder");
+  const folded = Object.values(stored.d).reduce((a, day) => a + day.used, 0);
+  assert.equal(folded, 3 * MIN, "the expired minutes are in d");
+  assert.equal(Object.keys(stored.b).length, 1, "only the live bucket is left in b");
+
+  const s = status(r, T0 + 2 * 60 * MIN + MIN);
+  assert.equal(s.usedMs, MIN, "the rolling window only sees the live minute");
+  assert.equal(s.today.usedMs + s.week.usedMs >= MIN, true, "calendar totals are reported");
+});
+
+test("load() normalises a ledger stored by an older build", async () => {
+  await local.set({ "usage:legacy": { b: { 5: 5 } } });
+  const r = rule("legacy");
+  await load([r]);
+  startCounting(r, T0);
+  stopCounting(r, T0 + MIN);
+  flush(T0 + MIN);
+  await settled();
+  const stored = local.data.get("usage:legacy");
+  assert.deepEqual(Object.keys(stored).sort(), ["b", "d", "p", "pass", "passUses"]);
+});
+
+test("status reports today's and this week's totals from the projection", async () => {
+  const r = rule("calendar");
+  await load([r]);
+  startCounting(r, T0);
+  const s = status(r, T0 + 2 * MIN);
+  assert.equal(s.today.usedMs, 2 * MIN, "the open interval counts toward today");
+  assert.equal(s.today.passMs, 0);
+  assert.equal(s.week.usedMs, 2 * MIN);
+});
+
 test("flush persists ledgers through the queue", async () => {
   const r = rule("flushed");
   await load([r]);

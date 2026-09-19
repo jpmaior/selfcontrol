@@ -260,7 +260,8 @@ nothing.
   is counted *whole* rather than prorated — we know how much was used inside a bucket but not
   *when* within it, so prorating would be a guess. Counting it whole over-counts by at most one
   bucket, erring toward blocking slightly early, which is the right direction here.
-- **Pruning** = delete keys below that threshold, done on every commit, so it never grows.
+- **Folding** = keys below that threshold are added to their local day in `usage.d` and
+  deleted, done on every commit, so the map never grows (§13).
 - A 20-minute budget can never produce more than ~20 non-zero buckets: **under 1KB per rule**,
   naturally self-limiting.
 
@@ -428,12 +429,13 @@ One knob spans every variant, so it is built in from the start rather than disco
 background/ (event page — the only stateful component)
   ├─ index.js       wiring, lifecycle, alarms, messaging
   ├─ observers.js   tabs/windows events  →  "is rule R counting right now?"
-  ├─ accountant.js  pure: bucket commit / prune / rolling sum / time-until-credit
+  ├─ accountant.js  pure: bucket commit / fold / rolling sum / time-until-credit
   ├─ enforcer.js    over-budget → block or close; guards new navigations
   └─ store.js       ledgers, debounced flush, storage.session for open intervals
 
 common/ (shared by the background and the UI pages)
   ├─ rules.js       pure: rule shape, hostname matching, domain parsing, validation
+  ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ settings.js    the `settings` key: load, save, and watch for edits
   └─ format.js      duration formatting
 
@@ -515,3 +517,55 @@ Then `dumpPlatform()` from the remote console (`about:debugging` on desktop, con
 answers the open questions in one shot: whether `windows` focus events exist, whether `idle` and
 `notifications` are available, and whether `storage.session` behaves. Enforcement, the ledger and
 the alarms should port unchanged; the popup opens from the ⋮ menu rather than a toolbar.
+
+---
+
+## 13. Calendar days and history
+
+The rolling window forgets everything older than an hour, which is right for the cap and
+useless for a daily cap or a "how much did I actually watch this week" view. Both need
+whole local days, and both arrive for free from a change to what pruning already does.
+
+### Fold, don't prune
+
+`prune()` deleted a bucket the moment it left the window. `fold()` does the same deletion
+but first adds the bucket's milliseconds to its local day in `usage.d`:
+
+```js
+usage = {
+  b: { "29384756": 60000 },                  // live buckets, as before
+  p: {},                                     // live buckets accrued under a pass (§17)
+  d: { "2026-09-19": { used: 60000, pass: 0 } },  // folded whole days
+  pass: null, passUses: []                   // §17
+}
+```
+
+Pruning already touches exactly those buckets on every settle, so the history costs no
+extra reads or writes, and there is nothing to garbage-collect on a timer: `fold()` also
+drops days older than `HISTORY_DAYS` (90) while it is there.
+
+### One local day per bucket
+
+A bucket is a whole minute and every time-zone offset is a whole number of minutes, so a
+bucket never straddles a local midnight; each one belongs to exactly one day. The day key
+is `YYYY-MM-DD` in *local* time because "forty minutes a day" means the day the user is
+living in, not UTC's. Local also means DST: the day the clocks go forward is 23 hours
+long, so `calendar.js` never adds multiples of 24 hours and always walks through `Date`
+setters. The Lisbon change days are pinned in `test/calendar.test.js`.
+
+### Usage in a period is folded days plus live buckets
+
+`usedInPeriod(usage, periodStartMs)` sums the folded days on or after the period start and
+the live buckets that start on or after it. No double counting is possible because a
+bucket is deleted as it is folded. A live bucket from late last night that has not yet
+aged out of the rolling window still belongs to yesterday, by its start, not to today.
+
+### `d` lives inside `usage:<id>`
+
+One key per rule means a flush costs exactly what it cost before: one `storage.local.set`
+for one key. A separate `history:<id>` key would be written on the same settles anyway,
+and would double the number of keys the write touched. Ninety days at a few dozen bytes
+each is a few kilobytes, well inside the ledger's budget (§6).
+
+`normalizeUsage()` fills in the members a ledger stored by an older build lacks, so the
+0.1.x ledgers load unchanged and start folding from their next settle.

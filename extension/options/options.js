@@ -13,6 +13,12 @@ import {
   validateRule,
 } from "../common/rules.js";
 import { loadRules, saveRules } from "../common/settings.js";
+import { normalizeUsage, usedByDay } from "../background/accountant.js";
+import { addDays, dayKey, startOfDay } from "../common/calendar.js";
+import { clock } from "../common/format.js";
+
+/** Days drawn in the history strip; the ledger keeps more (HISTORY_DAYS). */
+const HISTORY_SHOWN = 30;
 
 const listEl = document.getElementById("rules");
 const templateEl = document.getElementById("rule-template");
@@ -20,6 +26,13 @@ const statusEl = document.getElementById("status");
 
 /** The working copy. Never the same objects as what is in storage. */
 let drafts = [];
+
+/**
+ * ruleId -> per-day usage, read straight from `usage:*` at page load. The
+ * options page never messages the background (DESIGN.md §10); the ledger is
+ * plain storage, and this view is read-only.
+ */
+let history = new Map();
 
 /**
  * Ids that existed when the page loaded (or was last saved). A deleted rule's
@@ -79,6 +92,8 @@ function buildCard(draft) {
     event.target.value = draft.match.join(", ");
   });
 
+  renderHistory(card, draft);
+
   card.querySelector('[data-action="delete"]').addEventListener("click", () => {
     drafts = drafts.filter((d) => d !== draft);
     render();
@@ -90,6 +105,111 @@ function buildCard(draft) {
 
 function render() {
   listEl.replaceChildren(...drafts.map(buildCard));
+}
+
+// --- history -------------------------------------------------------------
+
+const sum = (days, field) => days.reduce((total, day) => total + day[field], 0);
+
+function totalsText(days) {
+  const week = days.slice(-7);
+  const all = (list) => sum(list, "used") + sum(list, "pass");
+  return `7 days ${clock(all(week))} · ${HISTORY_SHOWN} days ${clock(all(days))}`;
+}
+
+/**
+ * A 30-day strip of stacked columns, used time under pass time, drawn in
+ * plain CSS. Exact values ride in each column's title, and the two series
+ * carry a legend so identity never rests on colour alone.
+ */
+function renderHistory(card, draft) {
+  const details = card.querySelector('[data-role="history"]');
+  const body = card.querySelector('[data-role="history-body"]');
+  const totalsEl = card.querySelector('[data-role="history-totals"]');
+  const byDay = draft.id ? history.get(draft.id) : null;
+
+  const today = startOfDay(Date.now());
+  const days = [];
+  for (let i = HISTORY_SHOWN - 1; i >= 0; i--) {
+    const at = addDays(today, -i);
+    const key = dayKey(at);
+    days.push({ key, at, ...(byDay?.[key] ?? { used: 0, pass: 0 }) });
+  }
+
+  const peak = Math.max(...days.map((day) => day.used + day.pass));
+  if (!(peak > 0)) {
+    totalsEl.textContent = "";
+    body.replaceChildren(note("Nothing yet."));
+    details.classList.add("empty");
+    return;
+  }
+
+  totalsEl.textContent = totalsText(days);
+
+  const strip = document.createElement("div");
+  strip.className = "bars";
+  strip.setAttribute("role", "img");
+  strip.setAttribute("aria-label", `Daily usage over the last ${HISTORY_SHOWN} days`);
+
+  for (const day of days) {
+    const column = document.createElement("div");
+    column.className = "bar";
+    const label = new Date(day.at).toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+    column.title =
+      day.pass > 0
+        ? `${label}: ${clock(day.used)} used, ${clock(day.pass)} on a pass`
+        : `${label}: ${clock(day.used)}`;
+
+    // Only non-empty segments are drawn, so the gap between them never shows
+    // on its own, and the top-most one carries the rounded data-end.
+    const segments = [
+      ["pass", day.pass],
+      ["used", day.used],
+    ]
+      .filter(([, ms]) => ms > 0)
+      .map(([kind, ms]) => {
+        const seg = document.createElement("div");
+        seg.className = `seg ${kind}`;
+        seg.style.height = `${(ms / peak) * 100}%`;
+        return seg;
+      });
+    segments[0]?.classList.add("top");
+    column.append(...segments);
+    strip.append(column);
+  }
+
+  const legend = document.createElement("div");
+  legend.className = "legend";
+  legend.append(swatch("used", "Used"));
+  if (sum(days, "pass") > 0) legend.append(swatch("pass", "On a pass"));
+
+  body.replaceChildren(strip, legend);
+}
+
+function swatch(kind, text) {
+  const item = document.createElement("span");
+  item.className = `legend-item ${kind}`;
+  item.textContent = text;
+  return item;
+}
+
+function note(text) {
+  const p = document.createElement("p");
+  p.className = "history-note";
+  p.textContent = text;
+  return p;
+}
+
+async function loadHistory(rules) {
+  const keys = rules.map((rule) => `usage:${rule.id}`);
+  const stored = await browser.storage.local.get(keys);
+  history = new Map(
+    rules.map((rule) => [rule.id, usedByDay(normalizeUsage(stored[`usage:${rule.id}`]))]),
+  );
 }
 
 // --- validation and saving ----------------------------------------------
@@ -178,4 +298,5 @@ document.getElementById("version").textContent =
 
 drafts = (await loadRules()).map((rule) => ({ ...rule, match: [...rule.match] }));
 reservedIds = drafts.map((rule) => rule.id);
+await loadHistory(drafts);
 render();

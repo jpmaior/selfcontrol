@@ -14,12 +14,15 @@
 import {
   commit,
   createUsage,
-  prune,
+  fold,
+  normalizeUsage,
   remainingMs,
   unlockAt,
+  usedInPeriod,
   usedMs,
   windowOf,
 } from "./accountant.js";
+import { startOfDay, startOfWeek } from "../common/calendar.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
 
@@ -65,10 +68,6 @@ export function settled() {
 
 // --- loading -------------------------------------------------------------
 
-function isUsageShape(value) {
-  return Boolean(value) && typeof value === "object" && typeof value.b === "object";
-}
-
 /**
  * Rebuild the ledger from storage. Runs on EVERY event page start, not just on
  * install — that is the whole point.
@@ -81,8 +80,9 @@ export async function load(rules) {
 
   const local = await browser.storage.local.get(rules.map((rule) => usageKey(rule.id)));
   for (const rule of rules) {
-    const stored = local[usageKey(rule.id)];
-    ledgers.set(rule.id, isUsageShape(stored) ? stored : createUsage());
+    // normalizeUsage fills in what an older build did not store, the way
+    // withDefaults does for rules; a malformed value starts fresh.
+    ledgers.set(rule.id, normalizeUsage(local[usageKey(rule.id)]));
   }
 
   const session = await browser.storage.session.get(rules.map((rule) => openKey(rule.id)));
@@ -185,7 +185,7 @@ export function checkpointRule(rule, nowMs) {
 function settle(rule, fromMs, toMs) {
   const usage = ledgerFor(rule.id);
   commit(usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS });
-  prune(usage, toMs, rule.windowSec * 1000);
+  fold(usage, toMs, rule.windowSec * 1000);
   dirty.add(rule.id);
   return Math.min(Math.max(0, toMs - fromMs), MAX_CHUNK_MS);
 }
@@ -235,7 +235,15 @@ function projected(rule, nowMs) {
   const usage = ledgerFor(rule.id);
   const since = openSince.get(rule.id);
   if (since === undefined) return usage;
-  return commit({ b: { ...usage.b } }, since, nowMs, { maxChunkMs: MAX_CHUNK_MS });
+  const copy = { ...usage, b: { ...usage.b }, p: { ...usage.p } };
+  return commit(copy, since, nowMs, { maxChunkMs: MAX_CHUNK_MS });
+}
+
+/** Used and pass time since a local period start, for the popup. */
+function period(usage, startMs) {
+  const all = usedInPeriod(usage, startMs);
+  const used = usedInPeriod(usage, startMs, { includePass: false });
+  return { usedMs: used, passMs: all - used };
 }
 
 /** Everything a popup, block page or enforcer needs to know about one rule. */
@@ -255,6 +263,8 @@ export function status(rule, nowMs) {
     remainingMs: remaining,
     exhausted: remaining <= 0,
     unlockAtMs: remaining > 0 ? nowMs : unlockAt(usage, nowMs, rule),
+    today: period(usage, startOfDay(nowMs)),
+    week: period(usage, startOfWeek(nowMs)),
   };
 }
 
