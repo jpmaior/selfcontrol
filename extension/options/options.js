@@ -117,10 +117,44 @@ function totalsText(days) {
   return `7 days ${clock(all(week))} · ${HISTORY_SHOWN} days ${clock(all(days))}`;
 }
 
+/** Axis steps, in minutes: the smallest one at or above the busiest day. */
+const AXIS_STEPS_MIN = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440];
+
+function axisMaxMs(peakMs) {
+  const peakMin = Math.ceil(peakMs / 60_000);
+  const step = AXIS_STEPS_MIN.find((m) => m >= peakMin) ?? Math.ceil(peakMin / 60) * 60;
+  return step * 60_000;
+}
+
+/** "0", "30m", "1h", "1h30": short, for an axis. Values are whole minutes. */
+function axisLabel(ms) {
+  const min = Math.round(ms / 60_000);
+  if (min === 0) return "0";
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`;
+}
+
+function dayLabel(day, index) {
+  if (index === HISTORY_SHOWN - 1) return "Today";
+  if (index === HISTORY_SHOWN - 2) return "Yesterday";
+  return new Date(day.at).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
+function dayText(day, index) {
+  const parts = [`${dayLabel(day, index)}: ${clock(day.used)} used`];
+  if (day.pass > 0) parts.push(`${clock(day.pass)} on a pass`);
+  if (day.used === 0 && day.pass === 0) return `${dayLabel(day, index)}: nothing`;
+  return parts.join(", ");
+}
+
 /**
- * A 30-day strip of stacked columns, used time under pass time, drawn in
- * plain CSS. Exact values ride in each column's title, and the two series
- * carry a legend so identity never rests on colour alone.
+ * A 30-day chart of stacked columns, used time under pass time, drawn in
+ * plain CSS: a time axis with hairline gridlines on the left, dates along the
+ * bottom, and a readout line that names the day under the pointer (or the
+ * focused column) with its exact time. The two series carry a legend so
+ * identity never rests on colour alone.
  */
 function renderHistory(card, draft) {
   const details = card.querySelector('[data-role="history"]');
@@ -145,24 +179,57 @@ function renderHistory(card, draft) {
   }
 
   totalsEl.textContent = totalsText(days);
+  const maxMs = axisMaxMs(peak);
+
+  const chart = document.createElement("div");
+  chart.className = "chart";
+
+  // The readout shows today until a column is hovered or focused.
+  const readout = document.createElement("p");
+  readout.className = "readout";
+  const showDay = (index) => {
+    readout.textContent = dayText(days[index], index);
+  };
+  showDay(days.length - 1);
+
+  const plot = document.createElement("div");
+  plot.className = "plot";
+
+  const yAxis = document.createElement("div");
+  yAxis.className = "y-axis";
+  const area = document.createElement("div");
+  area.className = "area";
+  for (const fraction of [1, 0.5, 0]) {
+    const label = document.createElement("span");
+    label.style.bottom = `${fraction * 100}%`;
+    label.textContent = axisLabel(maxMs * fraction);
+    yAxis.append(label);
+    if (fraction > 0) {
+      const line = document.createElement("div");
+      line.className = "gridline";
+      line.style.bottom = `${fraction * 100}%`;
+      area.append(line);
+    }
+  }
 
   const strip = document.createElement("div");
   strip.className = "bars";
-  strip.setAttribute("role", "img");
+  strip.setAttribute("role", "group");
   strip.setAttribute("aria-label", `Daily usage over the last ${HISTORY_SHOWN} days`);
 
-  for (const day of days) {
+  const xAxis = document.createElement("div");
+  xAxis.className = "x-axis";
+
+  days.forEach((day, index) => {
     const column = document.createElement("div");
     column.className = "bar";
-    const label = new Date(day.at).toLocaleDateString(undefined, {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-    });
-    column.title =
-      day.pass > 0
-        ? `${label}: ${clock(day.used)} used, ${clock(day.pass)} on a pass`
-        : `${label}: ${clock(day.used)}`;
+    column.tabIndex = 0;
+    column.setAttribute("aria-label", dayText(day, index));
+    column.title = dayText(day, index);
+    column.addEventListener("mouseenter", () => showDay(index));
+    column.addEventListener("focus", () => showDay(index));
+    column.addEventListener("mouseleave", () => showDay(days.length - 1));
+    column.addEventListener("blur", () => showDay(days.length - 1));
 
     // Only non-empty segments are drawn, so the gap between them never shows
     // on its own, and the top-most one carries the rounded data-end.
@@ -174,20 +241,36 @@ function renderHistory(card, draft) {
       .map(([kind, ms]) => {
         const seg = document.createElement("div");
         seg.className = `seg ${kind}`;
-        seg.style.height = `${(ms / peak) * 100}%`;
+        seg.style.height = `${(ms / maxMs) * 100}%`;
         return seg;
       });
     segments[0]?.classList.add("top");
     column.append(...segments);
     strip.append(column);
-  }
+
+    // A date under every seventh column, counted back from today so "Today"
+    // is always labelled.
+    const tick = document.createElement("span");
+    tick.className = "tick";
+    if ((days.length - 1 - index) % 7 === 0) {
+      tick.textContent =
+        index === days.length - 1
+          ? "Today"
+          : new Date(day.at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    }
+    xAxis.append(tick);
+  });
+
+  area.append(strip);
+  plot.append(yAxis, area, document.createElement("div"), xAxis);
+  chart.append(readout, plot);
 
   const legend = document.createElement("div");
   legend.className = "legend";
   legend.append(swatch("used", "Used"));
   if (sum(days, "pass") > 0) legend.append(swatch("pass", "On a pass"));
 
-  body.replaceChildren(strip, legend);
+  body.replaceChildren(chart, legend);
 }
 
 function swatch(kind, text) {
