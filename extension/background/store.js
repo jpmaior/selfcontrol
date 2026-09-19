@@ -11,9 +11,17 @@
 // Keys are split per rule so a counter update never rewrites the settings, and
 // writes are batched: nothing is written during playback except at checkpoints.
 
-import { commit, createUsage, fold, normalizeUsage, usedInPeriod, windowOf } from "./accountant.js";
+import {
+  commit,
+  createUsage,
+  fold,
+  lockIn,
+  normalizeUsage,
+  usedInPeriod,
+  windowOf,
+} from "./accountant.js";
 import { startOfDay, startOfWeek } from "../common/calendar.js";
-import { evaluate } from "../common/policy.js";
+import { evaluate, lockInAmount, lockInPreview } from "../common/policy.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
 
@@ -173,6 +181,26 @@ export function checkpointRule(rule, nowMs) {
   return settle(rule, since, nowMs);
 }
 
+/**
+ * Spend the rest of the rule's budget on purpose (DESIGN.md §16). The open
+ * interval is checkpointed first so it is credited exactly once, and the
+ * interval stays open: it is the observers' job to close it when the tab is
+ * swept. Returns the milliseconds locked in.
+ */
+export function lockInRule(rule, nowMs) {
+  checkpointRule(rule, nowMs);
+  const usage = ledgerFor(rule.id);
+  const amount = lockInAmount(rule, usage, nowMs);
+  const passActive = Boolean(usage.pass && usage.pass.from <= nowMs && nowMs < usage.pass.to);
+  if (amount <= 0 && !passActive) return 0;
+
+  lockIn(usage, nowMs, amount);
+  if (passActive && amount <= 0) usage.pass = { ...usage.pass, to: nowMs };
+  fold(usage, nowMs, rule.windowSec * 1000);
+  dirty.add(rule.id);
+  return amount;
+}
+
 function settle(rule, fromMs, toMs) {
   const usage = ledgerFor(rule.id);
   commit(usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS });
@@ -255,6 +283,7 @@ export function status(rule, nowMs) {
     usedMs: decision.caps.rolling.usedMs,
     budgetMs: decision.caps.rolling.budgetMs,
     windowMs: windowOf(rule).windowMs,
+    lockIn: lockInPreview(rule, usage, nowMs),
     ...decision,
     today: period(usage, startOfDay(nowMs)),
     week: period(usage, startOfWeek(nowMs)),

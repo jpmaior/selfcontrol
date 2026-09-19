@@ -49,6 +49,7 @@ const {
   flush,
   hasOpenInterval,
   load,
+  lockInRule,
   reconcile,
   settled,
   startCounting,
@@ -172,6 +173,38 @@ test("status reports today's and this week's totals from the projection", async 
   assert.equal(s.today.usedMs, 2 * MIN, "the open interval counts toward today");
   assert.equal(s.today.passMs, 0);
   assert.equal(s.week.usedMs, 2 * MIN);
+});
+
+test("lockInRule: checkpoints the open interval first, then spends the rest", async () => {
+  const r = rule("locker");
+  await load([r]);
+
+  startCounting(r, T0);
+  const now = T0 + 3 * MIN;
+  const locked = lockInRule(r, now);
+
+  assert.equal(locked, 17 * MIN, "what was left of the 20 minutes");
+  assert.ok(hasOpenInterval(r.id), "the interval stays open; the observers close it");
+  const s = status(r, now);
+  assert.equal(s.usedMs, 20 * MIN, "3 counted + 17 locked, not 3 + 3 + 17");
+  assert.equal(s.exhausted, true);
+
+  flush(now);
+  await settled();
+  const stored = local.data.get("usage:locker");
+  const total = Object.values(stored.b).reduce((a, ms) => a + ms, 0);
+  assert.equal(total, 20 * MIN, "the flushed ledger holds both");
+});
+
+test("lockInRule: nothing to spend on an exhausted rule", async () => {
+  const r = rule("spent");
+  await load([r]);
+  // Checkpointed every 5 minutes, or the sleep clamp would cut the interval.
+  startCounting(r, T0);
+  for (let m = 5; m <= 20; m += 5) checkpointRule(r, T0 + m * MIN);
+  stopCounting(r, T0 + 20 * MIN);
+  assert.equal(status(r, T0 + 20 * MIN).exhausted, true);
+  assert.equal(lockInRule(r, T0 + 20 * MIN), 0);
 });
 
 test("flush persists ledgers through the queue", async () => {

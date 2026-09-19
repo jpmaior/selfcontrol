@@ -211,6 +211,22 @@ export function creditAvailableAt(usage, nowMs, { budgetMs, windowMs }, neededMs
   return null;
 }
 
+/**
+ * Spend `ms` on purpose, right now (DESIGN.md §16). It all lands in the bucket
+ * that contains `nowMs`: spread over past buckets, part of it would expire
+ * sooner, and the point of locking in is to stay locked. An active pass is
+ * ended first, since the user is asking to be blocked. Mutates and returns.
+ */
+export function lockIn(usage, nowMs, ms) {
+  if (!(ms > 0)) return usage;
+  if (usage.pass && usage.pass.from <= nowMs && nowMs < usage.pass.to) {
+    usage.pass = { ...usage.pass, to: nowMs };
+  }
+  const bucket = bucketOf(nowMs);
+  usage.b[bucket] = (usage.b[bucket] ?? 0) + ms;
+  return usage;
+}
+
 /** Convenience for rules, which are authored in seconds. */
 export function windowOf(rule) {
   return { budgetMs: rule.budgetSec * 1000, windowMs: rule.windowSec * 1000 };

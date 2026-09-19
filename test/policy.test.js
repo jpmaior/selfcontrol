@@ -8,7 +8,7 @@ process.env.TZ = "Europe/Lisbon";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { evaluate } from "../extension/common/policy.js";
+import { canLockIn, evaluate, lockInAmount, lockInPreview } from "../extension/common/policy.js";
 import {
   BUCKET_MS,
   bucketExpiresAt,
@@ -174,4 +174,38 @@ test("nextChangeAtMs: exhausted gives the unlock instant, counting or not", () =
 test("evaluate: the pass section exists and is inert without configuration", () => {
   const e = evaluate(rule(), createUsage(), T0);
   assert.equal(e.pass.active, false);
+});
+
+// --- lock in ---------------------------------------------------------------
+
+test("lockInAmount: the smallest remainder across the caps", () => {
+  const now = T0 + 3 * MIN;
+  assert.equal(lockInAmount(rule(), spent(3 * MIN), now), 17 * MIN, "rolling only");
+  assert.equal(lockInAmount(rule({ dailyBudgetSec: 5 * 60 }), spent(3 * MIN), now), 2 * MIN, "daily binds");
+  assert.equal(lockInAmount(rule({ weeklyBudgetSec: 4 * 60 }), spent(3 * MIN), now), MIN, "weekly binds");
+});
+
+test("lockInAmount: zero when already blocked", () => {
+  assert.equal(lockInAmount(rule(), spent(20 * MIN), T0 + 20 * MIN), 0);
+  assert.equal(lockInAmount(rule({ dailyBudgetSec: 60 }), spent(MIN), T0 + MIN), 0);
+});
+
+test("canLockIn: a reason while blocked, null while open", () => {
+  assert.equal(canLockIn(rule(), spent(3 * MIN), T0 + 3 * MIN), null);
+  assert.equal(typeof canLockIn(rule(), spent(20 * MIN), T0 + 20 * MIN), "string");
+});
+
+test("lockInPreview: what the popup's confirm step shows", () => {
+  const now = T0 + 3 * MIN;
+  const r = rule({ minUnlockCreditSec: 20 * 60 });
+  const preview = lockInPreview(r, spent(3 * MIN), now);
+  assert.equal(preview.ms, 17 * MIN);
+  assert.equal(preview.unlockAtMs, bucketExpiresAt(T0 / BUCKET_MS + 3, HOUR), "the current bucket's expiry");
+
+  const daily = lockInPreview(rule({ dailyBudgetSec: 5 * 60 }), spent(3 * MIN), now);
+  assert.equal(daily.ms, 2 * MIN);
+  assert.equal(daily.unlockAtMs, startOfNextDay(now), "locking in a daily cap holds until midnight");
+  assert.equal(daily.reason, "daily");
+
+  assert.equal(lockInPreview(rule(), spent(20 * MIN), T0 + 20 * MIN), null, "nothing to lock in");
 });

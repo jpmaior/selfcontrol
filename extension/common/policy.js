@@ -14,6 +14,7 @@
 // releases last; `binding` names the cap with the least left.
 
 import {
+  lockIn,
   remainingMs as rollingRemaining,
   unlockAt,
   usedInPeriod,
@@ -125,4 +126,44 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
   }
 
   return { exhausted, reason, binding, remainingMs, unlockAtMs, nextChangeAtMs, caps, pass };
+}
+
+// --- lock in (DESIGN.md §16) ---------------------------------------------
+
+const BLOCKED_TEXT = {
+  rolling: "already blocked",
+  daily: "done for today",
+  weekly: "done for the week",
+};
+
+/** Why lock-in is not offered right now, or null when it is. */
+export function canLockIn(rule, usage, nowMs) {
+  const e = evaluate(rule, usage, nowMs);
+  return e.exhausted ? BLOCKED_TEXT[e.reason] ?? "blocked" : null;
+}
+
+/**
+ * How much a lock-in would spend: the smallest remainder across the caps,
+ * taken over every cap regardless of a pass (a pass suspends the rolling
+ * cap, but lockIn ends the pass first). Zero when already blocked.
+ */
+export function lockInAmount(rule, usage, nowMs) {
+  const e = evaluate(rule, usage, nowMs);
+  if (e.exhausted) return 0;
+  let least = Infinity;
+  for (const cap of Object.values(e.caps)) {
+    if (cap && cap.remainingMs < least) least = cap.remainingMs;
+  }
+  return Number.isFinite(least) ? least : 0;
+}
+
+/**
+ * What the popup's confirm step shows: how much would be spent and until
+ * when the rule would then be blocked. Null when lock-in is not available.
+ */
+export function lockInPreview(rule, usage, nowMs) {
+  if (canLockIn(rule, usage, nowMs) !== null) return null;
+  const ms = lockInAmount(rule, usage, nowMs);
+  const after = evaluate(rule, lockIn(structuredClone(usage), nowMs, ms), nowMs);
+  return { ms, unlockAtMs: after.unlockAtMs, reason: after.reason };
 }

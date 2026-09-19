@@ -145,6 +145,45 @@ header h1 {
   margin-top: 0.15rem;
 }
 
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+}
+
+.actions:empty,
+.actions:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+.action {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.action.armed {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .note {
   margin: 0.9rem 0 0;
   font-size: 0.75rem;

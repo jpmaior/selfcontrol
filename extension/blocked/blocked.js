@@ -5,7 +5,7 @@
 // re-reads its status periodically rather than trusting the timestamp it was
 // opened with.
 
-import { clock, countdown } from "../common/format.js";
+import { clock, countdown, wallClock } from "../common/format.js";
 
 const params = new URLSearchParams(location.search);
 const ruleId = params.get("rule");

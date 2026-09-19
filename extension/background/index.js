@@ -6,7 +6,7 @@
 
 import { log } from "./log.js";
 import { isCountingNow, platform, setRules, start } from "./observers.js";
-import { clock } from "../common/format.js";
+import { clock, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { validateRule } from "../common/rules.js";
 import { enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
@@ -18,6 +18,7 @@ import {
   flush,
   forget,
   load,
+  lockInRule,
   reconcile,
   settled,
   startCounting,
@@ -208,13 +209,40 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 
 // Serves the block page and the popup. Deliberately NOT an async listener: a
 // listener that returns a promise claims the response channel for every
-// message, so only the branch we actually answer returns one.
-browser.runtime.onMessage.addListener((message) => {
-  if (message?.type !== "status") return undefined;
-  return (async () => {
-    await loaded;
+// message, so only a message we actually answer returns one.
+//
+// Usage is hot state owned by the background, so the popup's actions on it
+// (lock in, and later a pass) go through here rather than through storage.
+// The options page still never messages the background.
+const handlers = {
+  async status() {
     const now = Date.now();
     return rules.map((rule) => status(rule, now));
+  },
+
+  async lockIn({ ruleId }) {
+    const rule = rules.find((r) => r.id === ruleId);
+    if (!rule) return { ok: false, error: `no such rule: ${ruleId}` };
+    const now = Date.now();
+    const ms = lockInRule(rule, now);
+    flush(now);
+    const snapshot = status(rule, now);
+    log(
+      `🔒 locked in ${rule.id}: spent ${clock(ms)} on purpose,`,
+      `blocked until ${wallClock(snapshot.unlockAtMs, now)} (${snapshot.reason})`,
+    );
+    await enforceRule(rule, now);
+    await syncRuleAlarm(rule, now);
+    return { ok: true, ms };
+  },
+};
+
+browser.runtime.onMessage.addListener((message) => {
+  const handler = handlers[message?.type];
+  if (!handler) return undefined;
+  return (async () => {
+    await loaded;
+    return handler(message);
   })();
 });
 

@@ -622,3 +622,45 @@ A calendar cap's usage is `usedInPeriod()` from §13: folded days in the period 
 buckets that start in it. No new state, no migration of usage data. `SETTINGS_VERSION`
 went to 2 because this is the first step that stores a new rule field; `withDefaults` fills
 `null` into rules from a version-1 file, and later additive fields keep version 2.
+
+---
+
+## 16. Lock in
+
+A per-rule button in the popup that spends the rest of the current budget on purpose:
+"I am done with YouTube for now, block it." Irreversible by design; it is the one
+tightening action, and tightening never needs a cooling-off period.
+
+### Into the current bucket
+
+`accountant.lockIn()` adds the whole amount to the bucket that contains `now`. Spreading
+it over past buckets would let part of it expire sooner, and the user asked to stay
+blocked. With `minUnlockCreditSec` equal to the budget the unlock is exactly the current
+bucket's expiry, one window from now; with a smaller credit it is earlier, as the rolling
+window's rules already say.
+
+The amount is the *smallest* remainder across the caps (`policy.lockInAmount`). Locking in
+a rule whose daily cap has two minutes left spends those two minutes, which exhausts the
+daily cap, which blocks until midnight. That is what "lock in" means for that rule.
+
+### Checkpoint first
+
+`store.lockInRule()` checkpoints the open interval before spending, so the time counted so
+far is credited exactly once and the lock-in sits on top of it. The interval stays open;
+the sweep that follows closes the tab, and the observers close the interval as they
+always do.
+
+### It also ends a pass
+
+A pass (§17) suspends the rolling cap. Locking in while a pass is active ends the pass
+(`pass.to = now`) and then spends whatever the rolling cap has left, which may be nothing:
+the pass's own minutes already fill the window, so ending it is enough to block. The
+user pressed "block me now"; a pass must not be a reason to stay open.
+
+### The popup owns the control
+
+Lock-in acts on usage, which is hot state owned by the background, so it goes through a
+`lockIn` message like `status` does, never through storage. The confirm step is inline:
+the button becomes "Blocks YouTube until 14:32. Confirm" for five seconds, then reverts.
+`status()` carries `lockIn: { ms, unlockAtMs, reason }` (or `null` when blocked) so the
+popup shows the real consequence, computed by the same `evaluate` that will enforce it.
