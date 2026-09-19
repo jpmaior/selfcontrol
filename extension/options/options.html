@@ -12,7 +12,7 @@
       <p class="lede">
         Each rule watches some domains and runs a clock while you are actually using them.
         Time is counted over a rolling window, so budget comes back gradually rather than
-        resetting on the hour.
+        resetting on the hour. A daily or weekly cap can sit on top of it.
       </p>
     </header>
 
@@ -64,6 +64,28 @@
               <small>min</small>
             </span>
           </label>
+        </div>
+
+        <div class="grid">
+          <label class="field">
+            <span>Per day</span>
+            <span class="with-unit">
+              <input data-field="dailyMin" type="number" min="1" step="1" placeholder="none" />
+              <small>min</small>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>Per week</span>
+            <span class="with-unit">
+              <input data-field="weeklyMin" type="number" min="1" step="1" placeholder="none" />
+              <small>min</small>
+            </span>
+          </label>
+          <small class="grid-hint">
+            Calendar caps on top of the rolling window: a day ends at local midnight, a week
+            on Sunday night. Leave blank for none.
+          </small>
         </div>
 
         <label class="field wide">

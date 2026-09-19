@@ -27,6 +27,8 @@ export const DEFAULT_RULES = [
     windowSec: 60 * 60,
     onExceed: "block",
     minUnlockCreditSec: 5 * 60,
+    dailyBudgetSec: null, // calendar day, local time; null = no daily cap
+    weeklyBudgetSec: null, // calendar week from Monday, local time; null = none
   },
   {
     id: "instagram",
@@ -37,8 +39,14 @@ export const DEFAULT_RULES = [
     windowSec: 60 * 60,
     onExceed: "close",
     minUnlockCreditSec: 5 * 60,
+    dailyBudgetSec: null,
+    weeklyBudgetSec: null,
   },
 ];
+
+/** The longest a calendar cap can be: the period itself. */
+export const MAX_DAILY_SEC = 24 * 60 * 60;
+export const MAX_WEEKLY_SEC = 7 * MAX_DAILY_SEC;
 
 // --- matching ------------------------------------------------------------
 
@@ -131,10 +139,16 @@ export function blankRule() {
     windowSec: 60 * 60,
     onExceed: "block",
     minUnlockCreditSec: 5 * 60,
+    dailyBudgetSec: null,
+    weeklyBudgetSec: null,
   };
 }
 
-/** Fill in anything a stored rule is missing, so old data stays loadable. */
+/**
+ * Fill in anything a stored rule is missing, so old data stays loadable. This
+ * is the whole settings migration: a rule from a version-1 file gains the
+ * calendar caps as "none" and its id, and therefore its usage, is untouched.
+ */
 export function withDefaults(rule) {
   return {
     onExceed: "block",
@@ -142,8 +156,40 @@ export function withDefaults(rule) {
     windowSec: 60 * 60,
     mode: "focus",
     match: [],
+    dailyBudgetSec: null,
+    weeklyBudgetSec: null,
     ...rule,
   };
+}
+
+/**
+ * Only the fields a rule is made of, in their canonical shape. A whitelist on
+ * purpose: the options page's drafts carry form state, and anything not listed
+ * here is silently dropped rather than persisted. Shared with export.
+ */
+export function strip(draft) {
+  return {
+    id: draft.id,
+    label: String(draft.label ?? "").trim(),
+    match: draft.match,
+    mode: draft.mode,
+    budgetSec: draft.budgetSec,
+    windowSec: draft.windowSec,
+    onExceed: draft.onExceed,
+    minUnlockCreditSec: draft.minUnlockCreditSec,
+    dailyBudgetSec: draft.dailyBudgetSec ?? null,
+    weeklyBudgetSec: draft.weeklyBudgetSec ?? null,
+  };
+}
+
+/** null means "no cap"; anything else must be a positive whole number of seconds. */
+function validateCap(value, maxSec, what, errors) {
+  if (value === null || value === undefined) return;
+  if (!Number.isInteger(value) || value <= 0) {
+    errors.push(`${what} must be more than zero, or empty for none.`);
+  } else if (value > maxSec) {
+    errors.push(`${what} cannot be longer than the period itself.`);
+  }
 }
 
 /**
@@ -176,6 +222,9 @@ export function validateRule(rule, allRules = []) {
   } else if (rule.minUnlockCreditSec > rule.budgetSec) {
     errors.push("Unlock credit cannot exceed the budget.");
   }
+
+  validateCap(rule.dailyBudgetSec, MAX_DAILY_SEC, "Daily cap", errors);
+  validateCap(rule.weeklyBudgetSec, MAX_WEEKLY_SEC, "Weekly cap", errors);
 
   // Unsaved rules have no id yet, so two of them are not "duplicates".
   if (rule.id) {

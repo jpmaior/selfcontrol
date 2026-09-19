@@ -14,6 +14,7 @@ import {
   makeRuleId,
   parseDomain,
   ruleForUrl,
+  strip,
   validateRule,
   withDefaults,
 } from "../extension/common/rules.js";
@@ -200,4 +201,37 @@ test("the shipped defaults are valid", () => {
   for (const r of DEFAULT_RULES) {
     assert.deepEqual(validateRule(r, DEFAULT_RULES), [], `${r.id} should validate`);
   }
+});
+
+// --- daily and weekly caps ------------------------------------------------
+
+test("validateRule: calendar caps accept null and positive whole seconds", () => {
+  assert.deepEqual(validateRule(rule({ dailyBudgetSec: null, weeklyBudgetSec: null })), []);
+  assert.deepEqual(validateRule(rule({ dailyBudgetSec: 40 * MIN, weeklyBudgetSec: 5 * 60 * MIN })), []);
+  assert.deepEqual(validateRule(rule({ dailyBudgetSec: 24 * 60 * MIN })), [], "a full day is allowed");
+  assert.deepEqual(validateRule(rule({ weeklyBudgetSec: 7 * 24 * 60 * MIN })), [], "a full week is allowed");
+});
+
+test("validateRule: calendar caps reject zero, negatives, fractions and oversize", () => {
+  for (const bad of [0, -60, 1.5, "60", NaN]) {
+    assert.ok(validateRule(rule({ dailyBudgetSec: bad })).length > 0, `daily ${bad}`);
+    assert.ok(validateRule(rule({ weeklyBudgetSec: bad })).length > 0, `weekly ${bad}`);
+  }
+  assert.ok(validateRule(rule({ dailyBudgetSec: 24 * 60 * MIN + 1 })).length > 0, "over a day");
+  assert.ok(validateRule(rule({ weeklyBudgetSec: 7 * 24 * 60 * MIN + 1 })).length > 0, "over a week");
+});
+
+test("withDefaults: fills the calendar caps with null", () => {
+  const filled = withDefaults({ id: "x", label: "X", match: ["x.com"], budgetSec: 60 });
+  assert.equal(filled.dailyBudgetSec, null);
+  assert.equal(filled.weeklyBudgetSec, null);
+  assert.equal(withDefaults({ dailyBudgetSec: 60 }).dailyBudgetSec, 60, "keeps a stored value");
+});
+
+test("strip: keeps only the fields a rule is made of", () => {
+  const stripped = strip({ ...rule({ dailyBudgetSec: 60 }), label: " Test ", junk: 1 });
+  assert.equal(stripped.junk, undefined);
+  assert.equal(stripped.label, "Test");
+  assert.equal(stripped.dailyBudgetSec, 60);
+  assert.equal(stripped.weeklyBudgetSec, null);
 });

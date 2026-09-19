@@ -1,23 +1,25 @@
 // Enforcement: deciding when a rule is spent, acting on it, and keeping it
 // enforced against re-opening (DESIGN.md §7).
 //
-// The scheduling trick is worth understanding. While a rule is counting we set
-// exactly one alarm, at `now + remaining`. That estimate is ALWAYS early or
-// exact and never late, because a rolling window only ever hands budget back.
-// So when the alarm fires we recompute; if the rule is not actually spent yet,
-// we simply reschedule. No forward simulation of the window is needed.
+// The scheduling trick is worth understanding. Each rule has exactly one alarm,
+// at the earliest instant its answer could flip (policy.evaluate's
+// `nextChangeAtMs`): `now + remaining` while counting, the unlock instant
+// while blocked, a scheduled block's start while idle. The counting estimate
+// is ALWAYS early or exact and never late, because a rolling window only ever
+// hands budget back. So when the alarm fires we recompute; if the rule is not
+// actually spent yet, we simply reschedule. No forward simulation is needed.
 
 import { log } from "./log.js";
 import { ruleForUrl } from "../common/rules.js";
 import { status } from "./store.js";
 import { clock } from "../common/format.js";
 
-const EXHAUST_PREFIX = "exhaust:";
+const RULE_PREFIX = "rule:";
 
-export const exhaustAlarmFor = (ruleId) => `${EXHAUST_PREFIX}${ruleId}`;
+export const ruleAlarmFor = (ruleId) => `${RULE_PREFIX}${ruleId}`;
 
 export function ruleIdFromAlarm(name) {
-  return name.startsWith(EXHAUST_PREFIX) ? name.slice(EXHAUST_PREFIX.length) : null;
+  return name.startsWith(RULE_PREFIX) ? name.slice(RULE_PREFIX.length) : null;
 }
 
 export function blockedUrlFor(rule, snapshot) {
@@ -25,6 +27,7 @@ export function blockedUrlFor(rule, snapshot) {
     rule: rule.id,
     label: rule.label,
     until: String(snapshot.unlockAtMs),
+    reason: snapshot.reason ?? "",
   });
   return browser.runtime.getURL(`blocked/blocked.html?${params}`);
 }
@@ -101,19 +104,20 @@ export async function guardTab(rules, tab, nowMs) {
 }
 
 /**
- * Keep the exhaustion alarm in step with reality. Called whenever a rule starts
- * or stops counting, and after every checkpoint.
+ * Keep the rule's one alarm in step with reality. Called whenever a rule
+ * starts or stops counting, after every checkpoint, and after the alarm
+ * itself fires. A rule whose answer cannot flip on its own gets no alarm.
  */
-export async function syncExhaustionAlarm(rule, nowMs) {
-  const name = exhaustAlarmFor(rule.id);
+export async function syncRuleAlarm(rule, nowMs) {
+  const name = ruleAlarmFor(rule.id);
   const snapshot = status(rule, nowMs);
+  const when = snapshot.nextChangeAtMs;
 
-  if (!snapshot.counting || snapshot.exhausted) {
+  if (when === null) {
     await browser.alarms.clear(name);
     return null;
   }
 
-  const when = nowMs + snapshot.remainingMs;
   const existing = await browser.alarms.get(name);
 
   // Only rewrite the alarm if the target moved meaningfully — rescheduling on
@@ -121,6 +125,7 @@ export async function syncExhaustionAlarm(rule, nowMs) {
   if (existing && Math.abs(existing.scheduledTime - when) < 1000) return existing.scheduledTime;
 
   await browser.alarms.create(name, { when });
-  log(`${rule.id}: ${clock(snapshot.remainingMs)} left, exhaustion alarm set`);
+  const why = snapshot.exhausted ? `unlocks (${snapshot.reason})` : `${snapshot.binding} cap runs out`;
+  log(`${rule.id}: alarm in ${clock(when - nowMs)} — ${why}`);
   return when;
 }

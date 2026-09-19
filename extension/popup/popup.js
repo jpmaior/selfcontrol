@@ -18,6 +18,16 @@ const rows = new Map();
 
 const MODE_HINT = Object.fromEntries(MODES.map((mode) => [mode.value, mode.hint]));
 
+/** State text while blocked, by the constraint that releases last. */
+const BLOCKED_STATE = {
+  rolling: "blocked",
+  daily: "done for today",
+  weekly: "done for the week",
+  schedule: "off right now",
+};
+
+const CAP_NAME = { rolling: "window", daily: "today", weekly: "this week" };
+
 function createRow(status) {
   const li = document.createElement("li");
   li.className = "rule";
@@ -46,10 +56,15 @@ function createRow(status) {
   const right = document.createElement("span");
   detail.append(used, right);
 
-  li.append(row, meter, detail);
+  // Only shown for rules that carry a daily or weekly cap.
+  const calendar = document.createElement("div");
+  calendar.className = "detail calendar";
+  calendar.hidden = true;
+
+  li.append(row, meter, detail, calendar);
   listEl.append(li);
 
-  const parts = { li, state, fill, used, right };
+  const parts = { li, state, fill, used, right, calendar };
   rows.set(status.id, parts);
   return parts;
 }
@@ -61,14 +76,23 @@ function render(status, nowMs) {
   parts.li.classList.toggle("spent", status.exhausted);
 
   if (status.exhausted) {
-    parts.state.textContent = "blocked";
+    parts.state.textContent = BLOCKED_STATE[status.reason] ?? "blocked";
     parts.right.textContent = `unlocks in ${countdown(status.unlockAtMs - nowMs)}`;
   } else {
     parts.state.textContent = status.counting ? "counting" : MODE_HINT[status.mode] ?? "";
-    parts.right.textContent = `${clock(status.remainingMs)} left`;
+    // The remainder is the smallest across the caps; say which one when it is
+    // not the rolling window the meter shows.
+    const which = status.binding && status.binding !== "rolling" ? ` (${CAP_NAME[status.binding]})` : "";
+    parts.right.textContent = `${clock(status.remainingMs)} left${which}`;
   }
 
   parts.used.textContent = `${clock(status.usedMs)} / ${clock(status.budgetMs)}`;
+
+  const lines = [];
+  if (status.caps?.daily) lines.push(`today ${clock(status.caps.daily.usedMs)} / ${clock(status.caps.daily.budgetMs)}`);
+  if (status.caps?.weekly) lines.push(`week ${clock(status.caps.weekly.usedMs)} / ${clock(status.caps.weekly.budgetMs)}`);
+  parts.calendar.textContent = lines.join(" · ");
+  parts.calendar.hidden = lines.length === 0;
 
   const ratio = status.budgetMs > 0 ? status.usedMs / status.budgetMs : 0;
   parts.fill.style.width = `${Math.min(100, ratio * 100)}%`;
