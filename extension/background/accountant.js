@@ -2,15 +2,27 @@
 // is always an argument. That is what lets test/accountant.test.js pin down the
 // fiddly cases with `node --test` and no browser involved.
 //
-// See DESIGN.md §5. Usage is a sparse map of fixed 60-second buckets:
+// See DESIGN.md §5 and §13. Usage is a sparse map of fixed 60-second buckets
+// plus the calendar days those buckets fold into once they leave the window:
 //
-//   { b: { "29384756": 60000, "29384757": 23400 } }
+//   {
+//     b: { "29384756": 60000, "29384757": 23400 },  // live buckets
+//     p: { "29384790": 60000 },                     // live buckets under a pass
+//     d: { "2026-09-19": { used: 0, pass: 0 } },    // folded whole days, local
+//     pass: null,                                   // { from, to } of a pass
+//     passUses: []                                  // pass start instants, this week
+//   }
 //        ^ bucket index          ^ milliseconds accrued in that bucket
 //
 // Milliseconds rather than seconds so that many short intervals cannot
 // accumulate rounding drift; the JSON size difference is a few hundred bytes.
 
+import { addDays, dayKey } from "../common/calendar.js";
+
 export const BUCKET_MS = 60_000;
+
+/** Folded days kept in `d`; older ones are dropped by fold(). */
+export const HISTORY_DAYS = 90;
 
 export function bucketOf(ms) {
   return Math.floor(ms / BUCKET_MS);
@@ -22,7 +34,28 @@ export function bucketExpiresAt(bucket, windowMs) {
 }
 
 export function createUsage() {
-  return { b: {} };
+  return { b: {}, p: {}, d: {}, pass: null, passUses: [] };
+}
+
+const isMap = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Fill in whatever a ledger stored by an older build is missing, the way
+ * `withDefaults` does for rules. Anything that is not the right shape is
+ * reset on its own; a value that is not a ledger at all becomes a fresh one.
+ */
+export function normalizeUsage(value) {
+  if (!isMap(value) || !isMap(value.b)) return createUsage();
+  const pass = isMap(value.pass) && Number.isFinite(value.pass.from) && Number.isFinite(value.pass.to)
+    ? value.pass
+    : null;
+  return {
+    b: value.b,
+    p: isMap(value.p) ? value.p : {},
+    d: isMap(value.d) ? value.d : {},
+    pass,
+    passUses: Array.isArray(value.passUses) ? value.passUses : [],
+  };
 }
 
 /**
@@ -52,13 +85,80 @@ export function commit(usage, fromMs, toMs, { maxChunkMs = Infinity } = {}) {
   return usage;
 }
 
-/** Drop buckets that have fallen out of the window. Mutates and returns `usage`. */
-export function prune(usage, nowMs, windowMs) {
+/**
+ * Fold buckets that have fallen out of the window into their local day, then
+ * delete them. Mutates and returns `usage`.
+ *
+ * This replaces plain pruning (DESIGN.md §13): the buckets are being touched
+ * anyway, so history and the calendar caps cost no extra writes. A bucket
+ * belongs to exactly one local day because both buckets and time-zone offsets
+ * are whole minutes, and deleting a bucket as it is folded is what makes
+ * "folded days + live buckets" free of double counting.
+ */
+export function fold(usage, nowMs, windowMs) {
   const oldest = bucketOf(nowMs - windowMs);
-  for (const key of Object.keys(usage.b)) {
-    if (Number(key) < oldest) delete usage.b[key];
+  foldMap(usage, "b", "used", oldest);
+  foldMap(usage, "p", "pass", oldest);
+
+  const cutoff = dayKey(addDays(nowMs, -(HISTORY_DAYS - 1)));
+  for (const key of Object.keys(usage.d)) {
+    if (key < cutoff) delete usage.d[key];
   }
   return usage;
+}
+
+function foldMap(usage, map, field, oldestBucket) {
+  for (const key of Object.keys(usage[map])) {
+    const bucket = Number(key);
+    if (bucket >= oldestBucket) continue;
+    const day = dayKey(bucket * BUCKET_MS);
+    const entry = (usage.d[day] ??= { used: 0, pass: 0 });
+    entry[field] += usage[map][key];
+    delete usage[map][key];
+  }
+}
+
+/** The old name, kept for one step so nothing that imports it breaks. */
+export const prune = fold;
+
+/**
+ * Milliseconds used since `periodStartMs`, a local day or week start: folded
+ * days on or after it plus live buckets that start on or after it. A live
+ * bucket from before the period belongs to its own day, not to this one.
+ */
+export function usedInPeriod(usage, periodStartMs, { includePass = true } = {}) {
+  const startKey = dayKey(periodStartMs);
+  let total = 0;
+  for (const [key, day] of Object.entries(usage.d)) {
+    if (key < startKey) continue;
+    total += day.used + (includePass ? day.pass : 0);
+  }
+  const firstBucket = bucketOf(periodStartMs);
+  for (const [key, ms] of Object.entries(usage.b)) {
+    if (Number(key) >= firstBucket) total += ms;
+  }
+  if (includePass) {
+    for (const [key, ms] of Object.entries(usage.p)) {
+      if (Number(key) >= firstBucket) total += ms;
+    }
+  }
+  return total;
+}
+
+/**
+ * Every day with any usage, folded or live, as `{ "YYYY-MM-DD": { used, pass } }`.
+ * For the history view; the caps use usedInPeriod().
+ */
+export function usedByDay(usage) {
+  const days = {};
+  for (const [key, day] of Object.entries(usage.d)) days[key] = { ...day };
+  for (const [map, field] of [["b", "used"], ["p", "pass"]]) {
+    for (const [key, ms] of Object.entries(usage[map])) {
+      const day = dayKey(Number(key) * BUCKET_MS);
+      (days[day] ??= { used: 0, pass: 0 })[field] += ms;
+    }
+  }
+  return days;
 }
 
 /**
