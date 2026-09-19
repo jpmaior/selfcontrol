@@ -6,10 +6,14 @@
 // opened with.
 
 import { clock, countdown, wallClock } from "../common/format.js";
+import { returnUrlFrom } from "../common/rules.js";
 
 const params = new URLSearchParams(location.search);
 const ruleId = params.get("rule");
 const label = params.get("label") || ruleId || "this site";
+
+/** The page this one replaced, if it is safe to link back to. */
+const returnUrl = returnUrlFrom(params);
 
 const el = {
   emoji: document.getElementById("emoji"),
@@ -20,7 +24,38 @@ const el = {
   countdownText: document.getElementById("countdown-text"),
   detail: document.getElementById("detail"),
   passes: document.getElementById("passes"),
+  return: document.getElementById("return"),
 };
+
+/** "youtube.com/watch?v=abc…": hostname and a short path, for the muted line. */
+function shortUrl(href) {
+  const u = new URL(href);
+  const path = `${u.pathname}${u.search}`.replace(/\/$/, "");
+  const trimmed = path.length > 40 ? `${path.slice(0, 39)}…` : path;
+  return `${u.hostname.replace(/^www\./, "")}${trimmed}`;
+}
+
+/**
+ * While blocked: where you were, as text. Once unlocked: a real link. No
+ * auto-redirect on purpose; going back is a choice, and the navigation runs
+ * through the same guard as any other, so a rule that re-blocks re-blocks.
+ */
+function renderReturn(unlocked) {
+  if (!returnUrl) {
+    el.return.hidden = true;
+    return;
+  }
+  el.return.hidden = false;
+  el.return.replaceChildren();
+  if (unlocked) {
+    const a = document.createElement("a");
+    a.href = returnUrl;
+    a.textContent = `Back to ${shortUrl(returnUrl)}`;
+    el.return.append(a);
+  } else {
+    el.return.textContent = `You were on ${shortUrl(returnUrl)}`;
+  }
+}
 
 const QUIPS = [
   "The video will still be there. That is precisely the problem.",
@@ -107,6 +142,7 @@ function unlock() {
   el.countdown.textContent = "";
   el.meter.style.width = "100%";
   el.passes.hidden = true;
+  renderReturn(true);
 }
 
 function tick() {
@@ -126,6 +162,7 @@ function tick() {
 
 setHeadline();
 el.quip.textContent = pickQuip();
+renderReturn(false);
 tick();
 setInterval(tick, 1000);
 

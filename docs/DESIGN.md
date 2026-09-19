@@ -717,3 +717,21 @@ Lock-in (§16) stays available during a pass and ends it.
 `usePass` is a message like `lockIn`. The block page says "You have 2 passes left this
 week, in the toolbar popup" and nothing more, so the block page never carries an unlock
 control; a button there would be the drip-feed with extra steps.
+
+---
+
+## 19. The return link
+
+The block page knows the URL it replaced (`url=` in its query string, set by the
+enforcer at the moment of the sweep or guard). While blocked it shows it as muted text,
+"You were on youtube.com/watch?v=…", and once the rule unlocks it becomes a real link.
+
+Two deliberate limits. There is **no auto-redirect** on unlock: going back is a choice,
+and a page that reloads the site by itself the moment a cap returns is the drip-feed with
+a motor on it. And the link is **not a bypass**: navigating to it runs through `guardTab`
+like any navigation, so a rule that re-blocks re-blocks.
+
+The parameter is attacker-shaped input, since anyone can type a block page URL, so
+`returnUrlFrom()` accepts only what `hostnameOf` accepts: `http(s)`, nothing else. A
+`javascript:` or `data:` value rendered as a link would be a script injection into an
+extension page.

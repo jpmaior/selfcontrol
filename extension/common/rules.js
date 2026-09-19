@@ -73,6 +73,20 @@ export function hostnameOf(url) {
 }
 
 /**
+ * The page a block replaced, read back from the block page's own query
+ * string, or null. Only http(s) URLs that hostnameOf accepts come through:
+ * the parameter is attacker-shaped input (anyone can type a block page URL),
+ * and a `javascript:` or `data:` link rendered into the page would be a
+ * script injection. The query and fragment are kept, so a video resumes
+ * where it was.
+ */
+export function returnUrlFrom(params) {
+  const raw = params?.get?.("url");
+  if (!raw) return null;
+  return hostnameOf(raw) ? new URL(raw).href : null;
+}
+
+/**
  * Hostname suffix match. "youtube.com" matches youtube.com, www.youtube.com,
  * m.youtube.com and music.youtube.com — but deliberately NOT notyoutube.com,
  * which a naive `includes()` would let through.

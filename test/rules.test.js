@@ -13,6 +13,7 @@ import {
   hostMatches,
   makeRuleId,
   parseDomain,
+  returnUrlFrom,
   ruleForUrl,
   strip,
   validateRule,
@@ -266,4 +267,31 @@ test("validateRule: passes need a whole non-negative count, a positive length, a
 test("strip: keeps passes in their canonical shape", () => {
   const stripped = strip(rule({ passes: { perWeek: 2, durationSec: 600, countsTowardCaps: false, junk: 1 } }));
   assert.deepEqual(stripped.passes, { perWeek: 2, durationSec: 600, countsTowardCaps: false });
+});
+
+// --- the block page's return link -------------------------------------------
+
+test("returnUrlFrom: accepts http(s) and keeps the query and fragment", () => {
+  const url = "https://www.youtube.com/watch?v=abc&t=42#comments";
+  assert.equal(returnUrlFrom(new URLSearchParams({ url })), url);
+  assert.equal(returnUrlFrom(new URLSearchParams({ url: "http://example.com/a?b=1" })), "http://example.com/a?b=1");
+});
+
+test("returnUrlFrom: refuses anything that is not a web page", () => {
+  for (const bad of [
+    "javascript:alert(1)",
+    "data:text/html,hi",
+    "moz-extension://abc/blocked/blocked.html",
+    "file:///etc/passwd",
+    "about:blank",
+    "not a url",
+    "",
+  ]) {
+    assert.equal(returnUrlFrom(new URLSearchParams({ url: bad })), null, bad);
+  }
+});
+
+test("returnUrlFrom: null for a missing parameter", () => {
+  assert.equal(returnUrlFrom(new URLSearchParams()), null);
+  assert.equal(returnUrlFrom(new URLSearchParams({ rule: "youtube" })), null);
 });
