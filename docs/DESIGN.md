@@ -614,7 +614,9 @@ pure and combines every constraint the rule carries:
 `syncExhaustionAlarm` became `syncRuleAlarm`, targeting `nextChangeAtMs` and clearing the
 alarm when it is `null`. The "only rewrite if it moved" guard is unchanged. This is a small
 but real change in when alarms exist: a blocked rule now holds an alarm at its unlock
-instant, so the toolbar badge (§18) can flip without a user event.
+instant. It was added so a toolbar badge could flip without a user event; the badge was
+built as PR #6 and dropped (2026-09-26), and the alarm stays as it is, because one wake-up
+per unlock costs nothing and dropping it would mean a special case in `nextChangeAtMs`.
 
 ### The ledger already had what the caps need
 
