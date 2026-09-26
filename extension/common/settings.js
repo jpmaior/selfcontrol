@@ -7,7 +7,12 @@
 import { DEFAULT_RULES, withDefaults } from "./rules.js";
 
 export const SETTINGS_KEY = "settings";
-export const SETTINGS_VERSION = 1;
+/**
+ * 1: the rolling cap only. 2: dailyBudgetSec and weeklyBudgetSec (and every
+ * later additive field). `withDefaults` is the migration in both directions,
+ * so the number is informational; nothing branches on it.
+ */
+export const SETTINGS_VERSION = 2;
 
 /** Superseded by the options page; removed on sight so it cannot confuse things. */
 const LEGACY_LIMITS_KEY = "debug:limits";

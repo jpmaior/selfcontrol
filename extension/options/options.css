@@ -109,6 +109,13 @@ body {
   gap: 0.9rem;
 }
 
+.grid-hint {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
 .with-unit {
   display: flex;
   align-items: baseline;

@@ -6,10 +6,10 @@
 
 import { log } from "./log.js";
 import { isCountingNow, platform, setRules, start } from "./observers.js";
-import { clock } from "../common/format.js";
+import { clock, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { validateRule } from "../common/rules.js";
-import { enforceRule, guardTab, ruleIdFromAlarm, syncExhaustionAlarm } from "./enforcer.js";
+import { enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
 import {
   CHECKPOINT_MS,
   anyCounting,
@@ -18,6 +18,7 @@ import {
   flush,
   forget,
   load,
+  lockInRule,
   reconcile,
   settled,
   startCounting,
@@ -62,7 +63,7 @@ const primed = start({
     }
 
     log("   ", describe(rule, now));
-    await Promise.all([syncCheckpointAlarm(), syncExhaustionAlarm(rule, now)]);
+    await Promise.all([syncCheckpointAlarm(), syncRuleAlarm(rule, now)]);
   },
 });
 
@@ -100,7 +101,7 @@ async function settleAndArm(why) {
     // A rule may have run out while we were unloaded, or have just been given
     // a smaller budget than it has already spent.
     await enforceRule(rule, now);
-    await syncExhaustionAlarm(rule, now);
+    await syncRuleAlarm(rule, now);
   }
   log(`state re-armed (${why})`);
 }
@@ -179,7 +180,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
     const written = flush(now);
     if (written > 0) log(`flushed ${written} ledger(s) — ${stats.localWrites} local writes total`);
     await syncCheckpointAlarm();
-    for (const rule of rules) await syncExhaustionAlarm(rule, now);
+    for (const rule of rules) await syncRuleAlarm(rule, now);
     return;
   }
 
@@ -191,31 +192,57 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   // Measures the open question in DESIGN.md §5: does Firefox honour sub-minute
   // alarm delays, or clamp them the way Chrome does?
   const lateness = now - alarm.scheduledTime;
-  log(`exhaustion alarm for ${ruleId} fired ${lateness >= 0 ? "+" : ""}${lateness}ms vs scheduled`);
+  log(`alarm for ${ruleId} fired ${lateness >= 0 ? "+" : ""}${lateness}ms vs scheduled`);
 
   checkpointRule(rule, now);
   flush(now);
 
+  // The alarm fires at every instant the answer could flip: a cap running out
+  // or an unlock. Enforce if spent; either way, re-sync so the next flip has
+  // its alarm.
   const acted = await enforceRule(rule, now);
-  if (acted === 0) {
-    // Not actually spent — the window handed budget back. Reschedule; this is
-    // the "always early, never late" property doing its job.
-    log(`${ruleId}: not spent after all, rescheduling`);
-  }
-  await syncExhaustionAlarm(rule, now);
+  if (acted === 0) log(`${ruleId}: ${describe(rule, now)}`);
+  await syncRuleAlarm(rule, now);
 });
 
 // --- messaging -----------------------------------------------------------
 
 // Serves the block page and the popup. Deliberately NOT an async listener: a
 // listener that returns a promise claims the response channel for every
-// message, so only the branch we actually answer returns one.
-browser.runtime.onMessage.addListener((message) => {
-  if (message?.type !== "status") return undefined;
-  return (async () => {
-    await loaded;
+// message, so only a message we actually answer returns one.
+//
+// Usage is hot state owned by the background, so the popup's actions on it
+// (lock in, and later a pass) go through here rather than through storage.
+// The options page still never messages the background.
+const handlers = {
+  async status() {
     const now = Date.now();
     return rules.map((rule) => status(rule, now));
+  },
+
+  async lockIn({ ruleId }) {
+    const rule = rules.find((r) => r.id === ruleId);
+    if (!rule) return { ok: false, error: `no such rule: ${ruleId}` };
+    const now = Date.now();
+    const ms = lockInRule(rule, now);
+    flush(now);
+    const snapshot = status(rule, now);
+    log(
+      `🔒 locked in ${rule.id}: spent ${clock(ms)} on purpose,`,
+      `blocked until ${wallClock(snapshot.unlockAtMs, now)} (${snapshot.reason})`,
+    );
+    await enforceRule(rule, now);
+    await syncRuleAlarm(rule, now);
+    return { ok: true, ms };
+  },
+};
+
+browser.runtime.onMessage.addListener((message) => {
+  const handler = handlers[message?.type];
+  if (!handler) return undefined;
+  return (async () => {
+    await loaded;
+    return handler(message);
   })();
 });
 

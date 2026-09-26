@@ -569,3 +569,98 @@ each is a few kilobytes, well inside the ledger's budget (§6).
 
 `normalizeUsage()` fills in the members a ledger stored by an older build lacks, so the
 0.1.x ledgers load unchanged and start folding from their next settle.
+
+---
+
+## 14. Several caps on one rule
+
+A rule can now carry a daily and a weekly cap on top of its rolling window:
+
+```js
+{ ..., dailyBudgetSec: 2400, weeklyBudgetSec: 18000 }   // null = no such cap
+```
+
+### Calendar, not rolling
+
+"Forty minutes a day" means a day that ends at local midnight and comes back all at once.
+That is what the words mean to the person who typed them, and it makes the unlock instant
+trivial: the start of the next period. A rolling 24-hour or 7-day window was considered and
+rejected. It would need a week of minute buckets (up to ~200KB rewritten on every flush),
+and it would hand the block page an unlock time nobody can predict. The week starts on
+Monday; not configurable in this round.
+
+Because a calendar cap returns whole at the boundary, the drip-feed of §8 cannot happen to
+it, so `minUnlockCreditSec` applies to the rolling cap only and its clamp stays in
+`accountant.unlockAt()`.
+
+### One decision: `policy.evaluate()`
+
+`store.status()` used to compute exhaustion from the rolling cap alone. It now spreads
+`policy.evaluate(rule, usage, now, { counting })` over its identity fields. `evaluate` is
+pure and combines every constraint the rule carries:
+
+- **Exhausted = any constraint says so.** `unlockAtMs` is the *max* over the exhausted
+  constraints' release instants, because the site is usable only once all of them allow it.
+  `reason` names the one that releases last, so the block page can say "done for today"
+  and count down to midnight rather than to the rolling window's earlier return.
+- **`remainingMs` is the *min* over the caps**, and `binding` names that cap, so the popup
+  can say "12:00 left (today)" when the daily cap is what will bite first.
+- **`nextChangeAtMs` is the earliest instant the answer could flip:** `now + remainingMs`
+  while counting, the unlock instant while exhausted, `null` when nothing will change on
+  its own. §17 adds a pass's end to the candidates.
+
+### One alarm per rule
+
+`syncExhaustionAlarm` became `syncRuleAlarm`, targeting `nextChangeAtMs` and clearing the
+alarm when it is `null`. The "only rewrite if it moved" guard is unchanged. This is a small
+but real change in when alarms exist: a blocked rule now holds an alarm at its unlock
+instant, so the toolbar badge (§18) can flip without a user event.
+
+### The ledger already had what the caps need
+
+A calendar cap's usage is `usedInPeriod()` from §13: folded days in the period plus live
+buckets that start in it. No new state, no migration of usage data. `SETTINGS_VERSION`
+went to 2 because this is the first step that stores a new rule field; `withDefaults` fills
+`null` into rules from a version-1 file, and later additive fields keep version 2.
+
+---
+
+## 16. Lock in
+
+A per-rule button in the popup that spends the rest of the current budget on purpose:
+"I am done with YouTube for now, block it." Irreversible by design; it is the one
+tightening action, and tightening never needs a cooling-off period.
+
+### Into the current bucket
+
+`accountant.lockIn()` adds the whole amount to the bucket that contains `now`. Spreading
+it over past buckets would let part of it expire sooner, and the user asked to stay
+blocked. With `minUnlockCreditSec` equal to the budget the unlock is exactly the current
+bucket's expiry, one window from now; with a smaller credit it is earlier, as the rolling
+window's rules already say.
+
+The amount is the *smallest* remainder across the caps (`policy.lockInAmount`). Locking in
+a rule whose daily cap has two minutes left spends those two minutes, which exhausts the
+daily cap, which blocks until midnight. That is what "lock in" means for that rule.
+
+### Checkpoint first
+
+`store.lockInRule()` checkpoints the open interval before spending, so the time counted so
+far is credited exactly once and the lock-in sits on top of it. The interval stays open;
+the sweep that follows closes the tab, and the observers close the interval as they
+always do.
+
+### It also ends a pass
+
+A pass (§17) suspends the rolling cap. Locking in while a pass is active ends the pass
+(`pass.to = now`) and then spends whatever the rolling cap has left, which may be nothing:
+the pass's own minutes already fill the window, so ending it is enough to block. The
+user pressed "block me now"; a pass must not be a reason to stay open.
+
+### The popup owns the control
+
+Lock-in acts on usage, which is hot state owned by the background, so it goes through a
+`lockIn` message like `status` does, never through storage. The confirm step is inline:
+the button becomes "Blocks YouTube until 14:32. Confirm" for five seconds, then reverts.
+`status()` carries `lockIn: { ms, unlockAtMs, reason }` (or `null` when blocked) so the
+popup shows the real consequence, computed by the same `evaluate` that will enforce it.

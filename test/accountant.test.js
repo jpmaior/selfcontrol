@@ -19,8 +19,8 @@ import {
   createUsage,
   creditAvailableAt,
   fold,
+  lockIn,
   normalizeUsage,
-  prune,
   remainingMs,
   unlockAt,
   usedByDay,
@@ -114,27 +114,27 @@ test("usedMs: the boundary bucket is counted whole (deliberately strict)", () =>
   assert.equal(usedMs(u, now + 1, HOUR), 0);
 });
 
-test("prune: drops expired buckets and keeps live ones", () => {
+test("fold: drops expired buckets and keeps live ones", () => {
   const u = createUsage();
   commit(u, T0, T0 + MIN); // bucket 1000
   commit(u, T0 + 30 * MIN, T0 + 31 * MIN); // bucket 1030
   commit(u, T0 + 59 * MIN, T0 + 60 * MIN); // bucket 1059
 
-  prune(u, T0 + 61 * MIN, HOUR);
+  fold(u, T0 + 61 * MIN, HOUR);
 
   assert.equal(u.b[1000], undefined, "expired bucket removed");
   assert.equal(u.b[1030], MIN, "live bucket kept");
   assert.equal(u.b[1059], MIN, "live bucket kept");
 });
 
-test("prune: does not change what usedMs reports", () => {
+test("fold: does not change what usedMs reports", () => {
   const u = createUsage();
   commit(u, T0, T0 + MIN);
   commit(u, T0 + 45 * MIN, T0 + 50 * MIN);
   const now = T0 + 70 * MIN;
 
   const before = usedMs(u, now, HOUR);
-  prune(u, now, HOUR);
+  fold(u, now, HOUR);
   assert.equal(usedMs(u, now, HOUR), before);
 });
 
@@ -309,10 +309,6 @@ test("fold: pass buckets fold into the day's pass component", () => {
   assert.deepEqual(u.d[KEY0], { used: MIN, pass: 4 * MIN });
 });
 
-test("prune is fold: the old name still works for one step", () => {
-  assert.equal(prune, fold);
-});
-
 // --- calendar periods ----------------------------------------------------
 
 test("usedInPeriod: folded days plus live buckets, never double counted", () => {
@@ -398,4 +394,38 @@ test("usedByDay: folded days and live buckets, per local day", () => {
     "2026-09-18": { used: 10 * MIN, pass: MIN },
     [KEY0]: { used: 2 * MIN, pass: MIN },
   });
+});
+
+// --- lock in ---------------------------------------------------------------
+
+test("lockIn: spends into the current bucket only, never spread over the past", () => {
+  const u = commit(createUsage(), T0, T0 + 5 * MIN); // buckets 1000..1004
+  const now = T0 + 12 * MIN + 30_000; // mid-bucket 1012
+  lockIn(u, now, 15 * MIN);
+
+  assert.equal(u.b[1012], 15 * MIN, "all of it in the bucket that contains now");
+  assert.equal(Object.keys(u.b).length, 6, "no other bucket was touched");
+  assert.equal(usedMs(u, now, HOUR), 20 * MIN);
+});
+
+test("lockIn: with strict credit the unlock is when the current bucket expires", () => {
+  const now = T0 + 12 * MIN + 30_000;
+  const u = lockIn(commit(createUsage(), T0, T0 + 5 * MIN), now, 15 * MIN);
+
+  // Spreading over past buckets would let some of it expire sooner; in one
+  // bucket, the whole lock-in returns at once when that bucket leaves the window.
+  const strict = { ...SEC_RULE, minUnlockCreditSec: 20 * 60 };
+  assert.equal(unlockAt(u, now, strict), bucketExpiresAt(bucketOf(now), HOUR));
+
+  const chunked = unlockAt(u, now, { ...SEC_RULE, minUnlockCreditSec: 5 * 60 });
+  assert.ok(chunked < bucketExpiresAt(bucketOf(now), HOUR), "a smaller credit returns earlier");
+  assert.ok(chunked > now, "but not now");
+});
+
+test("lockIn: zero or negative amounts change nothing", () => {
+  const u = commit(createUsage(), T0, T0 + MIN);
+  const before = structuredClone(u);
+  lockIn(u, T0 + 2 * MIN, 0);
+  lockIn(u, T0 + 2 * MIN, -5);
+  assert.deepEqual(u, before);
 });

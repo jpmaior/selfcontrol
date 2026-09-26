@@ -15,14 +15,13 @@ import {
   commit,
   createUsage,
   fold,
+  lockIn,
   normalizeUsage,
-  remainingMs,
-  unlockAt,
   usedInPeriod,
-  usedMs,
   windowOf,
 } from "./accountant.js";
 import { startOfDay, startOfWeek } from "../common/calendar.js";
+import { evaluate, lockInAmount, lockInPreview } from "../common/policy.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
 
@@ -182,6 +181,26 @@ export function checkpointRule(rule, nowMs) {
   return settle(rule, since, nowMs);
 }
 
+/**
+ * Spend the rest of the rule's budget on purpose (DESIGN.md §16). The open
+ * interval is checkpointed first so it is credited exactly once, and the
+ * interval stays open: it is the observers' job to close it when the tab is
+ * swept. Returns the milliseconds locked in.
+ */
+export function lockInRule(rule, nowMs) {
+  checkpointRule(rule, nowMs);
+  const usage = ledgerFor(rule.id);
+  const amount = lockInAmount(rule, usage, nowMs);
+  const passActive = Boolean(usage.pass && usage.pass.from <= nowMs && nowMs < usage.pass.to);
+  if (amount <= 0 && !passActive) return 0;
+
+  lockIn(usage, nowMs, amount);
+  if (passActive && amount <= 0) usage.pass = { ...usage.pass, to: nowMs };
+  fold(usage, nowMs, rule.windowSec * 1000);
+  dirty.add(rule.id);
+  return amount;
+}
+
 function settle(rule, fromMs, toMs) {
   const usage = ledgerFor(rule.id);
   commit(usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS });
@@ -246,23 +265,26 @@ function period(usage, startMs) {
   return { usedMs: used, passMs: all - used };
 }
 
-/** Everything a popup, block page or enforcer needs to know about one rule. */
+/**
+ * Everything a popup, block page or enforcer needs to know about one rule.
+ * The decision itself is policy.evaluate(); this adds identity, the rolling
+ * meter's numbers and the calendar totals.
+ */
 export function status(rule, nowMs) {
   const usage = projected(rule, nowMs);
-  const limits = windowOf(rule);
-  const remaining = remainingMs(usage, nowMs, limits);
+  const counting = openSince.has(rule.id);
+  const decision = evaluate(rule, usage, nowMs, { counting });
 
   return {
     id: rule.id,
     label: rule.label,
     mode: rule.mode,
-    counting: openSince.has(rule.id),
-    usedMs: usedMs(usage, nowMs, limits.windowMs),
-    budgetMs: limits.budgetMs,
-    windowMs: limits.windowMs,
-    remainingMs: remaining,
-    exhausted: remaining <= 0,
-    unlockAtMs: remaining > 0 ? nowMs : unlockAt(usage, nowMs, rule),
+    counting,
+    usedMs: decision.caps.rolling.usedMs,
+    budgetMs: decision.caps.rolling.budgetMs,
+    windowMs: windowOf(rule).windowMs,
+    lockIn: lockInPreview(rule, usage, nowMs),
+    ...decision,
     today: period(usage, startOfDay(nowMs)),
     week: period(usage, startOfWeek(nowMs)),
   };
