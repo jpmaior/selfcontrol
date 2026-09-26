@@ -17,6 +17,7 @@ import { loadRules, saveRules } from "../common/settings.js";
 import { normalizeUsage, usedByDay } from "../background/accountant.js";
 import { addDays, dayKey, startOfDay } from "../common/calendar.js";
 import { clock } from "../common/format.js";
+import { importSummary, parseImport, serializeRules } from "../common/transfer.js";
 
 /** Days drawn in the history strip; the ledger keeps more (HISTORY_DAYS). */
 const HISTORY_SHOWN = 30;
@@ -364,8 +365,88 @@ async function save() {
   // The background has now forgotten any deleted rule's usage, so its id is
   // genuinely free again from here on.
   reservedIds = drafts.map((d) => d.id);
+  // The background has now forgotten any deleted rule's usage, so the history
+  // this page shows must not keep claiming otherwise.
+  await loadHistory(drafts);
+  render();
   setStatus("Saved — applied immediately.", "ok");
 }
+
+// --- export and import ---------------------------------------------------
+
+/** What is saved, not the drafts: an export must not carry unsaved edits. */
+async function exportRules() {
+  const rules = await loadRules();
+  const json = JSON.stringify(serializeRules(rules, Date.now()), null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `selfcontrol-rules-${dayKey(Date.now())}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  setStatus(`Exported ${rules.length} rule${rules.length === 1 ? "" : "s"}.`, "ok");
+}
+
+const transferEl = document.getElementById("transfer");
+const transferSummaryEl = document.getElementById("transfer-summary");
+
+/** The parsed rules waiting for the user to confirm, or null. */
+let pendingImport = null;
+
+function describeImport(current, incoming) {
+  const { added, kept, removed } = importSummary(current, incoming);
+  const n = (count) => `${count} rule${count === 1 ? "" : "s"}`;
+  const parts = [`${n(incoming.length)} replace your ${n(current.length)}.`];
+  if (kept.length > 0) parts.push(`${kept.join(", ")} keep${kept.length === 1 ? "s" : ""} its history;`);
+  if (removed.length > 0) parts.push(`${removed.join(", ")}: history discarded.`);
+  if (added.length > 0) parts.push(`${added.join(", ")}: new.`);
+  return parts.join(" ").replace(/;$/, ".");
+}
+
+async function importFromFile(file) {
+  const result = parseImport(await file.text());
+  if (!result.ok) {
+    setStatus(`Import refused: ${result.error}`, "bad");
+    return;
+  }
+  // Against what is saved, since that is whose history is at stake.
+  const current = await loadRules();
+  pendingImport = result.rules;
+  transferSummaryEl.textContent = describeImport(current, result.rules);
+  transferEl.hidden = false;
+  clearStatus();
+}
+
+function cancelImport() {
+  pendingImport = null;
+  transferEl.hidden = true;
+}
+
+/** Replace the drafts and go through the ordinary save path, validation included. */
+async function confirmImport() {
+  if (!pendingImport) return;
+  drafts = pendingImport.map((rule) => structuredClone(rule));
+  cancelImport();
+  render();
+  await save();
+}
+
+document.getElementById("export").addEventListener("click", exportRules);
+
+const fileInput = document.getElementById("import-file");
+document.getElementById("import").addEventListener("click", () => {
+  fileInput.value = "";
+  fileInput.click();
+});
+fileInput.addEventListener("change", () => {
+  const [file] = fileInput.files;
+  if (file) importFromFile(file);
+});
+document.getElementById("transfer-confirm").addEventListener("click", confirmImport);
+document.getElementById("transfer-cancel").addEventListener("click", cancelImport);
 
 // --- wiring --------------------------------------------------------------
 

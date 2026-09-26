@@ -93,7 +93,8 @@ problem of DESIGN.md §8 does not exist for it.
 **One alarm per rule, at `nextChangeAtMs`.** `syncExhaustionAlarm` is renamed
 `syncRuleAlarm` and keeps its "only rewrite if it moved" guard. The target is the earliest of:
 `now + remainingMs` while counting; the end of an active pass; the next scheduled block start;
-the unlock instant while exhausted (so the badge can flip without a user event). The alarm is
+the unlock instant while exhausted (originally so the badge could flip without a user event;
+the badge was dropped in Step 6, the alarm stayed). The alarm is
 therefore set for scheduled rules even while nothing is counting, which is new: a rule with a
 schedule but no open tab still gets one alarm days away, and that is fine. The handler stays
 what it is: checkpoint, flush, `enforceRule`, re-sync.
@@ -393,7 +394,11 @@ the caps can exclude it, popup-only control.
 
 ---
 
-### Step 6: Toolbar badge
+### Step 6: Toolbar badge — dropped (2026-09-26)
+
+Built as PR #6, tried, and not wanted: closed without merging. Steps 7 and 8 were rebased
+off it, so nothing below depends on it; the plan stays here for the record. The unlock
+alarm from Step 2, which the badge was the first reason for, stays (DESIGN.md §14).
 
 A state indicator, not a countdown: set only on transitions, so nothing ticks.
 

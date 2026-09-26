@@ -614,7 +614,9 @@ pure and combines every constraint the rule carries:
 `syncExhaustionAlarm` became `syncRuleAlarm`, targeting `nextChangeAtMs` and clearing the
 alarm when it is `null`. The "only rewrite if it moved" guard is unchanged. This is a small
 but real change in when alarms exist: a blocked rule now holds an alarm at its unlock
-instant, so the toolbar badge (§18) can flip without a user event.
+instant. It was added so a toolbar badge could flip without a user event; the badge was
+built as PR #6 and dropped (2026-09-26), and the alarm stays as it is, because one wake-up
+per unlock costs nothing and dropping it would mean a special case in `nextChangeAtMs`.
 
 ### The ledger already had what the caps need
 
@@ -735,3 +737,34 @@ The parameter is attacker-shaped input, since anyone can type a block page URL, 
 `returnUrlFrom()` accepts only what `hostnameOf` accepts: `http(s)`, nothing else. A
 `javascript:` or `data:` value rendered as a link would be a script injection into an
 extension page.
+
+---
+
+## 20. Export and import
+
+A backup, and the only practical way to carry a rule set to Android. The file is an
+envelope around strip-clean rules:
+
+```json
+{ "format": "selfcontrol-rules", "version": 2, "exportedAt": "…", "rules": [ … ] }
+```
+
+**Export writes what is saved, not the drafts.** An export that silently carried
+half-typed edits would be a surprise on the other end.
+
+**Import is all-or-nothing.** `parseImport()` fills defaults with `withDefaults`, so a
+version-1 file loads, then validates every rule against the others exactly as the form
+does. One bad rule refuses the whole file and names it, with its position: a half-applied
+rule set is worse than none. Ids are kept as they are in the file, because an id is the
+key a rule's usage hangs off; duplicate or missing ids are refused for the same reason.
+
+**The user sees the cost before confirming.** `importSummary()` says which ids are new,
+which keep their history, and which current rules are about to lose theirs. Only after
+the confirm do the imported rules replace the drafts, and then they go through the
+ordinary `save()` path, so import can never bypass validation. `strip()` moved into
+`rules.js` so export and the form share one definition of what a rule is made of.
+
+**A loosening path, on purpose.** Editing a rule, importing a file, using a pass and
+locking in all touch what a rule allows. A cooling-off period, in which a rule that
+loosens takes effect only after a delay the user chose while tightening is immediate,
+would close the first two; it is deliberately not in this round (TODO.md).
