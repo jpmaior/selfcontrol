@@ -132,6 +132,16 @@ header h1 {
   background: var(--accent);
 }
 
+/* During a pass the rolling meter is suspended, so it steps back. */
+.rule.pass .meter {
+  opacity: 0.35;
+}
+
+.rule.pass .state {
+  color: var(--live);
+  font-weight: 600;
+}
+
 .detail {
   display: flex;
   justify-content: space-between;

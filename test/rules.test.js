@@ -13,6 +13,7 @@ import {
   hostMatches,
   makeRuleId,
   parseDomain,
+  returnUrlFrom,
   ruleForUrl,
   strip,
   validateRule,
@@ -234,4 +235,63 @@ test("strip: keeps only the fields a rule is made of", () => {
   assert.equal(stripped.label, "Test");
   assert.equal(stripped.dailyBudgetSec, 60);
   assert.equal(stripped.weeklyBudgetSec, null);
+});
+
+// --- passes ----------------------------------------------------------------
+
+test("withDefaults: passes default to disabled, an hour long, counting toward the caps", () => {
+  assert.deepEqual(withDefaults({ id: "x" }).passes, { perWeek: 0, durationSec: 60 * 60, countsTowardCaps: true });
+  const stored = { id: "x", passes: { perWeek: 2, durationSec: 600, countsTowardCaps: false } };
+  assert.deepEqual(withDefaults(stored).passes, stored.passes);
+  assert.deepEqual(
+    withDefaults({ id: "x", passes: { perWeek: 1 } }).passes,
+    { perWeek: 1, durationSec: 60 * 60, countsTowardCaps: true },
+    "a partial passes object is filled in",
+  );
+});
+
+test("validateRule: passes need a whole non-negative count, a positive length, a boolean", () => {
+  const ok = (passes) => validateRule(rule({ passes }));
+  assert.deepEqual(ok({ perWeek: 0, durationSec: 60, countsTowardCaps: true }), []);
+  assert.deepEqual(ok({ perWeek: 3, durationSec: 60, countsTowardCaps: false }), []);
+  assert.deepEqual(ok({ perWeek: 0, durationSec: 0, countsTowardCaps: true }), [], "length is irrelevant when disabled");
+
+  assert.ok(ok({ perWeek: -1, durationSec: 60, countsTowardCaps: true }).length > 0);
+  assert.ok(ok({ perWeek: 1.5, durationSec: 60, countsTowardCaps: true }).length > 0);
+  assert.ok(ok({ perWeek: 1, durationSec: 0, countsTowardCaps: true }).length > 0);
+  assert.ok(ok({ perWeek: 1, durationSec: -5, countsTowardCaps: true }).length > 0);
+  assert.ok(ok({ perWeek: 1, durationSec: 60, countsTowardCaps: "yes" }).length > 0);
+  assert.ok(ok("two").length > 0);
+});
+
+test("strip: keeps passes in their canonical shape", () => {
+  const stripped = strip(rule({ passes: { perWeek: 2, durationSec: 600, countsTowardCaps: false, junk: 1 } }));
+  assert.deepEqual(stripped.passes, { perWeek: 2, durationSec: 600, countsTowardCaps: false });
+});
+
+// --- the block page's return link -------------------------------------------
+
+test("returnUrlFrom: accepts http(s) and keeps the query and fragment", () => {
+  const url = "https://www.youtube.com/watch?v=abc&t=42#comments";
+  assert.equal(returnUrlFrom(new URLSearchParams({ url })), url);
+  assert.equal(returnUrlFrom(new URLSearchParams({ url: "http://example.com/a?b=1" })), "http://example.com/a?b=1");
+});
+
+test("returnUrlFrom: refuses anything that is not a web page", () => {
+  for (const bad of [
+    "javascript:alert(1)",
+    "data:text/html,hi",
+    "moz-extension://abc/blocked/blocked.html",
+    "file:///etc/passwd",
+    "about:blank",
+    "not a url",
+    "",
+  ]) {
+    assert.equal(returnUrlFrom(new URLSearchParams({ url: bad })), null, bad);
+  }
+});
+
+test("returnUrlFrom: null for a missing parameter", () => {
+  assert.equal(returnUrlFrom(new URLSearchParams()), null);
+  assert.equal(returnUrlFrom(new URLSearchParams({ rule: "youtube" })), null);
 });

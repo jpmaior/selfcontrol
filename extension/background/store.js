@@ -17,11 +17,14 @@ import {
   fold,
   lockIn,
   normalizeUsage,
+  passActive,
+  passesLeft,
+  startPass,
   usedInPeriod,
   windowOf,
 } from "./accountant.js";
 import { startOfDay, startOfWeek } from "../common/calendar.js";
-import { evaluate, lockInAmount, lockInPreview } from "../common/policy.js";
+import { canUsePass, evaluate, lockInAmount, lockInPreview } from "../common/policy.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
 
@@ -191,19 +194,32 @@ export function lockInRule(rule, nowMs) {
   checkpointRule(rule, nowMs);
   const usage = ledgerFor(rule.id);
   const amount = lockInAmount(rule, usage, nowMs);
-  const passActive = Boolean(usage.pass && usage.pass.from <= nowMs && nowMs < usage.pass.to);
-  if (amount <= 0 && !passActive) return 0;
+  const active = passActive(usage, nowMs);
+  if (amount <= 0 && !active) return 0;
 
-  lockIn(usage, nowMs, amount);
-  if (passActive && amount <= 0) usage.pass = { ...usage.pass, to: nowMs };
+  lockIn(usage, nowMs, amount); // ends the pass too, if one is active
   fold(usage, nowMs, rule.windowSec * 1000);
   dirty.add(rule.id);
   return amount;
 }
 
+/**
+ * Use one of this week's passes (DESIGN.md §17). The open interval is
+ * checkpointed first so the time before the click stays ordinary usage and
+ * only what follows accrues under the pass. Returns false when refused.
+ */
+export function usePassOnRule(rule, nowMs) {
+  checkpointRule(rule, nowMs);
+  const usage = ledgerFor(rule.id);
+  if (canUsePass(rule, usage, nowMs) !== null) return false;
+  startPass(usage, rule, nowMs);
+  dirty.add(rule.id);
+  return true;
+}
+
 function settle(rule, fromMs, toMs) {
   const usage = ledgerFor(rule.id);
-  commit(usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS });
+  commit(usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS, pass: usage.pass });
   fold(usage, toMs, rule.windowSec * 1000);
   dirty.add(rule.id);
   return Math.min(Math.max(0, toMs - fromMs), MAX_CHUNK_MS);
@@ -255,7 +271,7 @@ function projected(rule, nowMs) {
   const since = openSince.get(rule.id);
   if (since === undefined) return usage;
   const copy = { ...usage, b: { ...usage.b }, p: { ...usage.p } };
-  return commit(copy, since, nowMs, { maxChunkMs: MAX_CHUNK_MS });
+  return commit(copy, since, nowMs, { maxChunkMs: MAX_CHUNK_MS, pass: usage.pass });
 }
 
 /** Used and pass time since a local period start, for the popup. */
@@ -284,6 +300,10 @@ export function status(rule, nowMs) {
     budgetMs: decision.caps.rolling.budgetMs,
     windowMs: windowOf(rule).windowMs,
     lockIn: lockInPreview(rule, usage, nowMs),
+    passOffer:
+      canUsePass(rule, usage, nowMs) === null
+        ? { left: passesLeft(rule, usage, nowMs), durationMs: rule.passes.durationSec * 1000 }
+        : null,
     ...decision,
     today: period(usage, startOfDay(nowMs)),
     week: period(usage, startOfWeek(nowMs)),

@@ -17,6 +17,9 @@ export const ON_EXCEED = [
   { value: "close", label: "Close the tab" },
 ];
 
+/** perWeek 0 disables passes; the other two only matter once it is not. */
+export const DEFAULT_PASSES = { perWeek: 0, durationSec: 60 * 60, countsTowardCaps: true };
+
 export const DEFAULT_RULES = [
   {
     id: "youtube",
@@ -29,6 +32,7 @@ export const DEFAULT_RULES = [
     minUnlockCreditSec: 5 * 60,
     dailyBudgetSec: null, // calendar day, local time; null = no daily cap
     weeklyBudgetSec: null, // calendar week from Monday, local time; null = none
+    passes: { ...DEFAULT_PASSES },
   },
   {
     id: "instagram",
@@ -41,6 +45,7 @@ export const DEFAULT_RULES = [
     minUnlockCreditSec: 5 * 60,
     dailyBudgetSec: null,
     weeklyBudgetSec: null,
+    passes: { ...DEFAULT_PASSES },
   },
 ];
 
@@ -65,6 +70,20 @@ export function hostnameOf(url) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The page a block replaced, read back from the block page's own query
+ * string, or null. Only http(s) URLs that hostnameOf accepts come through:
+ * the parameter is attacker-shaped input (anyone can type a block page URL),
+ * and a `javascript:` or `data:` link rendered into the page would be a
+ * script injection. The query and fragment are kept, so a video resumes
+ * where it was.
+ */
+export function returnUrlFrom(params) {
+  const raw = params?.get?.("url");
+  if (!raw) return null;
+  return hostnameOf(raw) ? new URL(raw).href : null;
 }
 
 /**
@@ -141,6 +160,7 @@ export function blankRule() {
     minUnlockCreditSec: 5 * 60,
     dailyBudgetSec: null,
     weeklyBudgetSec: null,
+    passes: { ...DEFAULT_PASSES },
   };
 }
 
@@ -159,8 +179,11 @@ export function withDefaults(rule) {
     dailyBudgetSec: null,
     weeklyBudgetSec: null,
     ...rule,
+    passes: { ...DEFAULT_PASSES, ...(isObject(rule.passes) ? rule.passes : {}) },
   };
 }
+
+const isObject = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
 
 /**
  * Only the fields a rule is made of, in their canonical shape. A whitelist on
@@ -179,6 +202,11 @@ export function strip(draft) {
     minUnlockCreditSec: draft.minUnlockCreditSec,
     dailyBudgetSec: draft.dailyBudgetSec ?? null,
     weeklyBudgetSec: draft.weeklyBudgetSec ?? null,
+    passes: {
+      perWeek: draft.passes?.perWeek ?? 0,
+      durationSec: draft.passes?.durationSec ?? DEFAULT_PASSES.durationSec,
+      countsTowardCaps: draft.passes?.countsTowardCaps ?? true,
+    },
   };
 }
 
@@ -225,6 +253,23 @@ export function validateRule(rule, allRules = []) {
 
   validateCap(rule.dailyBudgetSec, MAX_DAILY_SEC, "Daily cap", errors);
   validateCap(rule.weeklyBudgetSec, MAX_WEEKLY_SEC, "Weekly cap", errors);
+
+  if (rule.passes !== undefined) {
+    const passes = rule.passes;
+    if (!isObject(passes)) {
+      errors.push("Passes must be an object.");
+    } else {
+      if (!Number.isInteger(passes.perWeek) || passes.perWeek < 0) {
+        errors.push("Passes per week must be a whole number, zero or more.");
+      }
+      if (passes.perWeek > 0 && !(Number.isInteger(passes.durationSec) && passes.durationSec > 0)) {
+        errors.push("Pass length must be more than zero.");
+      }
+      if (typeof passes.countsTowardCaps !== "boolean") {
+        errors.push("Whether pass time counts toward the caps must be yes or no.");
+      }
+    }
+  }
 
   // Unsaved rules have no id yet, so two of them are not "duplicates".
   if (rule.id) {

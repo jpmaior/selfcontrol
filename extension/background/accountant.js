@@ -17,7 +17,7 @@
 // Milliseconds rather than seconds so that many short intervals cannot
 // accumulate rounding drift; the JSON size difference is a few hundred bytes.
 
-import { addDays, dayKey } from "../common/calendar.js";
+import { addDays, dayKey, startOfWeek } from "../common/calendar.js";
 
 export const BUCKET_MS = 60_000;
 
@@ -66,23 +66,49 @@ export function normalizeUsage(value) {
  * moving the *start* forward rather than truncating the end, because the one
  * thing we know is that the machine was awake around `toMs`.
  *
+ * `pass` is the ledger's `{ from, to }`, if any: the part of the interval
+ * inside it goes to `p` rather than `b`, so the calendar caps can leave pass
+ * time out while the rolling window always counts it (DESIGN.md §17).
+ *
  * Mutates and returns `usage`.
  */
-export function commit(usage, fromMs, toMs, { maxChunkMs = Infinity } = {}) {
+export function commit(usage, fromMs, toMs, { maxChunkMs = Infinity, pass = null } = {}) {
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return usage;
   if (toMs <= fromMs) return usage; // zero-length, or a clock that went backwards
 
   const start = Math.max(fromMs, toMs - maxChunkMs);
 
+  if (pass && pass.from < toMs && pass.to > start) {
+    credit(usage.b, start, Math.min(pass.from, toMs));
+    credit(usage.p, Math.max(start, pass.from), Math.min(pass.to, toMs));
+    credit(usage.b, Math.max(start, pass.to), toMs);
+  } else {
+    credit(usage.b, start, toMs);
+  }
+  return usage;
+}
+
+function credit(map, fromMs, toMs) {
+  if (toMs <= fromMs) return;
   // `toMs - 1` so an interval ending exactly on a boundary does not create a
   // trailing zero-width bucket.
-  for (let bucket = bucketOf(start); bucket <= bucketOf(toMs - 1); bucket++) {
-    const lo = Math.max(start, bucket * BUCKET_MS);
+  for (let bucket = bucketOf(fromMs); bucket <= bucketOf(toMs - 1); bucket++) {
+    const lo = Math.max(fromMs, bucket * BUCKET_MS);
     const hi = Math.min(toMs, (bucket + 1) * BUCKET_MS);
-    if (hi > lo) usage.b[bucket] = (usage.b[bucket] ?? 0) + (hi - lo);
+    if (hi > lo) map[bucket] = (map[bucket] ?? 0) + (hi - lo);
   }
+}
 
-  return usage;
+/** Live buckets from both maps, summed per bucket index, from `oldest` on. */
+function liveBuckets(usage, oldest) {
+  const live = new Map();
+  for (const map of [usage.b, usage.p]) {
+    for (const [key, ms] of Object.entries(map)) {
+      const bucket = Number(key);
+      if (bucket >= oldest) live.set(bucket, (live.get(bucket) ?? 0) + ms);
+    }
+  }
+  return live;
 }
 
 /**
@@ -103,6 +129,12 @@ export function fold(usage, nowMs, windowMs) {
   const cutoff = dayKey(addDays(nowMs, -(HISTORY_DAYS - 1)));
   for (const key of Object.keys(usage.d)) {
     if (key < cutoff) delete usage.d[key];
+  }
+
+  // Pass uses only matter for this week's allowance.
+  const week = startOfWeek(nowMs);
+  if (usage.passUses.some((at) => at < week)) {
+    usage.passUses = usage.passUses.filter((at) => at >= week);
   }
   return usage;
 }
@@ -167,11 +199,8 @@ export function usedByDay(usage) {
  * blocking slightly early — the right direction for this tool.
  */
 export function usedMs(usage, nowMs, windowMs) {
-  const oldest = bucketOf(nowMs - windowMs);
   let total = 0;
-  for (const [key, ms] of Object.entries(usage.b)) {
-    if (Number(key) >= oldest) total += ms;
-  }
+  for (const ms of liveBuckets(usage, bucketOf(nowMs - windowMs)).values()) total += ms;
   return total;
 }
 
@@ -195,14 +224,9 @@ export function creditAvailableAt(usage, nowMs, { budgetMs, windowMs }, neededMs
   let used = usedMs(usage, nowMs, windowMs);
   if (budgetMs - used >= needed) return nowMs;
 
-  const oldest = bucketOf(nowMs - windowMs);
-  const live = Object.keys(usage.b)
-    .map(Number)
-    .filter((bucket) => bucket >= oldest)
-    .sort((a, b) => a - b);
-
-  for (const bucket of live) {
-    used -= usage.b[bucket];
+  const live = liveBuckets(usage, bucketOf(nowMs - windowMs));
+  for (const bucket of [...live.keys()].sort((a, b) => a - b)) {
+    used -= live.get(bucket);
     if (budgetMs - used >= needed) return bucketExpiresAt(bucket, windowMs);
   }
 
@@ -218,13 +242,34 @@ export function creditAvailableAt(usage, nowMs, { budgetMs, windowMs }, neededMs
  * ended first, since the user is asking to be blocked. Mutates and returns.
  */
 export function lockIn(usage, nowMs, ms) {
+  if (passActive(usage, nowMs)) usage.pass = { ...usage.pass, to: nowMs };
   if (!(ms > 0)) return usage;
-  if (usage.pass && usage.pass.from <= nowMs && nowMs < usage.pass.to) {
-    usage.pass = { ...usage.pass, to: nowMs };
-  }
   const bucket = bucketOf(nowMs);
   usage.b[bucket] = (usage.b[bucket] ?? 0) + ms;
   return usage;
+}
+
+// --- passes (DESIGN.md §17) -------------------------------------------------
+
+export function passActive(usage, nowMs) {
+  const pass = usage.pass;
+  return Boolean(pass) && pass.from <= nowMs && nowMs < pass.to;
+}
+
+/** Start a pass now: the rolling cap is suspended until `to`. Mutates and returns. */
+export function startPass(usage, rule, nowMs) {
+  usage.pass = { from: nowMs, to: nowMs + rule.passes.durationSec * 1000 };
+  usage.passUses.push(nowMs);
+  return usage;
+}
+
+/** The weekly allowance minus the uses since Monday, never negative. */
+export function passesLeft(rule, usage, nowMs) {
+  const perWeek = rule.passes?.perWeek ?? 0;
+  if (!(perWeek > 0)) return 0;
+  const week = startOfWeek(nowMs);
+  const used = usage.passUses.filter((at) => at >= week).length;
+  return Math.max(0, perWeek - used);
 }
 
 /** Convenience for rules, which are authored in seconds. */

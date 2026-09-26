@@ -73,12 +73,17 @@ function createRow(status) {
     if (!reply?.ok) setNote(reply?.error ?? "Could not lock in.");
     await refresh();
   });
-  actions.append(lockIn.button);
+  const usePass = actionButton("Use a pass", async () => {
+    const reply = await browser.runtime.sendMessage({ type: "usePass", ruleId: status.id });
+    if (!reply?.ok) setNote(reply?.error ?? "Could not use a pass.");
+    await refresh();
+  });
+  actions.append(usePass.button, lockIn.button);
 
   li.append(row, meter, detail, calendar, actions);
   listEl.append(li);
 
-  const parts = { li, state, fill, used, right, calendar, lockIn };
+  const parts = { li, state, fill, used, right, calendar, lockIn, usePass };
   rows.set(status.id, parts);
   return parts;
 }
@@ -88,10 +93,16 @@ function render(status, nowMs) {
 
   parts.li.classList.toggle("live", status.counting && !status.exhausted);
   parts.li.classList.toggle("spent", status.exhausted);
+  parts.li.classList.toggle("pass", Boolean(status.pass?.active) && !status.exhausted);
 
   if (status.exhausted) {
     parts.state.textContent = BLOCKED_STATE[status.reason] ?? "blocked";
     parts.right.textContent = `unlocks in ${countdown(status.unlockAtMs - nowMs)}`;
+  } else if (status.pass?.active) {
+    // The rolling meter is suspended; the pass is what is running out.
+    parts.state.textContent = `pass, ${countdown(status.pass.endsAtMs - nowMs)} left`;
+    const which = status.binding && status.binding !== "pass" ? `${CAP_NAME[status.binding]}: ` : "";
+    parts.right.textContent = which ? `${which}${clock(status.remainingMs)} left` : "rolling window paused";
   } else {
     parts.state.textContent = status.counting ? "counting" : MODE_HINT[status.mode] ?? "";
     // The remainder is the smallest across the caps; say which one when it is
@@ -110,6 +121,15 @@ function render(status, nowMs) {
     parts.lockIn.disarm();
   }
 
+  const offer = status.passOffer;
+  parts.usePass.button.hidden = !offer;
+  if (offer) {
+    parts.usePass.setLabel(`Use a pass (${offer.left} left)`);
+    parts.usePass.arm(`Opens ${status.label} for ${clock(offer.durationMs)}. Confirm`);
+  } else {
+    parts.usePass.disarm();
+  }
+
   const lines = [];
   if (status.caps?.daily) lines.push(`today ${clock(status.caps.daily.usedMs)} / ${clock(status.caps.daily.budgetMs)}`);
   if (status.caps?.weekly) lines.push(`week ${clock(status.caps.weekly.usedMs)} / ${clock(status.caps.weekly.budgetMs)}`);
@@ -125,7 +145,8 @@ function render(status, nowMs) {
  * and whose second click runs `act`. `arm(text)` sets the confirm wording;
  * the caller refreshes it every tick so the "until" stays current.
  */
-function actionButton(label, act) {
+function actionButton(initialLabel, act) {
+  let label = initialLabel;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "action";
@@ -165,6 +186,10 @@ function actionButton(label, act) {
     arm(text) {
       confirmText = text;
       if (Date.now() < armedUntil) button.textContent = text;
+    },
+    setLabel(text) {
+      label = text;
+      if (Date.now() >= armedUntil) button.textContent = text;
     },
     disarm,
   };

@@ -8,12 +8,14 @@ process.env.TZ = "Europe/Lisbon";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { canLockIn, evaluate, lockInAmount, lockInPreview } from "../extension/common/policy.js";
+import { canLockIn, canUsePass, evaluate, lockInAmount, lockInPreview } from "../extension/common/policy.js";
 import {
   BUCKET_MS,
   bucketExpiresAt,
   commit,
   createUsage,
+  creditAvailableAt,
+  startPass,
 } from "../extension/background/accountant.js";
 import { startOfNextDay, startOfNextWeek } from "../extension/common/calendar.js";
 
@@ -208,4 +210,106 @@ test("lockInPreview: what the popup's confirm step shows", () => {
   assert.equal(daily.reason, "daily");
 
   assert.equal(lockInPreview(rule(), spent(20 * MIN), T0 + 20 * MIN), null, "nothing to lock in");
+});
+
+// --- passes ----------------------------------------------------------------
+
+const withPasses = (overrides = {}, passes = {}) =>
+  rule({ passes: { perWeek: 2, durationSec: 30 * 60, countsTowardCaps: true, ...passes }, ...overrides });
+
+/** Twenty minutes spent from T0, then a pass started at T0+20. */
+function midPass(r, minutesIn = 5) {
+  const u = spent(20 * MIN);
+  startPass(u, r, T0 + 20 * MIN);
+  const now = T0 + 20 * MIN + minutesIn * MIN;
+  commit(u, T0 + 20 * MIN, now, { pass: u.pass });
+  return { u, now };
+}
+
+test("canUsePass: refusals, and the rolling cap is not one of them", () => {
+  const now = T0 + 20 * MIN;
+  assert.equal(canUsePass(withPasses(), spent(20 * MIN), now), null, "rolling spent is the whole point");
+  assert.equal(canUsePass(withPasses(), spent(3 * MIN), now), null, "usable before it is spent, too");
+
+  assert.equal(typeof canUsePass(rule(), spent(20 * MIN), now), "string", "no passes configured");
+  assert.equal(typeof canUsePass(withPasses({}, { perWeek: 0 }), spent(20 * MIN), now), "string");
+
+  const used = spent(20 * MIN);
+  used.passUses = [T0, T0 + MIN];
+  assert.equal(typeof canUsePass(withPasses(), used, now), "string", "allowance spent this week");
+
+  const { u, now: later } = midPass(withPasses());
+  assert.equal(typeof canUsePass(withPasses(), u, later), "string", "one already active");
+
+  for (const countsTowardCaps of [true, false]) {
+    const daily = withPasses({ dailyBudgetSec: 5 * 60 }, { countsTowardCaps });
+    assert.equal(typeof canUsePass(daily, spent(5 * MIN), T0 + 5 * MIN), "string", `daily spent, counts=${countsTowardCaps}`);
+    const weekly = withPasses({ weeklyBudgetSec: 5 * 60 }, { countsTowardCaps });
+    assert.equal(typeof canUsePass(weekly, spent(5 * MIN), T0 + 5 * MIN), "string", `weekly spent, counts=${countsTowardCaps}`);
+  }
+});
+
+test("evaluate during a pass: open while only the rolling cap is spent", () => {
+  const r = withPasses();
+  const { u, now } = midPass(r);
+  const e = evaluate(r, u, now, { counting: true });
+  assert.equal(e.exhausted, false);
+  assert.equal(e.reason, null);
+  assert.equal(e.caps.rolling.exhausted, true, "the rolling cap is spent underneath");
+  assert.equal(e.pass.active, true);
+  assert.equal(e.pass.endsAtMs, T0 + 50 * MIN);
+  assert.equal(e.pass.leftThisWeek, 1);
+  assert.equal(e.nextChangeAtMs, T0 + 50 * MIN, "the pass end");
+});
+
+test("evaluate during a pass: the daily cap can fill mid-pass when the pass counts", () => {
+  const r = withPasses({ dailyBudgetSec: 23 * 60 }, { countsTowardCaps: true });
+  const { u, now } = midPass(r, 2);
+  const open = evaluate(r, u, now, { counting: true });
+  assert.equal(open.exhausted, false);
+  assert.equal(open.caps.daily.usedMs, 22 * MIN, "pass minutes count");
+  assert.equal(open.nextChangeAtMs, now + MIN, "the daily cap runs out before the pass ends");
+
+  const { u: u2, now: now2 } = midPass(r, 3);
+  const closed = evaluate(r, u2, now2, { counting: true });
+  assert.equal(closed.exhausted, true);
+  assert.equal(closed.reason, "daily");
+  assert.equal(closed.unlockAtMs, startOfNextDay(now2));
+});
+
+test("evaluate during a pass: with countsTowardCaps false the daily cap does not move", () => {
+  const r = withPasses({ dailyBudgetSec: 23 * 60 }, { countsTowardCaps: false });
+  const { u, now } = midPass(r, 5);
+  const e = evaluate(r, u, now, { counting: true });
+  assert.equal(e.exhausted, false);
+  assert.equal(e.caps.daily.usedMs, 20 * MIN, "only the pre-pass minutes");
+  assert.equal(e.caps.rolling.usedMs, 25 * MIN, "the rolling window sees the pass time");
+  assert.equal(e.nextChangeAtMs, T0 + 50 * MIN, "the pass end, not a cap");
+});
+
+test("evaluate just after the pass: the rolling cap is spent by the pass buckets", () => {
+  const r = withPasses();
+  const u = spent(20 * MIN);
+  startPass(u, r, T0 + 20 * MIN);
+  commit(u, T0 + 20 * MIN, T0 + 50 * MIN, { pass: u.pass });
+  const now = T0 + 50 * MIN;
+
+  const e = evaluate(r, u, now);
+  assert.equal(e.pass.active, false);
+  assert.equal(e.exhausted, true);
+  assert.equal(e.reason, "rolling");
+  // 5 min of credit needs the first five buckets from T0 gone, exactly as
+  // creditAvailableAt over b and p says.
+  assert.equal(e.unlockAtMs, creditAvailableAt(u, now, { budgetMs: 20 * MIN, windowMs: HOUR }, 5 * MIN));
+  assert.ok(e.unlockAtMs > now);
+});
+
+test("lockInPreview during a pass: ends it and spends what the rolling cap has left", () => {
+  const r = withPasses({ minUnlockCreditSec: 20 * 60 });
+  const { u, now } = midPass(r);
+  assert.equal(canLockIn(r, u, now), null, "lock-in stays available during a pass");
+  const preview = lockInPreview(r, u, now);
+  assert.equal(preview.ms, 0, "the rolling cap is already full");
+  assert.equal(preview.reason, "rolling");
+  assert.ok(preview.unlockAtMs > now, "blocked once the pass is ended");
 });

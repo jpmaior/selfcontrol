@@ -22,13 +22,19 @@ export function ruleIdFromAlarm(name) {
   return name.startsWith(RULE_PREFIX) ? name.slice(RULE_PREFIX.length) : null;
 }
 
-export function blockedUrlFor(rule, snapshot) {
+/**
+ * `originalUrl` is the page being replaced, so the block page can offer it
+ * back once the rule unlocks (DESIGN.md §19). Only the `block` action reaches
+ * a page, so `close` is unaffected.
+ */
+export function blockedUrlFor(rule, snapshot, originalUrl = null) {
   const params = new URLSearchParams({
     rule: rule.id,
     label: rule.label,
     until: String(snapshot.unlockAtMs),
     reason: snapshot.reason ?? "",
   });
+  if (originalUrl) params.set("url", originalUrl);
   return browser.runtime.getURL(`blocked/blocked.html?${params}`);
 }
 
@@ -50,7 +56,7 @@ async function act(rule, tab, snapshot) {
       await browser.tabs.remove(tab.id);
       return "closed";
     }
-    await browser.tabs.update(tab.id, { url: blockedUrlFor(rule, snapshot) });
+    await browser.tabs.update(tab.id, { url: blockedUrlFor(rule, snapshot, tab.url) });
     return "blocked";
   } catch (error) {
     // The tab can vanish between query and action; that is not an error worth

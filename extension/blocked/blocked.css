@@ -102,3 +102,15 @@ body.unlocked .meter-fill {
   width: 100% !important;
   background: #2e9e5b;
 }
+
+.return {
+  margin: 1rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.return a {
+  color: var(--accent);
+  font-weight: 600;
+}

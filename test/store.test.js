@@ -55,6 +55,7 @@ const {
   startCounting,
   status,
   stopCounting,
+  usePassOnRule,
 } = await import("../extension/background/store.js");
 
 const MIN = 60_000;
@@ -205,6 +206,35 @@ test("lockInRule: nothing to spend on an exhausted rule", async () => {
   stopCounting(r, T0 + 20 * MIN);
   assert.equal(status(r, T0 + 20 * MIN).exhausted, true);
   assert.equal(lockInRule(r, T0 + 20 * MIN), 0);
+});
+
+test("usePassOnRule: checkpoints first, so the interval before the click stays in b", async () => {
+  const r = { ...rule("passer"), passes: { perWeek: 1, durationSec: 10 * 60, countsTowardCaps: true } };
+  await load([r]);
+
+  startCounting(r, T0);
+  const clicked = T0 + 3 * MIN;
+  assert.equal(usePassOnRule(r, clicked), true);
+
+  const s = status(r, clicked + 2 * MIN);
+  assert.equal(s.pass.active, true);
+  assert.equal(s.pass.endsAtMs, clicked + 10 * MIN);
+  assert.equal(s.usedMs, 5 * MIN, "3 before the pass + 2 under it, in the rolling window");
+
+  stopCounting(r, clicked + 2 * MIN);
+  flush(clicked + 2 * MIN);
+  await settled();
+  const stored = local.data.get("usage:passer");
+  const sum = (map) => Object.values(map).reduce((a, ms) => a + ms, 0);
+  assert.equal(sum(stored.b), 3 * MIN, "before the click");
+  assert.equal(sum(stored.p), 2 * MIN, "under the pass");
+  assert.deepEqual(stored.passUses, [clicked]);
+});
+
+test("usePassOnRule: refused when the allowance is gone", async () => {
+  const r = { ...rule("nopass"), passes: { perWeek: 0, durationSec: 600, countsTowardCaps: true } };
+  await load([r]);
+  assert.equal(usePassOnRule(r, T0), false);
 });
 
 test("flush persists ledgers through the queue", async () => {
