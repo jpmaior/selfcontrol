@@ -1,4 +1,8 @@
 :root {
+  /* History bars. One pair for both modes: validated for lightness, chroma,
+     colour-vision separation and contrast against both card surfaces. */
+  --bar-used: #e4572e;
+  --bar-pass: #4d7ec2;
   --bg: #f4f5f7;
   --card: #ffffff;
   --ink: #1d2433;
@@ -214,4 +218,177 @@ button:focus-visible {
   font-size: 0.8rem;
   color: var(--muted);
   padding-bottom: 1rem;
+}
+
+/* --- history ------------------------------------------------------------- */
+
+.history {
+  border-top: 1px solid var(--line);
+  padding-top: 0.6rem;
+}
+
+.history summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.history-totals {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-body {
+  margin-top: 0.75rem;
+}
+
+.history-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Time axis on the left, dates along the bottom, hairline gridlines behind
+   the columns. The axes are recessive: the data is the only loud thing. */
+.chart {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.readout {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.plot {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.5rem;
+  row-gap: 0.25rem;
+}
+
+.y-axis {
+  position: relative;
+  height: 5rem;
+  min-width: 2.2rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.y-axis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  line-height: 1;
+}
+
+.area {
+  position: relative;
+  height: 5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.gridline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Thirty columns, growing from one baseline. Each is capped in width and the
+   leftover is air; segments are separated by a gap in the card colour rather
+   than a stroke, and the top segment carries the rounded data-end. The date
+   row below uses the same column layout so its labels line up. */
+.bars,
+.x-axis {
+  display: flex;
+  gap: 2px;
+}
+
+.bars {
+  position: absolute;
+  inset: 0;
+  align-items: flex-end;
+}
+
+.bar,
+.tick {
+  flex: 1 1 0;
+  max-width: 24px;
+  min-width: 3px;
+}
+
+.bar {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  border-radius: 2px;
+}
+
+/* The whole column is the hit target, not just the painted part. */
+.bar:hover,
+.bar:focus-visible {
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  outline: none;
+}
+
+.tick {
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: visible;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.seg {
+  flex: 0 0 auto;
+  border-radius: 0;
+}
+
+.seg.used {
+  background: var(--bar-used);
+}
+
+.seg.pass {
+  background: var(--bar-pass);
+}
+
+.seg.top {
+  border-radius: 4px 4px 0 0;
+}
+
+.legend {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.legend-item::before {
+  content: "";
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 2px;
+  margin-right: 0.35rem;
+  vertical-align: -1px;
+}
+
+.legend-item.used::before {
+  background: var(--bar-used);
+}
+
+.legend-item.pass::before {
+  background: var(--bar-pass);
 }

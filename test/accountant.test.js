@@ -4,21 +4,30 @@
 // No browser, no mocking: accountant.js takes the clock as an argument, so
 // every case here is plain data in, plain data out.
 
+// Folding is keyed by local day, so the zone is pinned (see calendar.test.js).
+process.env.TZ = "Europe/Lisbon";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   BUCKET_MS,
+  HISTORY_DAYS,
   bucketOf,
   bucketExpiresAt,
   commit,
   createUsage,
   creditAvailableAt,
+  fold,
+  normalizeUsage,
   prune,
   remainingMs,
   unlockAt,
+  usedByDay,
+  usedInPeriod,
   usedMs,
 } from "../extension/background/accountant.js";
+import { addDays, dayKey, startOfDay } from "../extension/common/calendar.js";
 
 /** Bucket 1000 starts here; using a round bucket keeps the arithmetic readable. */
 const T0 = 1000 * BUCKET_MS;
@@ -222,6 +231,171 @@ test("a realistic session: watch, pause, watch, then wait it out", () => {
   assert.ok(at <= t + HOUR, "and within the window");
 });
 
+// --- folding into calendar days ------------------------------------------
+
+/** 10:00 local on a Saturday; Lisbon is UTC+1 then, so this is bucket-aligned. */
+const DAY0 = new Date(2026, 8, 19, 10, 0).getTime();
+const KEY0 = "2026-09-19";
+
+test("fold: a bucket outside the window lands in its day and leaves b", () => {
+  const u = commit(createUsage(), DAY0, DAY0 + 3 * MIN);
+  fold(u, DAY0 + HOUR + 10 * MIN, HOUR);
+
+  assert.deepEqual(u.b, {}, "expired buckets are gone");
+  assert.deepEqual(u.d, { [KEY0]: { used: 3 * MIN, pass: 0 } });
+});
+
+test("fold: two buckets from the same day accumulate", () => {
+  const u = createUsage();
+  commit(u, DAY0, DAY0 + MIN);
+  commit(u, DAY0 + 30 * MIN, DAY0 + 32 * MIN);
+  fold(u, DAY0 + 2 * HOUR, HOUR);
+  assert.equal(u.d[KEY0].used, 3 * MIN);
+});
+
+test("fold: a bucket inside the window stays live and is not counted twice", () => {
+  const u = createUsage();
+  commit(u, DAY0, DAY0 + MIN); // will expire
+  commit(u, DAY0 + 50 * MIN, DAY0 + 51 * MIN); // still live
+  const now = DAY0 + 70 * MIN;
+  fold(u, now, HOUR);
+
+  assert.deepEqual(Object.keys(u.b).map(Number), [bucketOf(DAY0 + 50 * MIN)]);
+  assert.equal(u.d[KEY0].used, MIN);
+  assert.equal(usedMs(u, now, HOUR), MIN, "the rolling window still sees the live bucket");
+});
+
+test("fold: folding twice is idempotent", () => {
+  const u = commit(createUsage(), DAY0, DAY0 + 5 * MIN);
+  fold(u, DAY0 + 2 * HOUR, HOUR);
+  const once = structuredClone(u);
+  fold(u, DAY0 + 2 * HOUR, HOUR);
+  assert.deepEqual(u, once);
+});
+
+test("fold: buckets either side of local midnight land on different days", () => {
+  const beforeMidnight = new Date(2026, 8, 19, 23, 59).getTime();
+  const u = commit(createUsage(), beforeMidnight, beforeMidnight + 2 * MIN);
+  fold(u, beforeMidnight + 2 * HOUR, HOUR);
+  assert.deepEqual(u.d, {
+    "2026-09-19": { used: MIN, pass: 0 },
+    "2026-09-20": { used: MIN, pass: 0 },
+  });
+});
+
+test("fold: days older than the retention are dropped, the rest kept", () => {
+  const u = createUsage();
+  const old = addDays(DAY0, -(HISTORY_DAYS + 5));
+  const edge = addDays(DAY0, -(HISTORY_DAYS - 1));
+  u.d[dayKey(old)] = { used: MIN, pass: 0 };
+  u.d[dayKey(edge)] = { used: MIN, pass: 0 };
+  u.d[KEY0] = { used: MIN, pass: 0 };
+
+  fold(u, DAY0, HOUR);
+
+  assert.equal(u.d[dayKey(old)], undefined, "too old");
+  assert.ok(u.d[dayKey(edge)], "the oldest retained day survives");
+  assert.ok(u.d[KEY0]);
+});
+
+test("fold: pass buckets fold into the day's pass component", () => {
+  // Written before passes exist (Step 5) so that step cannot forget it.
+  const u = createUsage();
+  u.p[bucketOf(DAY0)] = 4 * MIN;
+  commit(u, DAY0 + MIN, DAY0 + 2 * MIN);
+  fold(u, DAY0 + 2 * HOUR, HOUR);
+
+  assert.deepEqual(u.p, {});
+  assert.deepEqual(u.d[KEY0], { used: MIN, pass: 4 * MIN });
+});
+
+test("prune is fold: the old name still works for one step", () => {
+  assert.equal(prune, fold);
+});
+
+// --- calendar periods ----------------------------------------------------
+
+test("usedInPeriod: folded days plus live buckets, never double counted", () => {
+  const u = createUsage();
+  commit(u, DAY0, DAY0 + 3 * MIN); // will fold
+  commit(u, DAY0 + 2 * HOUR, DAY0 + 2 * HOUR + 2 * MIN); // stays live
+  const now = DAY0 + 2 * HOUR + 30 * MIN;
+  fold(u, now, HOUR);
+
+  assert.equal(u.d[KEY0].used, 3 * MIN, "folded part");
+  assert.equal(usedInPeriod(u, startOfDay(now)), 5 * MIN);
+});
+
+test("usedInPeriod: a live bucket from before the period start is excluded", () => {
+  const lateLastNight = new Date(2026, 8, 19, 23, 58).getTime();
+  const u = commit(createUsage(), lateLastNight, lateLastNight + 4 * MIN); // 2 min each side
+  const today = new Date(2026, 8, 20, 0, 30).getTime();
+
+  assert.equal(usedInPeriod(u, startOfDay(today)), 2 * MIN);
+  assert.equal(usedInPeriod(u, startOfDay(lateLastNight)), 4 * MIN, "yesterday's period sees both");
+});
+
+test("usedInPeriod: the pass component can be excluded", () => {
+  const u = createUsage();
+  u.d[KEY0] = { used: 10 * MIN, pass: 7 * MIN };
+  u.p[bucketOf(DAY0 + 5 * HOUR)] = 2 * MIN;
+  commit(u, DAY0 + 5 * HOUR, DAY0 + 5 * HOUR + MIN);
+  const start = startOfDay(DAY0);
+
+  assert.equal(usedInPeriod(u, start), 20 * MIN, "everything by default");
+  assert.equal(usedInPeriod(u, start, { includePass: true }), 20 * MIN);
+  assert.equal(usedInPeriod(u, start, { includePass: false }), 11 * MIN);
+});
+
+test("usedInPeriod: days before the period do not count", () => {
+  const u = createUsage();
+  u.d["2026-09-18"] = { used: 30 * MIN, pass: 0 };
+  u.d[KEY0] = { used: MIN, pass: 0 };
+  assert.equal(usedInPeriod(u, startOfDay(DAY0)), MIN);
+  assert.equal(usedInPeriod(u, addDays(startOfDay(DAY0), -1)), 31 * MIN);
+});
+
+// --- ledger shape --------------------------------------------------------
+
+test("normalizeUsage: a ledger from an older build gains the new members", () => {
+  const u = normalizeUsage({ b: { 1000: 5000 } });
+  assert.deepEqual(u, { b: { 1000: 5000 }, p: {}, d: {}, pass: null, passUses: [] });
+});
+
+test("normalizeUsage: keeps what a current ledger already holds", () => {
+  const stored = {
+    b: { 1: 1 },
+    p: { 2: 2 },
+    d: { "2026-09-19": { used: 3, pass: 4 } },
+    pass: { from: 5, to: 6 },
+    passUses: [5],
+  };
+  assert.deepEqual(normalizeUsage(structuredClone(stored)), stored);
+});
+
+test("normalizeUsage: a malformed value becomes a fresh ledger", () => {
+  for (const bad of [undefined, null, 42, "b", [], { b: "nope" }, { b: null }]) {
+    assert.deepEqual(normalizeUsage(bad), createUsage(), `${JSON.stringify(bad)}`);
+  }
+  assert.deepEqual(createUsage(), { b: {}, p: {}, d: {}, pass: null, passUses: [] });
+});
+
+test("normalizeUsage: a malformed member is reset without touching the others", () => {
+  const u = normalizeUsage({ b: { 1: 1 }, p: 7, d: [], pass: "x", passUses: {} });
+  assert.deepEqual(u, { b: { 1: 1 }, p: {}, d: {}, pass: null, passUses: [] });
+});
+
 function total(usage) {
   return Object.values(usage.b).reduce((sum, ms) => sum + ms, 0);
 }
+
+test("usedByDay: folded days and live buckets, per local day", () => {
+  const u = createUsage();
+  u.d["2026-09-18"] = { used: 10 * MIN, pass: MIN };
+  commit(u, DAY0, DAY0 + 2 * MIN);
+  u.p[bucketOf(DAY0 + 5 * MIN)] = MIN;
+  assert.deepEqual(usedByDay(u), {
+    "2026-09-18": { used: 10 * MIN, pass: MIN },
+    [KEY0]: { used: 2 * MIN, pass: MIN },
+  });
+});
