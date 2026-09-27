@@ -14,6 +14,7 @@ node --test                  # the pure modules and store.js, milliseconds, no b
 web-ext lint                 # must stay at 0 errors, 0 warnings
 web-ext run                  # Firefox with live reload
 web-ext build                # unsigned zip, for inspecting what would ship
+nix develop .#browser        # Linux: adds Firefox on a virtual display, for tools/browser.mjs
 ```
 
 Nix flakes only see **git-tracked** files. A new file needs `git add` before `nix develop` sees
@@ -27,6 +28,7 @@ extension/common/       shared with the UI: rules, settings, format; policy, cal
                         schedule, transfer and badge arrive with the roadmap in TODO.md
 extension/popup|options|blocked/
 test/                   node --test
+tools/                  make-updates-json (release), browser (Firefox on a virtual display)
 docs/                   DESIGN.md, PLAN.md, RELEASE.md, TODO.md (open findings)
 ```
 
@@ -87,6 +89,14 @@ claiming it works.
 ⚠️ **An attached devtools console pins the event page alive**, so the suspend/restart cycle never
 happens while you are watching. Force it with **Terminate Background Script** in `about:debugging`
 (*Terminate* keeps `storage.session`; *Reload* clears it).
+
+**On a machine with no desktop**, `node tools/browser.mjs` (inside `nix develop .#browser`) runs
+Firefox on a virtual display with the extension installed temporarily. `shot` takes a
+screenshot, `popup` opens the real popup, `eval --bg 'dumpUsage()'` reaches the console
+handles, `terminate` is *Terminate Background Script* and `log` is the event page's console.
+Run it with no arguments for the rest. It attaches no devtools, so the event page suspends as it
+would for a user. On a fresh profile YouTube opens behind an EU consent dialog that pauses
+playback; reject it once and the profile in `.browser/` remembers.
 
 ## Workflow
 

@@ -79,6 +79,10 @@ no `browser.*`, no `Date.now()`, the clock is always an argument — which is wh
 testable without a browser. Everything else is verified by hand against the checkpoints in
 [PLAN.md](./docs/PLAN.md).
 
+No desktop? On Linux, `nix develop .#browser` adds Firefox on a virtual display, and
+`node tools/browser.mjs` drives it: screenshots, the real popup, the event page's console. Run
+it with no arguments for the commands.
+
 No bundler, no framework, no build step. Plain ES modules.
 
 ## Known limitations
