@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Blocked / Done for now Icon: Hourglass with running sand & urgent coral accent in the same dark navy rounded squircle style -->
+  <rect width="64" height="64" rx="14" fill="#2b3a55"/>
+  <!-- Top & bottom plates of hourglass -->
+  <rect x="20" y="16" width="24" height="4" rx="2" fill="#f5f7fa"/>
+  <rect x="20" y="44" width="24" height="4" rx="2" fill="#f5f7fa"/>
+  <!-- Hourglass glass outline -->
+  <path d="M23 20 L41 20 L34 32 L41 44 L23 44 L30 32 Z" fill="none" stroke="#f5f7fa" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- Upper sand chamber (drained/low) -->
+  <path d="M26 23 L38 23 L35 28 L29 28 Z" fill="#f5f7fa" opacity="0.4"/>
+  <!-- Sand trickle -->
+  <line x1="32" y1="30" x2="32" y2="35" stroke="#e4572e" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Lower sand chamber (accumulated budget elapsed - brand coral highlight) -->
+  <path d="M26.5 42 L37.5 42 L35 37 L29 37 Z" fill="#e4572e"/>
+  <!-- Soft accent dot -->
+  <circle cx="32" cy="10" r="2" fill="#e4572e"/>
+</svg>

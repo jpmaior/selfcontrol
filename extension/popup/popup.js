@@ -55,8 +55,14 @@ function createRow(status) {
   const detail = document.createElement("div");
   detail.className = "detail";
   const used = document.createElement("span");
+  used.className = "used";
+  // The clock icon is only there while blocked, beside "unlocks in".
+  const rightBox = document.createElement("span");
+  rightBox.className = "right";
+  const clockIcon = lineIcon("M12 7v5l3 2", "circle");
   const right = document.createElement("span");
-  detail.append(used, right);
+  rightBox.append(clockIcon, right);
+  detail.append(used, rightBox);
 
   // Only shown for rules that carry a daily or weekly cap.
   const calendar = document.createElement("div");
@@ -68,12 +74,12 @@ function createRow(status) {
   // do not mix.
   const actions = document.createElement("div");
   actions.className = "actions";
-  const lockIn = actionButton("Lock in", async () => {
+  const lockIn = actionButton("lock-in", "Lock in", null, async () => {
     const reply = await browser.runtime.sendMessage({ type: "lockIn", ruleId: status.id });
     if (!reply?.ok) setNote(reply?.error ?? "Could not lock in.");
     await refresh();
   });
-  const usePass = actionButton("Use a pass", async () => {
+  const usePass = actionButton("use-pass", "Use a pass", "../icons/pass.svg", async () => {
     const reply = await browser.runtime.sendMessage({ type: "usePass", ruleId: status.id });
     if (!reply?.ok) setNote(reply?.error ?? "Could not use a pass.");
     await refresh();
@@ -83,7 +89,7 @@ function createRow(status) {
   li.append(row, meter, detail, calendar, actions);
   listEl.append(li);
 
-  const parts = { li, state, fill, used, right, calendar, lockIn, usePass };
+  const parts = { li, state, fill, used, right, clockIcon, calendar, lockIn, usePass };
   rows.set(status.id, parts);
   return parts;
 }
@@ -95,6 +101,8 @@ function render(status, nowMs) {
   parts.li.classList.toggle("spent", status.exhausted);
   parts.li.classList.toggle("pass", Boolean(status.pass?.active) && !status.exhausted);
 
+  // An SVG element has no .hidden property; the attribute is what the CSS reads.
+  parts.clockIcon.toggleAttribute("hidden", !status.exhausted);
   if (status.exhausted) {
     parts.state.textContent = BLOCKED_STATE[status.reason] ?? "blocked";
     parts.right.textContent = `unlocks in ${countdown(status.unlockAtMs - nowMs)}`;
@@ -140,17 +148,47 @@ function render(status, nowMs) {
   parts.fill.style.width = `${Math.min(100, ratio * 100)}%`;
 }
 
+/** A stroke icon in the theme's line style: one path, plus a ring if asked. */
+function lineIcon(d, ring) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  if (ring) {
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", "12");
+    circle.setAttribute("cy", "12");
+    circle.setAttribute("r", "9");
+    svg.append(circle);
+  }
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", d);
+  svg.append(path);
+  return svg;
+}
+
 /**
  * A button whose first click turns it into a confirmation for a few seconds
  * and whose second click runs `act`. `arm(text)` sets the confirm wording;
- * the caller refreshes it every tick so the "until" stays current.
+ * the caller refreshes it every tick so the "until" stays current. The label
+ * lives in its own span so an icon beside it survives the text changes.
  */
-function actionButton(initialLabel, act) {
+function actionButton(kind, initialLabel, iconSrc, act) {
   let label = initialLabel;
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "action";
-  button.textContent = label;
+  button.className = `secondary action ${kind}`;
+  const text = document.createElement("span");
+  text.textContent = label;
+  if (iconSrc) {
+    const icon = document.createElement("img");
+    icon.src = iconSrc;
+    icon.alt = "";
+    icon.width = 16;
+    icon.height = 16;
+    button.append(icon);
+  }
+  button.append(text);
 
   let armedUntil = 0;
   let confirmText = "";
@@ -159,7 +197,7 @@ function actionButton(initialLabel, act) {
   const disarm = () => {
     armedUntil = 0;
     button.classList.remove("armed");
-    button.textContent = label;
+    text.textContent = label;
   };
 
   button.addEventListener("click", async () => {
@@ -176,20 +214,20 @@ function actionButton(initialLabel, act) {
     }
     armedUntil = Date.now() + CONFIRM_MS;
     button.classList.add("armed");
-    button.textContent = confirmText;
+    text.textContent = confirmText;
     clearTimeout(timer);
     timer = setTimeout(disarm, CONFIRM_MS);
   });
 
   return {
     button,
-    arm(text) {
-      confirmText = text;
-      if (Date.now() < armedUntil) button.textContent = text;
+    arm(wording) {
+      confirmText = wording;
+      if (Date.now() < armedUntil) text.textContent = wording;
     },
-    setLabel(text) {
-      label = text;
-      if (Date.now() >= armedUntil) button.textContent = text;
+    setLabel(wording) {
+      label = wording;
+      if (Date.now() >= armedUntil) text.textContent = wording;
     },
     disarm,
   };
@@ -221,10 +259,13 @@ async function refresh() {
   setNote(null);
 }
 
-document.getElementById("edit").addEventListener("click", () => {
+function openRules() {
   browser.runtime.openOptionsPage();
   window.close();
-});
+}
+
+document.getElementById("edit").addEventListener("click", openRules);
+document.getElementById("settings").addEventListener("click", openRules);
 
 refresh();
 setInterval(refresh, REFRESH_MS);

@@ -16,14 +16,16 @@ const label = params.get("label") || ruleId || "this site";
 const returnUrl = returnUrlFrom(params);
 
 const el = {
-  emoji: document.getElementById("emoji"),
+  icon: document.getElementById("icon"),
   headline: document.getElementById("headline"),
   quip: document.getElementById("quip"),
   meter: document.getElementById("meter"),
   countdown: document.getElementById("countdown"),
   countdownText: document.getElementById("countdown-text"),
+  unlocked: document.getElementById("unlocked"),
   detail: document.getElementById("detail"),
   passes: document.getElementById("passes"),
+  passesText: document.getElementById("passes-text"),
   return: document.getElementById("return"),
 };
 
@@ -46,15 +48,29 @@ function renderReturn(unlocked) {
     return;
   }
   el.return.hidden = false;
-  el.return.replaceChildren();
   if (unlocked) {
     const a = document.createElement("a");
+    a.className = "button primary";
     a.href = returnUrl;
-    a.textContent = `Back to ${shortUrl(returnUrl)}`;
-    el.return.append(a);
+    a.append(`Back to ${shortUrl(returnUrl)}`, arrowIcon());
+    el.return.replaceChildren(a);
   } else {
-    el.return.textContent = `You were on ${shortUrl(returnUrl)}`;
+    const where = document.createElement("span");
+    where.className = "where";
+    where.textContent = shortUrl(returnUrl);
+    el.return.replaceChildren("You were on ", where);
   }
+}
+
+function arrowIcon() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M5 12h14M13 6l6 6-6 6");
+  svg.append(path);
+  return svg;
 }
 
 const QUIPS = [
@@ -88,17 +104,31 @@ function setHeadline() {
   el.headline.textContent = (HEADLINE[reason] ?? HEADLINE.rolling)(label);
 }
 
+/** "YouTube: 4:57 of 5:00 used today.", with the two figures in bold. */
 function describeCap(mine) {
   const windowMin = Math.round(mine.windowMs / 60000);
   const cap = mine.caps?.[reason];
+  const line = (usedMs, budgetMs, period) => [
+    `${label}: `,
+    strong(clock(usedMs)),
+    " of ",
+    strong(clock(budgetMs)),
+    ` used ${period}.`,
+  ];
   switch (cap && reason) {
     case "daily":
-      return `${label}: ${clock(cap.usedMs)} of ${clock(cap.budgetMs)} used today.`;
+      return line(cap.usedMs, cap.budgetMs, "today");
     case "weekly":
-      return `${label}: ${clock(cap.usedMs)} of ${clock(cap.budgetMs)} used this week.`;
+      return line(cap.usedMs, cap.budgetMs, "this week");
     default:
-      return `${label}: ${clock(mine.usedMs)} of ${clock(mine.budgetMs)} used in the last ${windowMin} minutes.`;
+      return line(mine.usedMs, mine.budgetMs, `in the last ${windowMin} minutes`);
   }
+}
+
+function strong(text) {
+  const el = document.createElement("strong");
+  el.textContent = text;
+  return el;
 }
 
 async function refresh() {
@@ -115,13 +145,13 @@ async function refresh() {
       reason = mine.reason;
       setHeadline();
     }
-    el.detail.textContent = describeCap(mine);
+    el.detail.replaceChildren(...describeCap(mine));
 
     // The pass control lives in the popup on purpose: this page never gets
     // an unlock button. It only says that one exists.
     const left = mine.passOffer?.left ?? 0;
     el.passes.hidden = !(mine.exhausted && mine.reason === "rolling" && left > 0);
-    el.passes.textContent =
+    el.passesText.textContent =
       left === 1
         ? "You have 1 pass left this week, in the toolbar popup."
         : `You have ${left} passes left this week, in the toolbar popup.`;
@@ -134,12 +164,16 @@ async function refresh() {
 }
 
 function unlock() {
+  // The tick keeps calling this once the time is up; rebuilding the link
+  // every second would drop keyboard focus from it.
+  if (document.body.classList.contains("unlocked")) return;
   document.body.classList.add("unlocked");
-  el.emoji.textContent = "✅";
+  el.icon.src = "../icons/available.svg";
   el.headline.textContent = `${label} is available again`;
   el.quip.textContent = "Spend it deliberately this time.";
-  el.countdownText.textContent = "Unlocked";
-  el.countdown.textContent = "";
+  el.countdownText.hidden = true;
+  el.countdown.hidden = true;
+  el.unlocked.hidden = false;
   el.meter.style.width = "100%";
   el.passes.hidden = true;
   renderReturn(true);

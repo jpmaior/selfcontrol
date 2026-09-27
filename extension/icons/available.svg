@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Available Again / Unlocked Icon: Refilled clock / deliberate checkmark badge in matching dark navy rounded squircle -->
+  <rect width="64" height="64" rx="14" fill="#2b3a55"/>
+  <!-- Clock circle backdrop -->
+  <circle cx="32" cy="34" r="17" fill="none" stroke="#f5f7fa" stroke-width="3.5" opacity="0.4"/>
+  <!-- Replenished pie sector / progress ring in fresh emerald accent -->
+  <path d="M32 34 L32 17 A17 17 0 1 1 20 46 Z" fill="#10b981" opacity="0.25"/>
+  <!-- Prominent bold checkmark indicating available again -->
+  <path d="M24 33.5 L29.5 39 L40 27" fill="none" stroke="#10b981" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Extension top pin/crown consistent with main icon -->
+  <rect x="26" y="8" width="12" height="5" rx="2.5" fill="#f5f7fa"/>
+</svg>

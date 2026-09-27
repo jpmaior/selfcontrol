@@ -1,0 +1,179 @@
+/* The design language shared by every page: the popup, the options page and
+   the block page, so they read as one product: the same colours, surfaces,
+   labels, pills and buttons. Each page's own stylesheet only lays things out. */
+
+:root {
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --tile: #f8f9fb;
+  --ink: #1d2433;
+  --muted: #5b6478;
+  --faint: #8a93a6;
+  --line: #e1e5eb;
+  --line-soft: #eef0f4;
+  --field: #ffffff;
+  --field-line: #cdd3dc;
+  --accent: #e4572e;
+  --danger: #c8362a;
+  --ok: #2e9e5b;
+  --warn: #b25e09;
+  --shadow: 0 1px 2px rgb(16 24 40 / 0.05);
+  --shadow-lift: 0 12px 32px -12px rgb(16 24 40 / 0.3);
+  --radius: 0.75rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171a21;
+    --card: #21252e;
+    --tile: #1c2029;
+    --ink: #eef1f6;
+    --muted: #9aa3b5;
+    --faint: #7b8497;
+    --line: #333947;
+    --line-soft: #2b303a;
+    --field: #1a1d25;
+    --field-line: #404758;
+    --accent: #ff7a52;
+    --danger: #ff6b5c;
+    --ok: #45c07c;
+    --warn: #f0a44b;
+    --shadow: none;
+    --shadow-lift: 0 12px 32px -12px rgb(0 0 0 / 0.6);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Several hidden-by-default boxes set their own display, which would win. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+/* Inline line icons; the state icons are <img>s and unaffected. */
+svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A small caption over a value or a section: "RULE NAME", "UNLOCKS IN". */
+.eyebrow {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* A one-word state. The colour comes from --pill, so a variant is one line. */
+.pill {
+  --pill: var(--muted);
+  flex: none;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.3rem;
+  color: var(--pill);
+  background: color-mix(in srgb, var(--pill) 13%, transparent);
+}
+
+.pill.ok {
+  --pill: var(--ok);
+}
+
+/* Numbers in a quiet box, the figures in ink: "7 days: 3:26", "4:57 of 5:00". */
+.stat {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat strong {
+  color: var(--ink);
+}
+
+/* --- buttons: <button>, or an <a class="button"> that navigates ------------ */
+
+button,
+.button {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+.primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+
+.secondary {
+  background: var(--card);
+  border-color: var(--line);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.secondary:hover {
+  background: var(--tile);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--tile);
+  color: var(--ink);
+}
