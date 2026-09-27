@@ -437,7 +437,8 @@ common/ (shared by the background and the UI pages)
   ├─ rules.js       pure: rule shape, hostname matching, domain parsing, validation
   ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ settings.js    the `settings` key: load, save, and watch for edits
-  └─ format.js      duration formatting
+  ├─ format.js      duration formatting
+  └─ theme.css      colours, pills, captions, buttons: shared by every page
 
 options/   edit rules
 popup/     "YouTube: 2:30 / 5:00 — unlocks in 8 min"
@@ -476,9 +477,15 @@ this has been run on a device. Treat everything below as intent, not as tested b
   `observers.js`, because reading `WINDOW_ID_NONE` off an absent namespace would throw before a
   single listener was registered and take the whole background down. `platform.canTrackWindowFocus`
   records the answer, and `dumpPlatform()` prints the full capability report from a real device.
-- **Every page is responsive.** The block page was sized for a phone from the start; the popup's
-  minimum width is `min(20rem, 100vw)` so the viewport wins on a narrow screen; the options page
-  uses an auto-fitting grid that collapses to one column.
+- **Every page is responsive.**
+  - The block page was sized for a phone from the start.
+  - The popup keeps a 21.25rem minimum for a fine pointer only; on Android (coarse pointer) it
+    opens as a full-screen sheet and the viewport wins. `min(21.25rem, 100vw)` would be simpler
+    but fails on desktop: while Firefox sizes the popup, 100vw is the panel being sized, and it
+    came out ~300px wide.
+  - The options page is a rule list beside one rule's form, which stacks the list above the
+    form below 60rem, with Save in a bar pinned to the bottom edge (checked at 360 and 390 px
+    wide).
 - The permissions we use — `storage`, `tabs`, `alarms` — are core APIs, and no host permissions
   or content scripts are involved, which removes the largest class of Android differences.
 

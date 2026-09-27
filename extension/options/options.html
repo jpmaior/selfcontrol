@@ -4,153 +4,235 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SelfControl — Rules</title>
+    <link rel="stylesheet" href="../common/theme.css" />
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <header class="page-head">
-      <h1>Rules</h1>
-      <p class="lede">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <img src="../icons/rules.svg" alt="" width="32" height="32" />
+          <div>
+            <h1>Rules</h1>
+            <p class="tagline">SelfControl</p>
+          </div>
+        </div>
+        <span class="version" id="version"></span>
+      </div>
+    </header>
+
+    <div class="page">
+      <p class="intro">
         Each rule watches some domains and runs a clock while you are actually using them.
         Time is counted over a rolling window, so budget comes back gradually rather than
         resetting on the hour. A daily or weekly cap can sit on top of it.
       </p>
-    </header>
 
-    <ul class="rules" id="rules"></ul>
+      <!-- DOM order is the phone order: list, form, backup, save bar. On a wide
+           screen the grid moves backup up under the list. -->
+      <div class="layout">
+        <nav class="panel rule-nav" aria-labelledby="rules-heading">
+          <div class="panel-head">
+            <h2 class="eyebrow" id="rules-heading">
+              Configured rules (<span id="rule-count">0</span>)
+            </h2>
+          </div>
+          <ul class="rule-list" id="rule-list"></ul>
+          <div class="panel-foot">
+            <button type="button" id="add" class="add-rule">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              Add a rule
+            </button>
+          </div>
+        </nav>
 
-    <div class="transfer-panel" id="transfer" hidden>
-      <p id="transfer-summary"></p>
-      <div class="transfer-buttons">
-        <button type="button" id="transfer-confirm" class="primary">Replace my rules</button>
-        <button type="button" id="transfer-cancel" class="secondary">Cancel</button>
+        <main class="detail" id="detail"></main>
+
+        <section class="panel backup" aria-labelledby="backup-heading">
+          <h2 class="eyebrow" id="backup-heading">Backup</h2>
+          <div class="backup-buttons">
+            <button type="button" id="export" class="secondary">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1M16 8l-4-4-4 4M12 4v12" />
+              </svg>
+              Export
+            </button>
+            <button type="button" id="import" class="secondary">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1M16 12l-4 4-4-4M12 16V4" />
+              </svg>
+              Import
+            </button>
+          </div>
+          <input type="file" id="import-file" accept="application/json,.json" hidden />
+
+          <div class="transfer-panel" id="transfer" hidden>
+            <p id="transfer-summary"></p>
+            <div class="transfer-buttons">
+              <button type="button" id="transfer-confirm" class="primary">Replace my rules</button>
+              <button type="button" id="transfer-cancel" class="secondary">Cancel</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="savebar">
+          <output id="status" class="status" role="status"></output>
+          <div class="savebar-buttons">
+            <button type="button" id="revert" class="ghost">Revert<span class="roomy"> changes</span></button>
+            <button type="button" id="save" class="primary">Save</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="actions">
-      <button type="button" id="add" class="secondary">Add a rule</button>
-      <button type="button" id="export" class="secondary">Export</button>
-      <button type="button" id="import" class="secondary">Import</button>
-      <input type="file" id="import-file" accept="application/json,.json" hidden />
-      <div class="spacer"></div>
-      <output id="status" class="status" role="status"></output>
-      <button type="button" id="save" class="primary">Save</button>
-    </div>
+    <template id="rule-item-template">
+      <li>
+        <button type="button" class="rule-item">
+          <span class="rule-item-head">
+            <span class="rule-item-name" data-role="name"></span>
+            <span class="pill" data-role="state"></span>
+          </span>
+          <span class="rule-item-domains" data-role="domains"></span>
+          <span class="rule-item-foot">
+            <span class="chip" data-role="summary"></span>
+            <span class="arrow" aria-hidden="true">→</span>
+          </span>
+        </button>
+      </li>
+    </template>
 
-    <footer class="version" id="version"></footer>
+    <template id="empty-template">
+      <section class="card empty">
+        <h2>No rules</h2>
+        <p>Nothing is being limited. Add a rule to put a clock on a site.</p>
+      </section>
+    </template>
 
+    <!-- Only one rule's form is on screen at a time, so the ids below are unique. -->
     <template id="rule-template">
-      <li class="rule">
-        <div class="rule-head">
-          <input class="label-input" data-field="label" type="text" placeholder="Site name"
-                 aria-label="Rule name" />
-          <button type="button" class="delete" data-action="delete" aria-label="Delete rule">
-            Delete
+      <div class="rule">
+        <section class="card name-card">
+          <label class="eyebrow" for="rule-label">Rule name</label>
+          <input id="rule-label" class="label-input" data-field="label" type="text"
+                 placeholder="Site name" />
+          <button type="button" class="delete" data-action="delete">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M19 7l-.87 12.14A2 2 0 0 1 16.14 21H7.86a2 2 0 0 1-2-1.86L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+            </svg>
+            Delete rule
           </button>
-        </div>
+          <ul class="errors" data-role="errors" hidden></ul>
+        </section>
 
-        <label class="field wide">
-          <span>Domains</span>
-          <input data-field="match" type="text" placeholder="youtube.com, vimeo.com" />
-          <small>Subdomains are included. A pasted URL works too.</small>
-        </label>
-
-        <label class="field wide">
-          <span>Count time</span>
-          <select data-field="mode"></select>
-        </label>
-
-        <div class="grid">
+        <section class="card">
+          <h2 class="section-title">1. Domains &amp; trigger condition</h2>
           <label class="field">
-            <span>Budget</span>
-            <span class="with-unit">
-              <input data-field="budgetMin" type="number" min="1" step="1" />
-              <small>min</small>
-            </span>
+            <span>Domains</span>
+            <input data-field="match" type="text" placeholder="youtube.com, vimeo.com" />
+            <small>Subdomains are included. A pasted URL works too.</small>
           </label>
-
           <label class="field">
-            <span>Per rolling window</span>
-            <span class="with-unit">
-              <input data-field="windowMin" type="number" min="2" step="1" />
-              <small>min</small>
-            </span>
+            <span>Count time</span>
+            <select data-field="mode"></select>
           </label>
-        </div>
+        </section>
 
-        <div class="grid">
-          <label class="field">
-            <span>Per day</span>
-            <span class="with-unit">
-              <input data-field="dailyMin" type="number" min="1" step="1" placeholder="none" />
-              <small>min</small>
-            </span>
-          </label>
-
-          <label class="field">
-            <span>Per week</span>
-            <span class="with-unit">
-              <input data-field="weeklyMin" type="number" min="1" step="1" placeholder="none" />
-              <small>min</small>
-            </span>
-          </label>
-          <small class="grid-hint">
+        <section class="card">
+          <h2 class="section-title">2. Budget &amp; limits</h2>
+          <div class="tiles">
+            <label class="tile">
+              <span>Budget</span>
+              <span class="with-unit">
+                <input data-field="budgetMin" type="number" min="1" step="1" />
+                <small>min</small>
+              </span>
+            </label>
+            <label class="tile">
+              <span>Per rolling window</span>
+              <span class="with-unit">
+                <input data-field="windowMin" type="number" min="2" step="1" />
+                <small>min</small>
+              </span>
+            </label>
+            <label class="tile">
+              <span>Per day</span>
+              <span class="with-unit">
+                <input data-field="dailyMin" type="number" min="1" step="1" placeholder="none" />
+                <small>min</small>
+              </span>
+            </label>
+            <label class="tile">
+              <span>Per week</span>
+              <span class="with-unit">
+                <input data-field="weeklyMin" type="number" min="1" step="1" placeholder="none" />
+                <small>min</small>
+              </span>
+            </label>
+          </div>
+          <p class="hint">
             Calendar caps on top of the rolling window: a day ends at local midnight, a week
             on Sunday night. Leave blank for none.
-          </small>
-        </div>
+          </p>
+        </section>
 
-        <label class="field wide">
-          <span>When it runs out</span>
-          <select data-field="onExceed"></select>
-        </label>
-
-        <label class="field wide">
-          <span>Stay blocked until this much is free again</span>
-          <span class="with-unit">
-            <input data-field="unlockMin" type="number" min="0" step="1" />
-            <small>min</small>
-          </span>
-          <small>
+        <section class="card">
+          <h2 class="section-title">3. Blocking &amp; cool-down</h2>
+          <div class="cols">
+            <label class="field">
+              <span>When it runs out</span>
+              <select data-field="onExceed"></select>
+            </label>
+            <label class="field">
+              <span>Stay blocked until this much is free again</span>
+              <span class="with-unit">
+                <input data-field="unlockMin" type="number" min="0" step="1" />
+                <small>min</small>
+              </span>
+            </label>
+          </div>
+          <p class="hint">
             0 unblocks the moment any time frees up, which on a rolling window means a
             minute at a time. Set it higher to come back in usable chunks.
-          </small>
-        </label>
+          </p>
+        </section>
 
-        <div class="grid">
-          <label class="field">
-            <span>Passes per week</span>
-            <input data-field="passesPerWeek" type="number" min="0" step="1" />
-          </label>
-
-          <label class="field">
-            <span>Pass length</span>
-            <span class="with-unit">
-              <input data-field="passMin" type="number" min="1" step="1" />
-              <small>min</small>
-            </span>
-          </label>
-
-          <label class="check grid-hint">
+        <section class="card">
+          <h2 class="section-title">4. Passes</h2>
+          <div class="cols">
+            <label class="field">
+              <span>Passes per week</span>
+              <input data-field="passesPerWeek" type="number" min="0" step="1" />
+            </label>
+            <label class="field">
+              <span>Pass length</span>
+              <span class="with-unit">
+                <input data-field="passMin" type="number" min="1" step="1" />
+                <small>min</small>
+              </span>
+            </label>
+          </div>
+          <label class="check">
             <input data-field="passCounts" type="checkbox" />
             <span>Pass time counts toward the daily and weekly caps</span>
           </label>
-          <small class="grid-hint">
+          <p class="hint">
             A pass suspends the rolling window for one long session, for the video that is
             longer than the window allows. The time still goes into the window afterwards,
             so a pass is followed by the usual cool-down. 0 passes disables them.
-          </small>
-        </div>
+          </p>
+        </section>
 
-        <ul class="errors" data-role="errors" hidden></ul>
-
-        <details class="history" data-role="history">
-          <summary>
-            <span>History</span>
-            <span class="history-totals" data-role="history-totals"></span>
-          </summary>
+        <section class="card history">
+          <div class="history-head">
+            <div>
+              <h2>History</h2>
+              <p class="readout" data-role="readout"></p>
+            </div>
+            <p class="history-totals stat" data-role="history-totals"></p>
+          </div>
           <div class="history-body" data-role="history-body"></div>
-        </details>
-      </li>
+        </section>
+      </div>
     </template>
 
     <script src="options.js" type="module"></script>
