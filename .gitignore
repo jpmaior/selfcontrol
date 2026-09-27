@@ -7,3 +7,4 @@ result-*
 
 # updates.json is generated at release time by the workflow
 public/updates.json
+.browser/
