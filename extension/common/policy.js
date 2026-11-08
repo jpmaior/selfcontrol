@@ -20,6 +20,7 @@ import {
   passesLeft,
   remainingMs as rollingRemaining,
   unlockAt,
+  unlockCreditMs,
   usedInPeriod,
   usedMs,
   windowOf,
@@ -43,13 +44,19 @@ function rollingCap(rule, usage, nowMs) {
   const limits = windowOf(rule);
   const used = usedMs(usage, nowMs, limits.windowMs);
   const remaining = rollingRemaining(usage, nowMs, limits);
-  const exhausted = remaining <= 0;
+  // Spent, or still cooling down from a block that already landed. The first
+  // bucket to age out frees a little credit, and without the hold that little
+  // reopened the rule: the drip-feed minUnlockCreditSec exists to stop
+  // (DESIGN.md §8). The hold only says a block is in progress; the release is
+  // still "enough credit is back", so a rule loosened mid-block lets go early.
+  const held = usage.blockedUntil > nowMs && remaining < unlockCreditMs(rule);
+  const exhausted = remaining <= 0 || held;
   return {
     usedMs: used,
     budgetMs: limits.budgetMs,
     remainingMs: remaining,
     exhausted,
-    // The max(minUnlockCreditSec, 1) clamp lives in unlockAt (DESIGN.md §8).
+    // The max(minUnlockCreditSec, 1) clamp lives in unlockCreditMs (DESIGN.md §8).
     unlockAtMs: exhausted ? unlockAt(usage, nowMs, rule) : nowMs,
   };
 }

@@ -529,3 +529,32 @@ write in `flush()`; installs that already hold the key keep a harmless orphan in
 **Known and accepted:** the observers still *drop* the waking event itself because they run with
 an empty rule set until `setRules()` lands. That is harmless — reconcile covers stops and
 `prime()` re-derives starts — but it is why `reported` cannot be trusted across a restart.
+
+## Fixed: a blocked rule unlocked before `minUnlockCreditSec` (2026-11-08)
+
+**Symptom:** once blocked, a rule unlocked as soon as its oldest bucket left the window, with
+whatever little credit that freed, not when `minUnlockCreditSec` of it was back. The block
+page counted down to one instant and flipped to "available again" earlier. Seen on the Android
+emulator as "available again" at `0:22 of 0:30` with `minUnlockCreditSec: 30`; not
+platform-specific. With the default YouTube rule (5 of 5 minutes used from 12:00), the page
+promised 13:05 and the rule reopened at 13:01 with one minute: the drip-feed of DESIGN.md §8.
+
+**Cause:** `rollingCap()` in `policy.js` (and `store.status()` before it, since Step 3) decided
+`exhausted = remaining <= 0`, with no memory of having been blocked. `minUnlockCreditSec` only
+reached `unlockAt()`, which feeds the countdown and the alarm.
+
+**Fix:** the ledger's `blockedUntil` (DESIGN.md §8, "The hold"). `evaluate()` keeps the rolling
+cap exhausted while `now < blockedUntil` and the credit back is short of the threshold;
+`store.status()` sets, moves and clears it, flushing on each change. The buckets alone could
+not carry it: the first expired bucket is already folded into its day.
+
+**Tests:** `policy.test.js` "hold:" (held past the first expiry, released at the promised
+instant, never invented without a block, yields when the rule is loosened, drip-feed kept at
+0, suspended by a pass, refuses lock-in); `store.test.js` "hold:" (recorded and flushed,
+survives a reload, cleared on release). The ledger-shape tests in `accountant.test.js` and
+`store.test.js` gained the member.
+
+**Checked by hand** on the Android emulator: 30 s budget in a 2-minute window, needing all 30 s
+back, spent across two buckets (12 s and 18 s). When the first aged out the page still said
+"unlocks in 0:50" at `0:18 of 0:30`; it unlocked at the promised instant with the full 30 s
+and `blockedUntil` back to `null`.

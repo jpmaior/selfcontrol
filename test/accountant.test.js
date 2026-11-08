@@ -26,6 +26,7 @@ import {
   remainingMs,
   startPass,
   unlockAt,
+  unlockCreditMs,
   usedByDay,
   usedInPeriod,
   usedMs,
@@ -358,7 +359,7 @@ test("usedInPeriod: days before the period do not count", () => {
 
 test("normalizeUsage: a ledger from an older build gains the new members", () => {
   const u = normalizeUsage({ b: { 1000: 5000 } });
-  assert.deepEqual(u, { b: { 1000: 5000 }, p: {}, d: {}, pass: null, passUses: [] });
+  assert.deepEqual(u, { b: { 1000: 5000 }, p: {}, d: {}, pass: null, passUses: [], blockedUntil: null });
 });
 
 test("normalizeUsage: keeps what a current ledger already holds", () => {
@@ -368,6 +369,7 @@ test("normalizeUsage: keeps what a current ledger already holds", () => {
     d: { "2026-09-19": { used: 3, pass: 4 } },
     pass: { from: 5, to: 6 },
     passUses: [5],
+    blockedUntil: 7,
   };
   assert.deepEqual(normalizeUsage(structuredClone(stored)), stored);
 });
@@ -376,12 +378,12 @@ test("normalizeUsage: a malformed value becomes a fresh ledger", () => {
   for (const bad of [undefined, null, 42, "b", [], { b: "nope" }, { b: null }]) {
     assert.deepEqual(normalizeUsage(bad), createUsage(), `${JSON.stringify(bad)}`);
   }
-  assert.deepEqual(createUsage(), { b: {}, p: {}, d: {}, pass: null, passUses: [] });
+  assert.deepEqual(createUsage(), { b: {}, p: {}, d: {}, pass: null, passUses: [], blockedUntil: null });
 });
 
 test("normalizeUsage: a malformed member is reset without touching the others", () => {
-  const u = normalizeUsage({ b: { 1: 1 }, p: 7, d: [], pass: "x", passUses: {} });
-  assert.deepEqual(u, { b: { 1: 1 }, p: {}, d: {}, pass: null, passUses: [] });
+  const u = normalizeUsage({ b: { 1: 1 }, p: 7, d: [], pass: "x", passUses: {}, blockedUntil: "x" });
+  assert.deepEqual(u, { b: { 1: 1 }, p: {}, d: {}, pass: null, passUses: [], blockedUntil: null });
 });
 
 test("usedByDay: folded days and live buckets, per local day", () => {
@@ -557,3 +559,10 @@ test("lockIn: ends an active pass at now before spending", () => {
 function total(usage, map = "b") {
   return Object.values(usage[map]).reduce((sum, ms) => sum + ms, 0);
 }
+
+test("unlockCreditMs: the unlock threshold, at least 1ms and at most the budget", () => {
+  assert.equal(unlockCreditMs({ budgetSec: 600, minUnlockCreditSec: 300 }), 300_000);
+  assert.equal(unlockCreditMs({ budgetSec: 600, minUnlockCreditSec: 0 }), 1, "the drip-feed, not zero");
+  assert.equal(unlockCreditMs({ budgetSec: 600 }), 1, "missing means 0");
+  assert.equal(unlockCreditMs({ budgetSec: 600, minUnlockCreditSec: 900 }), 600_000, "never more than the budget");
+});

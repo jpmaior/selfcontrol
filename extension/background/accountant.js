@@ -10,7 +10,8 @@
 //     p: { "29384790": 60000 },                     // live buckets under a pass
 //     d: { "2026-09-19": { used: 0, pass: 0 } },    // folded whole days, local
 //     pass: null,                                   // { from, to } of a pass
-//     passUses: []                                  // pass start instants, this week
+//     passUses: [],                                 // pass start instants, this week
+//     blockedUntil: null                            // end of a block's cool-down (§8)
 //   }
 //        ^ bucket index          ^ milliseconds accrued in that bucket
 //
@@ -34,7 +35,7 @@ export function bucketExpiresAt(bucket, windowMs) {
 }
 
 export function createUsage() {
-  return { b: {}, p: {}, d: {}, pass: null, passUses: [] };
+  return { b: {}, p: {}, d: {}, pass: null, passUses: [], blockedUntil: null };
 }
 
 const isMap = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
@@ -55,6 +56,7 @@ export function normalizeUsage(value) {
     d: isMap(value.d) ? value.d : {},
     pass,
     passUses: Array.isArray(value.passUses) ? value.passUses : [],
+    blockedUntil: Number.isFinite(value.blockedUntil) ? value.blockedUntil : null,
   };
 }
 
@@ -278,15 +280,20 @@ export function windowOf(rule) {
 }
 
 /**
- * The instant a blocked rule becomes usable again.
+ * How much credit a blocked rule needs back before it unlocks.
  *
  * Note the `max(..., 1)`. `minUnlockCreditSec: 0` means "unlock as soon as any
  * time at all is available" — the drip-feed of DESIGN.md §8 — which is one
  * millisecond of credit, NOT zero. Asking `creditAvailableAt` for zero credit is
  * trivially satisfied right now, so passing 0 straight through would mean the
- * rule never blocks at all.
+ * rule never blocks at all. Capped at the budget, which is all there can be.
  */
-export function unlockAt(usage, nowMs, rule) {
+export function unlockCreditMs(rule) {
   const needed = Math.max((rule.minUnlockCreditSec ?? 0) * 1000, 1);
-  return creditAvailableAt(usage, nowMs, windowOf(rule), needed);
+  return Math.min(needed, rule.budgetSec * 1000);
+}
+
+/** The instant a blocked rule becomes usable again. */
+export function unlockAt(usage, nowMs, rule) {
+  return creditAvailableAt(usage, nowMs, windowOf(rule), unlockCreditMs(rule));
 }
