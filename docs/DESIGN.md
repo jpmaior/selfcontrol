@@ -510,10 +510,14 @@ per-check results are in [TODO-ANDROID.md](./TODO-ANDROID.md).
   records the answer, and `dumpPlatform()` prints the full capability report from a real device.
 - **Every page is responsive.**
   - The block page was sized for a phone from the start.
-  - The popup keeps a 21.25rem minimum for a fine pointer only; on Android (coarse pointer) it
-    opens as a full-screen sheet and the viewport wins. `min(21.25rem, 100vw)` would be simpler
-    but fails on desktop: while Firefox sizes the popup, 100vw is the panel being sized, and it
-    came out ~300px wide.
+  - On desktop the popup is a fixed 21.25rem wide; on Android it opens as a full-screen sheet
+    and the viewport wins. Fixed, not a minimum: Firefox sizes the panel to the page's widest
+    unwrapped line, so with a minimum the inline "… Confirm" step (laid beside its neighbour
+    button) widened the panel while it was open, and a long label did too. `min(21.25rem,
+    100vw)` fails on desktop: while Firefox sizes the popup, 100vw is the panel being sized, and
+    it came out ~300px wide. Android is told apart by `(pointer: coarse), (hover: none)`:
+    Firefox for Android on the emulator reports `pointer: fine`, and only `hover: none`
+    separated it from desktop there.
   - The options page is a rule list beside one rule's form, which stacks the list above the
     form below 60rem, with Save in a bar pinned to the bottom edge (checked at 360 and 390 px
     wide).

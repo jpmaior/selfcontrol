@@ -470,11 +470,15 @@ const commands = {
         ),
       ),
     );
+    const env = { ...process.env, DISPLAY: state.display };
+    // With no window manager, X focus follows the pointer: moving into the
+    // popup's own window would take focus from Firefox's, and Firefox closes
+    // the popup when it loses focus. Pinned to the browser window, focus stays
+    // put, so `xdo mousemove X Y click 1` can press buttons inside the popup.
+    execFileSync("xdotool", ["search", "--onlyvisible", "--class", "firefox", "windowfocus"], { env });
     // A real click rather than a scripted one: the button opens its popup on
     // mousedown, and a synthetic click() never gets there.
-    execFileSync("xdotool", ["mousemove", String(x), String(y), "click", "1"], {
-      env: { ...process.env, DISPLAY: state.display },
-    });
+    execFileSync("xdotool", ["mousemove", String(x), String(y), "click", "1"], { env });
     await sleep(1000);
     console.log(`clicked the toolbar button at ${x},${y}; \`xdo key Escape\` closes the popup`);
   },
