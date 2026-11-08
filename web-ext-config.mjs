@@ -6,8 +6,8 @@ export default {
   run: {
     // Land straight on the page where the extension's console lives.
     startUrl: ["about:debugging#/runtime/this-firefox"],
-    // Keep the dev profile between runs so storage.local survives restarts
-    // (needed for Checkpoint 4).
+    // Keep the dev profile between runs so storage.local survives restarts,
+    // which the persistence scenarios in docs/SCENARIOS.md rely on.
     keepProfileChanges: true,
     profileCreateIfMissing: true,
     firefoxProfile: "./.web-ext-profile",

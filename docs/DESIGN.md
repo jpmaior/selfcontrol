@@ -47,6 +47,9 @@ YouTube and Instagram are the **same code path** with two different mode predica
 the most important decision in the design: there is no YouTube feature and no Instagram
 feature, only modes.
 
+Later sections add optional fields to the rule (daily and weekly caps, §14; passes, §17).
+`DEFAULT_RULES` and `withDefaults()` in `rules.js` are the full shape.
+
 ### Counting modes
 
 | Mode | Clock runs while... | Implemented via |
@@ -79,18 +82,14 @@ minimises disk writes, so the constraint costs nothing.
 
 Chrome compatibility is explicitly a non-goal.
 
-Background scripts are loaded as **ES modules** (`"type": "module"`), verified working at
-Checkpoint 1, so the background can be split across files without a bundler.
+Background scripts are loaded as **ES modules** (`"type": "module"`), checked in Firefox before
+anything was built on them, so the background can be split across files without a bundler.
 
-> ⚠️ **Development trap, found at Checkpoint 1.** An attached devtools toolbox *pins the event
-> page alive* — Firefox reports "background event page was not terminated on idle because a
-> devtools toolbox is attached". With the console open, the suspend/restart cycle never happens,
-> so MV3 lifecycle bugs stay invisible during development and only appear in normal use. Force
-> it with **Terminate Background Script** in `about:debugging`. Note the difference from
-> **Reload**: *Terminate* unloads only the event page and leaves `storage.session` intact
-> (the real-world failure mode); *Reload* restarts the whole extension and clears it.
+Testing this lifecycle has a trap: an attached devtools console keeps the event page alive, so
+lifecycle bugs stay invisible while you watch. [DEVELOPMENT.md](./DEVELOPMENT.md) has how to
+force the unload.
 
-### Manifest floors (discovered via `web-ext lint`, Step 1)
+### Manifest floors (discovered via `web-ext lint`)
 
 Firefox now requires every new extension to declare what data it collects. We collect none:
 
@@ -161,9 +160,9 @@ Why this over a content script:
   the home page starts muted preview clips; a naive `<video>` detector would silently burn the
   budget. Muted playback produces no sound, so `audible` never sees it.
 
-### ✅ Validated at Checkpoint 2
+### ✅ Validated in Firefox
 
-Confirmed by hand on Firefox 154 before anything was built on top of it:
+Confirmed on Firefox 154 before anything was built on top of it (SCENARIOS.md re-runs it):
 
 | Scenario | Result |
 |---|---|
@@ -284,12 +283,11 @@ late**, because a rolling window only ever regenerates quota in the user's favou
 fires, recompute; if not actually exhausted, reschedule. Correct without simulating the window
 forward.
 
-> **Status after Checkpoint 5:** enforcement lands correctly in practice — blocking, the re-open
-> guard and unlocking all verified by hand. What has *not* been measured is whether Firefox
-> clamps sub-minute alarm delays the way Chrome does (30s minimum). Every exhaustion alarm logs
-> `fired +Nms vs scheduled`, so the answer is one glance at the console away if it ever matters.
-> It would show up as a block landing up to a minute late, and only for the final alarm before
-> exhaustion.
+> **Does Firefox clamp sub-minute alarm delays**, the way Chrome does (30 s minimum)? Firefox
+> for Android 159 does not: `fired +3ms` awake, `+147ms` when the alarm had to wake a suspended
+> event page. Desktop has not been measured. Every rule alarm logs `fired +Nms vs scheduled`, so
+> SCENARIOS.md records it on the next run. A clamp would show up as a block landing up to a
+> minute late, and only for the final alarm before exhaustion.
 
 ### Crash and sleep resilience
 
@@ -335,12 +333,17 @@ mean every counter update also rewrites the settings.
 
 ```
 settings          → { version, rules: [...] }        // cold: written when a rule is edited
-usage:youtube     → { b: {...} }                     // hot: flushed on transitions + checkpoints
-usage:instagram   → { b: {...} }
+usage:youtube     → { b, p, d, pass, passUses, blockedUntil }   // hot: flushed on transitions + checkpoints
+usage:instagram   → { ... }
 ```
+
+`b` is the rolling window's buckets (§5); the other members arrived with history (§13), passes
+(§17) and the hold (§8), all inside the same key so a flush still writes one key per rule.
 
 The unlock instant is deliberately *not* stored: it is derived on demand by
 `accountant.unlockAt()` from the buckets, so it can never go stale as the window rolls.
+`blockedUntil` is not an unlock instant: it only records that a block is in progress, which the
+buckets cannot show once the first one has folded (§8).
 
 ### Ephemeral state lives in `storage.session`
 
@@ -402,7 +405,7 @@ regenerated.
 
 One knob spans every variant, so it is built in from the start rather than discovered later.
 
-> ⚠️ **Subtlety, caught by a unit test in Step 3.** "When will 0 ms of credit be available?" is
+> ⚠️ **Subtlety, caught by a unit test.** "When will 0 ms of credit be available?" is
 > trivially satisfied *right now*, so passing `minUnlockCreditSec: 0` straight into
 > `creditAvailableAt` would mean the rule **never blocks at all** — the exact opposite of the
 > drip-feed. The threshold is therefore `max(minUnlockCreditSec, 1ms)`, and that clamp lives in
@@ -458,23 +461,28 @@ background/ (event page — the only stateful component)
   ├─ observers.js   tabs/windows events  →  "is rule R counting right now?"
   ├─ accountant.js  pure: bucket commit / fold / rolling sum / time-until-credit
   ├─ enforcer.js    over-budget → block or close; guards new navigations
-  └─ store.js       ledgers, debounced flush, storage.session for open intervals
+  ├─ store.js       ledgers, debounced flush, storage.session for open intervals
+  └─ log.js         the prefixed console logger
 
 common/ (shared by the background and the UI pages)
   ├─ rules.js       pure: rule shape, hostname matching, domain parsing, validation
   ├─ calendar.js    pure: local days and weeks, DST-safe
+  ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14)
+  ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
   ├─ settings.js    the `settings` key: load, save, and watch for edits
+  ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
   ├─ format.js      duration formatting
   └─ theme.css      colours, pills, captions, buttons: shared by every page
 
-options/   edit rules
-popup/     "YouTube: 2:30 / 5:00 — unlocks in 8 min"
-blocked/   message + live countdown
+options/   edit rules, history, export and import
+popup/     per rule: used / budget, state, lock in, passes
+blocked/   message + live countdown + the return link
 ```
 
-**Two pure modules carry the tricky logic**, with no `browser.*` and no `Date.now()` — time is
-always an argument. That is what lets `node --test` cover the rolling-window arithmetic and the
-whole options-page validation story without a browser.
+**The pure modules carry the tricky logic** (`accountant`, `rules`, `calendar`, `policy`,
+`transfer`), with no `browser.*` and no `Date.now()` — time is always an argument. That is what
+lets `node --test` cover the arithmetic, every decision about a rule and the whole validation
+story without a browser.
 
 **The options page never messages the background.** It writes `settings`; the background listens
 via `storage.onChanged`, filtered hard to that one key, and re-arms itself. Edits apply without a
@@ -482,12 +490,10 @@ reload, and a console tweak takes the same path a UI edit does.
 
 ---
 
-## 11. Roadmap beyond v1
+## 11. Roadmap
 
-1. `idle` integration for `focus` mode.
-2. Notifications at N minutes remaining.
-3. `declarativeNetRequest` for flash-free blocking.
-4. **Firefox for Android** — *prepared, not verified.* See §12.
+This document records what was decided, not what might come next: open work and ideas are
+[GitHub issues](https://github.com/jpmaior/selfcontrol/issues).
 
 ---
 
@@ -497,8 +503,9 @@ reload, and a console tweak takes the same path a UI edit does.
 two things this section had wrong: the `tabs.onUpdated` filter argument, which Android rejects
 by throwing (fixed by `onTabUpdated()` in `observers.js`), and `audible` mode, which cannot
 work there at all (below). Enforcement, alarms (including waking a suspended event page with
-Firefox in the background), `storage.session` and all three pages work unchanged. The
-per-check results are in [TODO-ANDROID.md](./TODO-ANDROID.md).
+Firefox in the background), `storage.session` and all three pages work unchanged.
+[SCENARIOS.md](./SCENARIOS.md) has the checks, and [DEVELOPMENT.md](./DEVELOPMENT.md) how to
+run the extension on a phone or the emulator.
 
 ### What is already in place
 
@@ -562,101 +569,6 @@ anyway. The popup names what the rule does on the device in front of you.
 The platform is detected with `runtime.getPlatformInfo()` (`common/platform.js`), not by
 feature: the property exists and returns `undefined`, which only a tab that is playing could
 expose. If bug 2032751 lands, that one function is what changes.
-
-### What testing it would involve
-
-```bash
-nix develop .#android   # adb, plus a headless emulator (next section)
-adb devices             # a phone with USB debugging on, or emulator-5554
-web-ext run -t firefox-android --adb-device <ID> --firefox-apk org.mozilla.firefox
-```
-
-Firefox has to allow it too: ⋮ → Settings → Advanced → **Remote debugging via USB**. Until that
-is on, `web-ext` prints "Waiting for org.mozilla.firefox Remote Debugging Server..." and never
-says why. A phone also needs *USB debugging* in Android's developer options, and Firefox from
-its store.
-
-Then `dumpPlatform()` from the remote console (`about:debugging` on desktop, connected over USB)
-reports what the device offers: `windows` focus events, whether the `tabs.onUpdated` filter was
-accepted, whether tabs report `audible`. Its `idle` and `notifications` lines only mean anything
-once the manifest asks for those permissions. The popup opens from the ⋮ menu rather than a
-toolbar.
-
-### Running it on the emulator
-
-The emulator has no window: watch and drive it from T3's Device panel (next section), or with
-`screenshot`, `ui-list` and `tap-text`.
-
-**Once per AVD.** The Google APIs image has no Play Store, so Firefox comes from Mozilla's
-release archive. The AVD keeps Firefox and its settings across `emu-stop`, so none of this
-repeats:
-
-```bash
-nix develop .#android
-emu-create
-emu-start
-v=$(curl -fsS https://product-details.mozilla.org/1.0/mobile_versions.json \
-  | sed -n 's/^ *"version": "\(.*\)".*/\1/p')   # current release, e.g. 159.0.1
-curl -fLO "https://archive.mozilla.org/pub/fenix/releases/$v/android/fenix-$v-android-x86_64/fenix-$v.multi.android-x86_64.apk"
-adb install "fenix-$v.multi.android-x86_64.apk"
-```
-
-Then open Firefox on the emulator, go through its welcome screens, and turn on Remote debugging
-via USB as above. If `archive.mozilla.org` times out, add `-4` to both `curl` calls: on the
-maintainer's machine its IPv6 route hangs.
-
-**Each session:**
-
-```bash
-nix develop .#android
-node tools/android.mjs start            # emu-start if needed (~2½ min cold), then web-ext run
-node tools/android.mjs eval 'dumpUsage()'
-node tools/android.mjs log              # the event page's console since it started
-```
-
-`start` leaves `web-ext` running in the background: it installs the working tree as a temporary
-add-on and reloads it on every change under `extension/`. Firefox for Android sends extension
-console output nowhere a shell can read, so the tool talks to Firefox's remote debugging port,
-which `web-ext` forwards over adb. Its header comment explains what attaches to the event page
-and what does not. The options page is ⋮ → Extensions → SelfControl → Settings; under software
-rendering it can stay blank for a few seconds before it draws. `node tools/android.mjs stop`
-stops `web-ext` (the add-on stays loaded until Firefox restarts), then `emu-stop`.
-
-### Watching the emulator in T3 Code
-
-T3 Code's Device panel shows the headless emulator live and lets you (or an agent) tap and type
-in it, which beats `screenshot` and `tap-text` for anything interactive. It looks for its tools
-outside any dev shell, on the machine running the T3 server, and each step below fixes one error
-it reports otherwise:
-
-```bash
-# An Android SDK outside the dev shell. On the maintainer's machine that is
-# ~/dev-envs/android#android-sdk in the user profile: same nixpkgs revision, same store paths.
-nix profile add ~/dev-envs/android#android-sdk
-
-# "Android SDK was not found": T3 insists on cmdline-tools/latest/bin/avdmanager, and the Nix
-# SDK names that directory by version. Mirror the SDK at ~/Android/Sdk, where T3 looks on its own.
-S=~/.nix-profile/libexec/android-sdk
-mkdir -p ~/Android/Sdk/cmdline-tools
-for e in "$S"/*; do [ "${e##*/}" = cmdline-tools ] || ln -sfn "$e" ~/Android/Sdk/"${e##*/}"; done
-ln -sfn "$S"/cmdline-tools/* ~/Android/Sdk/cmdline-tools/latest
-
-# "requires Node.js" and "needs working ffmpeg with the libx264 encoder". Taking both from
-# flake.lock's nixpkgs revision means they are already in the store, not downloaded.
-rev=$(sed -n 's/.*"rev": "\([0-9a-f]*\)".*/\1/p' flake.lock | head -1)
-nix profile add "github:NixOS/nixpkgs/$rev#nodejs_22" "github:NixOS/nixpkgs/$rev#ffmpeg-headless"
-```
-
-None of this needs a T3 restart, which matters because a restart ends every running agent
-thread. T3 re-checks `~/Android/Sdk` on each call, and `~/.nix-profile/bin` is already on its
-`PATH`. One trap: an `ANDROID_HOME` in the T3 server's environment overrides `~/Android/Sdk`, so
-it must point there rather than at the Nix SDK, or T3 rejects the SDK again after its next
-restart. `~/.profile` exports `ANDROID_HOME=~/Android/Sdk` for that reason.
-
-Once `emu-start` has booted it, the emulator appears in the Device panel as `emulator-5554`; open
-it there. T3 also lists the AVDs that are not running, but booting through `emu-start` is the
-path that has been checked. After a nixpkgs bump that changes the cmdline-tools version,
-`latest` dangles: re-run the `ln … latest` line.
 
 ---
 
@@ -768,6 +680,14 @@ went to 2 because this is the first step that stores a new rule field; `withDefa
 
 ---
 
+## 15. Schedules — dropped
+
+Blocking a site during chosen hours of the week was built as PR #3, tried, and not wanted
+(2026-09-19). Nothing else depends on it. The PR keeps the design and the code; `calendar.js`
+still has `atMinute()` and `minuteOfDay()`, which were its footing.
+
+---
+
 ## 16. Lock in
 
 A per-rule button in the popup that spends the rest of the current budget on purpose:
@@ -863,6 +783,14 @@ control; a button there would be the drip-feed with extra steps.
 
 ---
 
+## 18. Toolbar badge — dropped
+
+A dot on the toolbar button while a rule counts, and a mark while one is blocked, was built as
+PR #6, tried, and not wanted (2026-09-26). The unlock alarm it was the first reason for stays
+(§14).
+
+---
+
 ## 19. The return link
 
 The block page knows the URL it replaced (`url=` in its query string, set by the
@@ -908,4 +836,4 @@ ordinary `save()` path, so import can never bypass validation. `strip()` moved i
 **A loosening path, on purpose.** Editing a rule, importing a file, using a pass and
 locking in all touch what a rule allows. A cooling-off period, in which a rule that
 loosens takes effect only after a delay the user chose while tightening is immediate,
-would close the first two; it is deliberately not in this round (TODO.md).
+would close the first two; it was deliberately left out when these features were built.

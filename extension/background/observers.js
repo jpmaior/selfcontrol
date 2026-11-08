@@ -37,7 +37,7 @@ export const modeOf = (rule) => effectiveMode(rule, platform);
  * the call outright ("Incorrect argument types for tabs.onUpdated") instead of
  * ignoring it. At module scope in index.js that throw aborted evaluation before
  * the message listener existed, so the popup only ever said "Background script
- * not responding" (docs/TODO-ANDROID.md). The fallback registers unfiltered and
+ * not responding" (DESIGN.md §12). The fallback registers unfiltered and
  * drops what the filter would have, so both platforms see the same events.
  * Synchronous on purpose: listeners must exist by the end of module evaluation.
  */
@@ -135,9 +135,9 @@ async function prime() {
 function handleTabUpdated(tabId, changeInfo, tab) {
   const rule = ruleForUrl(rules, tab.url);
 
-  // Raw trace of what Firefox actually reports. This is the whole point of
-  // Checkpoint 2: watching `audible` respond to real playback, muting and
-  // YouTube's muted hover-previews before any logic depends on it.
+  // Raw trace of what Firefox actually reports: how `audible` was validated
+  // against real playback, muting and YouTube's muted hover-previews before
+  // any logic depended on it (DESIGN.md §3).
   if (rule || audibleTabs.has(tabId)) {
     trace(
       `tab ${tabId} ${hostnameOf(tab.url) ?? "?"}`,

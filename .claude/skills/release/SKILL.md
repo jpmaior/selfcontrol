@@ -20,6 +20,8 @@ Abort and report if any fails:
   workflow refuses to run from a branch.
 - `nix develop --command node --test` passes.
 - `nix develop --command web-ext lint` shows 0 errors, 0 warnings.
+- The desktop scenarios in `docs/SCENARIOS.md` hold in a real Firefox (`tools/browser.mjs`),
+  and the Android ones too if the release touches anything Android sees. Report what ran.
 - The target tag `vX.Y.Z` does not already exist, locally or on origin.
 - The target version is greater than the current `version` in `extension/manifest.json`.
 - Nothing meant for this release is still open: run `gh pr list --base main` and, if any PR
@@ -27,10 +29,9 @@ Abort and report if any fails:
   Features land through PRs (RELEASE.md § Each release); the release bump is the only direct
   commit to `main`.
 
-⚠️ **AMO permanently burns a version number on a successful sign, even if a later workflow
-step fails.** A stranded version can never be reused — the only way forward is another bump.
-That is why every check runs before the push, and why a failed release is never re-tagged
-with the same number.
+⚠️ **A successful sign burns the version number for good, even if a later workflow step fails**
+(RELEASE.md § Notes). So every check runs before the push, and a failed release is never
+re-tagged with the same number.
 
 ## 2. Bump, commit, tag
 
@@ -63,7 +64,7 @@ Once it succeeds, finish the release notes per RELEASE.md § Release notes:
   ```
   Cross-check against `git log <previous-tag>..vX.Y.Z --oneline` so nothing is missed.
 - **Every relevant PR gets one plain-language bullet ending in its number, `(#N)`.** Relevant
-  means it changed what ships or what the user sees; docs-, CI- or tooling-only PRs may be
+  means it changed what ships or what the user sees; docs-, CI- or tooling-only PRs (labelled `dev`) may be
   omitted, and the release bump commit needs no bullet. Start from the PR title and rewrite it
   for the user if it reads like a commit message.
 - The bullets go **above** the `**Full Changelog**` compare link, which must stay at the

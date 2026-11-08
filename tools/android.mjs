@@ -365,7 +365,7 @@ const commands = {
       // web-ext waits forever, without saying why, until Firefox allows it in.
       if (/Waiting for .* Remote Debugging Server/.test(log())) {
         throw new Error(
-          "Firefox is not accepting the connection: turn on ⋮ → Settings → Remote debugging via USB (DESIGN.md §12)",
+          "Firefox is not accepting the connection: turn on ⋮ → Settings → Remote debugging via USB (docs/DEVELOPMENT.md)",
         );
       }
       throw err;

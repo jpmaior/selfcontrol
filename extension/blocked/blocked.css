@@ -1,4 +1,4 @@
-/* Sized for a phone from the start, so the Android port (DESIGN.md §11) is a
+/* Sized for a phone from the start, so the Android port (DESIGN.md §12) is a
    no-op for this page. Colours, pills, captions and buttons come from
    common/theme.css, shared with the options page; this file only lays out
    the card. */

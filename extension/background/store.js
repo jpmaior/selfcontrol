@@ -48,7 +48,7 @@ const openSince = new Map();
 /** Rules whose ledger has changed since the last flush. */
 const dirty = new Set();
 
-/** Observable counters, so Checkpoint 4 can verify writes are actually rare. */
+/** Observable counters, so a test can verify writes are actually rare (DESIGN.md §6). */
 export const stats = { localWrites: 0, sessionWrites: 0, keysWritten: 0 };
 
 // --- write serialisation -------------------------------------------------
