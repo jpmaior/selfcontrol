@@ -71,6 +71,10 @@ silently does nothing. The whole design avoids them.
 
 ## Testing
 
+**Every test is automated: nothing is left for the user to check by hand.** Behaviour is
+tested either by `node --test` or by you, in a real browser you drive yourself. Never hand the
+user a list of steps to verify.
+
 **Tests come before the code.** For any behaviour that `node --test` can reach — the pure
 modules and `store.js` — write the test cases for the new or changed behaviour first, run
 `node --test` and see them fail for the right reason, and only then implement until they pass.
@@ -79,13 +83,15 @@ tends to describe what the code does rather than what it must do. If a change ma
 test fail, that is a design question to raise, not a test to edit into silence. Each step in
 [TODO.md](./docs/TODO.md) lists its tests first for this reason.
 
-Browser behaviour (observers, enforcement, alarms, the pages) is verified **by hand** against
-checkpoints — [PLAN.md](./docs/PLAN.md) for v1, the "Check by hand" lists in TODO.md for the
-roadmap. That is deliberate, and several design decisions came from what those checkpoints
-revealed. The tests-first rule applies here too, in its only possible form: write the checkpoint
-(what the user does, what they should see) into the PR description before writing the code, and
-when changing observer or enforcement behaviour, say what the user should check rather than
-claiming it works.
+Browser behaviour (observers, enforcement, alarms, the pages) is tested in Firefox, and you run
+those tests: desktop Firefox through `tools/browser.mjs` (below), Firefox for Android on the
+emulator (`nix develop .#android`, DESIGN.md §12). Several design decisions came from what such
+runs revealed, so they are not optional. The tests-first rule applies here too: before writing
+the code, decide the scenario (what to do, what must be observed), run it against the current
+code and see it fail where it can, then make it pass. Report what you ran and what you saw. If
+something cannot be tested this way, say so plainly rather than claiming it works or asking the
+user to check it. The checkpoints in [PLAN.md](./docs/PLAN.md) and the "Check by hand" lists
+in TODO.md predate this: they are scenarios for you to run, not tasks for the user.
 
 ⚠️ **An attached devtools console pins the event page alive**, so the suspend/restart cycle never
 happens while you are watching. Force it with **Terminate Background Script** in `about:debugging`
@@ -103,8 +109,9 @@ playback; reject it once and the profile in `.browser/` remembers.
 
 Feature work goes on a branch and lands on `main` through a pull request. The release notes
 are built from the merged PRs, so a PR's title and description are user-facing copy: say what
-changed for the user, in plain language. `gh` is installed and authenticated on this machine
-(system-wide, not in the nix shell) for PRs, watching runs and editing releases.
+changed for the user, in plain language, with no list of things to test.
+`gh` is installed and authenticated on this machine (system-wide, not in the nix shell) for PRs,
+watching runs and editing releases.
 
 ## Releasing
 
