@@ -84,7 +84,8 @@ No desktop? On Linux, `nix develop .#browser` adds Firefox on a virtual display,
 it with no arguments for the commands.
 
 For Firefox for Android, `nix develop .#android` (x86_64 Linux) adds adb and a headless
-emulator; see [DESIGN.md §12](./docs/DESIGN.md#12-firefox-for-android).
+emulator, and `node tools/android.mjs` runs the extension there and reaches its console; see
+[DESIGN.md §12](./docs/DESIGN.md#12-firefox-for-android).
 
 No bundler, no framework, no build step. Plain ES modules.
 
