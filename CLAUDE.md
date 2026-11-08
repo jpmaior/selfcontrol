@@ -15,7 +15,7 @@ web-ext lint                 # must stay at 0 errors, 0 warnings
 web-ext run                  # Firefox with live reload
 web-ext build                # unsigned zip, for inspecting what would ship
 nix develop .#browser        # Linux: adds Firefox on a virtual display, for tools/browser.mjs
-nix develop .#android        # x86_64 Linux: adb + a headless emulator, for Firefox for Android
+nix develop .#android        # x86_64 Linux: adb + a headless emulator, for tools/android.mjs
 ```
 
 Nix flakes only see **git-tracked** files. A new file needs `git add` before `nix develop` sees
@@ -29,7 +29,8 @@ extension/common/       shared with the UI: rules, settings, format; policy, cal
                         schedule, transfer and badge arrive with the roadmap in TODO.md
 extension/popup|options|blocked/
 test/                   node --test
-tools/                  make-updates-json (release), browser (Firefox on a virtual display)
+tools/                  make-updates-json (release), browser (Firefox on a virtual display),
+                        android (the extension's console on Firefox for Android)
 docs/                   DESIGN.md, PLAN.md, RELEASE.md, TODO.md (open findings)
 ```
 
@@ -104,6 +105,15 @@ handles, `terminate` is *Terminate Background Script* and `log` is the event pag
 Run it with no arguments for the rest. It attaches no devtools, so the event page suspends as it
 would for a user. On a fresh profile YouTube opens behind an EU consent dialog that pauses
 playback; reject it once and the profile in `.browser/` remembers.
+
+**On Firefox for Android**, `node tools/android.mjs` (inside `nix develop .#android`) is the
+counterpart. `start` boots the emulator if needed and loads the extension with `web-ext run`,
+`log` and `eval 'dumpUsage()'` reach the event page's console (`eval` wakes it first),
+`terminate` and `wake` drive its lifecycle, and `eval … --page options.html` reaches an open
+extension page. `status`, `wake` and `terminate` attach nothing, so the page still suspends;
+`log` and `eval` attach only briefly, and `follow` keeps it alive while it streams. Taps and
+screenshots go through T3 Code's Device panel, or the dev shell's `tap-text` and `screenshot`.
+Firefox for Android has to be installed on the AVD once (DESIGN.md §12).
 
 ## Workflow
 

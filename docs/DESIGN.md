@@ -609,14 +609,18 @@ maintainer's machine its IPv6 route hangs.
 
 ```bash
 nix develop .#android
-emu-start   # about 2½ minutes from a cold boot
-web-ext run -t firefox-android --adb-device emulator-5554 --firefox-apk org.mozilla.firefox
+node tools/android.mjs start            # emu-start if needed (~2½ min cold), then web-ext run
+node tools/android.mjs eval 'dumpUsage()'
+node tools/android.mjs log              # the event page's console since it started
 ```
 
-`web-ext` starts Firefox and installs the working tree as a temporary add-on, reloading it on
-every change under `extension/`. The options page is ⋮ → Extensions → SelfControl → Settings;
-under software rendering it stays blank for a few seconds before it draws. To stop, Ctrl-C
-`web-ext` (the add-on is temporary, so it goes with that Firefox session), then `emu-stop`.
+`start` leaves `web-ext` running in the background: it installs the working tree as a temporary
+add-on and reloads it on every change under `extension/`. Firefox for Android sends extension
+console output nowhere a shell can read, so the tool talks to Firefox's remote debugging port,
+which `web-ext` forwards over adb. Its header comment explains what attaches to the event page
+and what does not. The options page is ⋮ → Extensions → SelfControl → Settings; under software
+rendering it can stay blank for a few seconds before it draws. `node tools/android.mjs stop`
+stops `web-ext` (the add-on stays loaded until Firefox restarts), then `emu-stop`.
 
 ### Watching the emulator in T3 Code
 
