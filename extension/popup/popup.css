@@ -1,6 +1,6 @@
 /* On desktop this is a ~21rem panel hanging off the toolbar button. On Android
    there is no toolbar — the action opens from the ⋮ menu as a full-screen sheet
-   (DESIGN.md §11) — so nothing here may assume a fixed narrow width. Colours,
+   (DESIGN.md §12) — so nothing here may assume a fixed narrow width. Colours,
    captions and buttons come from common/theme.css, shared with the options
    and block pages. */
 
