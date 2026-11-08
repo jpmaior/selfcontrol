@@ -518,13 +518,20 @@ bounds a suspended machine. `meta:lastFlush` had no other reader and was removed
 write in `flush()`; installs that already hold the key keep a harmless orphan in
 `storage.local`. Tests, PLAN.md Checkpoint 4 item 3 and DESIGN.md §5 updated.
 
-**Still to check by hand** (the pure tests cover the arithmetic, not Firefox):
+**Checked in Firefox** on 2026-11-08 with `tools/browser.mjs` (the pure tests cover the
+arithmetic, not Firefox). The YouTube rule also matched a local page looping a tone, with a
+30-minute budget so nothing blocked, and nothing attached to the event page:
 
-1. Start a video, close the console, let it run past one checkpoint, wait ~2 more minutes and
-   pause. Reopen the console. Expect `reconciled youtube: credited 2:00 …` (roughly) and
-   `dumpUsage()` matching the clock.
-2. Play, unload the page, suspend the laptop for >10 min, resume, pause. The `reconciled` line
-   must credit no more than 7:30.
+1. Played 7 minutes untouched. The event page suspended 30 s in, the checkpoint alarm woke it at
+   5:00 (`checkpoint: youtube +5:00`) and it suspended again; the pause woke it with
+   `reconciled youtube: credited 2:02 left open by a previous run`. `dumpUsage()`: 7:02, the
+   time from the start of counting to the pause.
+2. Played, let the event page suspend, then froze Firefox's whole process group for 11 minutes
+   (`SIGSTOP`/`SIGCONT`, standing in for a laptop suspend: the wall clock jumps, though timers
+   behave a little differently). On resume the overdue checkpoint alarm caught the 12-minute
+   stretch first and credited `+7:30`, the clamp; the pause added `+0:23`. A real suspend may
+   reach the same clamp through `reconcile` instead; both go through `settle()`, and
+   `store.test.js` covers the reconcile path.
 
 **Known and accepted:** the observers still *drop* the waking event itself because they run with
 an empty rule set until `setRules()` lands. That is harmless — reconcile covers stops and
@@ -554,7 +561,8 @@ instant, never invented without a block, yields when the rule is loosened, drip-
 survives a reload, cleared on release). The ledger-shape tests in `accountant.test.js` and
 `store.test.js` gained the member.
 
-**Checked by hand** on the Android emulator: 30 s budget in a 2-minute window, needing all 30 s
-back, spent across two buckets (12 s and 18 s). When the first aged out the page still said
-"unlocks in 0:50" at `0:18 of 0:30`; it unlocked at the promised instant with the full 30 s
-and `blockedUntil` back to `null`.
+**Checked in Firefox** for Android (the emulator) and on desktop (`tools/browser.mjs`): 30 s
+budget in a 2-minute window, needing all 30 s back, spent across two buckets (12 s and 18 s on
+the emulator, 14 s and 16 s on desktop). When the first aged out the block page still counted
+down ("unlocks in 0:50" at `0:18 of 0:30` and `0:16 of 0:30`); both unlocked at the promised
+instant with the full 30 s and `blockedUntil` back to `null`.
