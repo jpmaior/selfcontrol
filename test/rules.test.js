@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_RULES,
   blankRule,
+  effectiveMode,
   hostMatches,
   makeRuleId,
   parseDomain,
@@ -294,4 +295,15 @@ test("returnUrlFrom: refuses anything that is not a web page", () => {
 test("returnUrlFrom: null for a missing parameter", () => {
   assert.equal(returnUrlFrom(new URLSearchParams()), null);
   assert.equal(returnUrlFrom(new URLSearchParams({ rule: "youtube" })), null);
+});
+
+test("effectiveMode: an audible rule counts as focus where tab.audible is not reported", () => {
+  // Firefox for Android (DESIGN.md §12). The stored mode is untouched; only
+  // what the rule counts on changes, so the same rule still counts while
+  // playing once it is imported on desktop.
+  assert.equal(effectiveMode({ mode: "audible" }, { audible: false }), "focus");
+  assert.equal(effectiveMode({ mode: "focus" }, { audible: false }), "focus");
+  assert.equal(effectiveMode({ mode: "audible" }, { audible: true }), "audible");
+  assert.equal(effectiveMode({ mode: "focus" }, { audible: true }), "focus");
+  assert.equal(effectiveMode({ mode: "audible" }), "audible", "desktop unless told otherwise");
 });

@@ -19,6 +19,7 @@ import { normalizeUsage, usedByDay } from "../background/accountant.js";
 import { addDays, dayKey, startOfDay } from "../common/calendar.js";
 import { clock } from "../common/format.js";
 import { importSummary, parseImport, serializeRules } from "../common/transfer.js";
+import { reportsAudible } from "../common/platform.js";
 
 /** Days drawn in the history strip; the ledger keeps more (HISTORY_DAYS). */
 const HISTORY_SHOWN = 30;
@@ -31,6 +32,9 @@ const templateEl = document.getElementById("rule-template");
 const emptyTemplateEl = document.getElementById("empty-template");
 const statusEl = document.getElementById("status");
 const revertEl = document.getElementById("revert");
+
+/** Whether "Count time" is a real choice here; not on Firefox for Android. */
+const AUDIBLE = await reportsAudible();
 
 /** Stacked layout: picking a rule has to scroll its form into view. */
 const stacked = window.matchMedia("(max-width: 59.99rem)");
@@ -123,6 +127,12 @@ function buildForm(draft) {
   field("passCounts").checked = draft.passes.countsTowardCaps;
 
   fillOptions(field("mode"), MODES, draft.mode);
+  // Firefox for Android cannot tell when a tab plays sound, so every rule
+  // counts while focused there and the choice would be a lie (DESIGN.md §12).
+  // Hidden rather than removed: the select still reads the stored mode back
+  // into the draft, so a rule from desktop keeps counting while playing there.
+  field("mode").closest(".field").hidden = !AUDIBLE;
+  if (!AUDIBLE) field("match").closest("section").querySelector(".section-title").textContent = "1. Domains";
   fillOptions(field("onExceed"), ON_EXCEED, draft.onExceed);
 
   // Read every field back into the draft on any change, so validation and Save

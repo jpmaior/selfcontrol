@@ -10,7 +10,8 @@
 // on every single event page start, not just on install.
 
 import { log, warn } from "./log.js";
-import { hostnameOf, ruleForUrl } from "../common/rules.js";
+import { effectiveMode, hostnameOf, ruleForUrl } from "../common/rules.js";
+import { reportsAudible } from "../common/platform.js";
 
 // Firefox for Android has only ever one window, and its `windows` API is
 // reduced. Feature-detect rather than assume: reading WINDOW_ID_NONE off an
@@ -20,7 +21,37 @@ const windowsApi = globalThis.browser?.windows ?? null;
 const canTrackWindowFocus = Boolean(windowsApi?.onFocusChanged && windowsApi?.getLastFocused);
 const NO_WINDOW = windowsApi?.WINDOW_ID_NONE ?? -1;
 
-export const platform = { canTrackWindowFocus };
+/**
+ * `tabsUpdatedFilter` is learned on the first onTabUpdated() call, `audible`
+ * in start(); both are settled before setRules() hands over any rules.
+ */
+export const platform = { canTrackWindowFocus, tabsUpdatedFilter: null, audible: true };
+
+/** The mode a rule counts in here: `audible` falls back to `focus` on Android. */
+export const modeOf = (rule) => effectiveMode(rule, platform);
+
+/**
+ * `tabs.onUpdated.addListener` with a filter where the platform accepts one.
+ *
+ * Firefox for Android has the event but not its filter argument, and rejects
+ * the call outright ("Incorrect argument types for tabs.onUpdated") instead of
+ * ignoring it. At module scope in index.js that throw aborted evaluation before
+ * the message listener existed, so the popup only ever said "Background script
+ * not responding" (docs/TODO-ANDROID.md). The fallback registers unfiltered and
+ * drops what the filter would have, so both platforms see the same events.
+ * Synchronous on purpose: listeners must exist by the end of module evaluation.
+ */
+export function onTabUpdated(handler, properties) {
+  try {
+    browser.tabs.onUpdated.addListener(handler, { properties });
+    platform.tabsUpdatedFilter = true;
+  } catch {
+    platform.tabsUpdatedFilter = false;
+    browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      if (properties.some((p) => p in changeInfo)) return handler(tabId, changeInfo, tab);
+    });
+  }
+}
 
 /** tabId -> ruleId, for tabs currently producing sound under an `audible` rule. */
 const audibleTabs = new Map();
@@ -47,10 +78,9 @@ export async function start({ rules: ruleset, onChange, trace = false }) {
   onCountingChange = onChange;
   traceEnabled = trace;
 
-  browser.tabs.onUpdated.addListener(handleTabUpdated, {
-    // Filtering at the source keeps us from waking for every title/favicon change.
-    properties: ["audible", "mutedInfo", "url", "status"],
-  });
+  // Filtering at the source keeps us from waking for every title/favicon change
+  // (on desktop; Android wakes regardless, see onTabUpdated).
+  onTabUpdated(handleTabUpdated, ["audible", "mutedInfo", "url", "status"]);
   browser.tabs.onRemoved.addListener(handleTabRemoved);
   browser.tabs.onActivated.addListener(() => resolveFocus("tab activated"));
 
@@ -62,6 +92,11 @@ export async function start({ rules: ruleset, onChange, trace = false }) {
     // another app. The sleep clamp in store.js bounds the damage.
     log("no window focus events on this platform — focus rules count while the app is backgrounded");
   }
+
+  // After every listener is registered: awaiting before them could miss the
+  // event that woke the page. Nothing counts before setRules() anyway.
+  platform.audible = await reportsAudible();
+  if (!platform.audible) log("tabs do not report sound on this platform — audible rules count as focus");
 
   await prime();
 }
@@ -88,7 +123,7 @@ async function prime() {
   for (const tab of tabs) {
     if (!tab.audible) continue;
     const rule = ruleForUrl(rules, tab.url);
-    if (rule?.mode === "audible") audibleTabs.set(tab.id, rule.id);
+    if (rule && modeOf(rule) === "audible") audibleTabs.set(tab.id, rule.id);
   }
 
   log(`primed from ${tabs.length} open tabs`);
@@ -113,7 +148,7 @@ function handleTabUpdated(tabId, changeInfo, tab) {
     );
   }
 
-  if (rule?.mode === "audible" && tab.audible) {
+  if (rule && modeOf(rule) === "audible" && tab.audible) {
     audibleTabs.set(tabId, rule.id);
   } else {
     audibleTabs.delete(tabId);
@@ -189,7 +224,7 @@ export function isCountingNow(ruleId) {
 
 /** Is this rule being consumed right now, per its mode? */
 function isCounting(rule) {
-  switch (rule.mode) {
+  switch (modeOf(rule)) {
     case "audible":
       // Per rule, not per tab: three YouTube tabs playing is still one clock.
       for (const ruleId of audibleTabs.values()) if (ruleId === rule.id) return true;

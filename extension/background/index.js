@@ -5,7 +5,7 @@
 // message channel serves the block page and the popup.
 
 import { log } from "./log.js";
-import { isCountingNow, platform, setRules, start } from "./observers.js";
+import { isCountingNow, modeOf, onTabUpdated, platform, setRules, start } from "./observers.js";
 import { clock, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { validateRule } from "../common/rules.js";
@@ -53,14 +53,14 @@ const primed = start({
 
     if (counting) {
       startCounting(rule, now);
-      log("▶ COUNTING", `${rule.id} (${rule.mode})`, `— ${why}`);
+      log("▶ COUNTING", `${rule.id} (${modeOf(rule)})`, `— ${why}`);
       // A rule can start counting while already spent (the tab was opened
       // before the block landed), so check before scheduling.
       await enforceRule(rule, now);
     } else {
       const credited = stopCounting(rule, now);
       flush(now);
-      log("■ stopped  ", `${rule.id} (${rule.mode})`, `— ${why}`, `+${clock(credited)}`);
+      log("■ stopped  ", `${rule.id} (${modeOf(rule)})`, `— ${why}`, `+${clock(credited)}`);
     }
 
     log("   ", describe(rule, now));
@@ -144,12 +144,12 @@ browser.tabs.onCreated.addListener(async (tab) => {
   await guardTab(rules, tab, Date.now());
 });
 
-browser.tabs.onUpdated.addListener(
+onTabUpdated(
   async (tabId, changeInfo, tab) => {
     await loaded;
     await guardTab(rules, tab, Date.now());
   },
-  { properties: ["url"] },
+  ["url"],
 );
 
 // --- alarms --------------------------------------------------------------
@@ -341,7 +341,10 @@ globalThis.dumpPlatform = async () => {
     alarms: Boolean(browser.alarms),
     idle: Boolean(browser.idle),
     notifications: Boolean(browser.notifications),
-    "tabs.onUpdated filters": Boolean(browser.tabs?.onUpdated),
+    // Whether the filtered registration was accepted, not whether the event exists.
+    "tabs.onUpdated filters": platform.tabsUpdatedFilter,
+    // False on Android: audible rules count as focus there (DESIGN.md §12).
+    "tab.audible": platform.audible,
     sidebarAction: Boolean(browser.sidebarAction),
     commands: Boolean(browser.commands),
   };

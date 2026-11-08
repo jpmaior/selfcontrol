@@ -6,7 +6,8 @@
 // transitions and make the meters stutter.
 
 import { clock, countdown, wallClock } from "../common/format.js";
-import { MODES } from "../common/rules.js";
+import { MODES, effectiveMode } from "../common/rules.js";
+import { reportsAudible } from "../common/platform.js";
 
 const REFRESH_MS = 1000;
 
@@ -20,6 +21,9 @@ const noteEl = document.getElementById("note");
 const rows = new Map();
 
 const MODE_HINT = Object.fromEntries(MODES.map((mode) => [mode.value, mode.hint]));
+
+/** On Android an `audible` rule counts while focused; say what it does there. */
+const AUDIBLE = await reportsAudible();
 
 /** State text while blocked, by the constraint that releases last. */
 const BLOCKED_STATE = {
@@ -112,7 +116,9 @@ function render(status, nowMs) {
     const which = status.binding && status.binding !== "pass" ? `${CAP_NAME[status.binding]}: ` : "";
     parts.right.textContent = which ? `${which}${clock(status.remainingMs)} left` : "rolling window paused";
   } else {
-    parts.state.textContent = status.counting ? "counting" : MODE_HINT[status.mode] ?? "";
+    parts.state.textContent = status.counting
+      ? "counting"
+      : MODE_HINT[effectiveMode(status, { audible: AUDIBLE })] ?? "";
     // The remainder is the smallest across the caps; say which one when it is
     // not the rolling window the meter shows.
     const which = status.binding && status.binding !== "rolling" ? ` (${CAP_NAME[status.binding]})` : "";

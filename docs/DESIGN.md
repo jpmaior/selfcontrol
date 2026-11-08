@@ -466,8 +466,12 @@ reload, and a console tweak takes the same path a UI edit does.
 
 ## 12. Firefox for Android
 
-**Status: prepared, not verified.** The code no longer assumes a desktop browser, but none of
-this has been run on a device. Treat everything below as intent, not as tested behaviour.
+**Status: verified on the emulator (2026-11-08, Firefox for Android 159).** The first run found
+two things this section had wrong: the `tabs.onUpdated` filter argument, which Android rejects
+by throwing (fixed by `onTabUpdated()` in `observers.js`), and `audible` mode, which cannot
+work there at all (below). Enforcement, alarms (including waking a suspended event page with
+Firefox in the background), `storage.session` and all three pages work unchanged. The
+per-check results are in [TODO-ANDROID.md](./TODO-ANDROID.md).
 
 ### What is already in place
 
@@ -499,18 +503,38 @@ The damage is bounded rather than unbounded: the sleep clamp caps any single com
 `1.5 × CHECKPOINT_MS`, so a phone left overnight credits minutes, not hours. But the rule is
 wrong, and on a phone — where app switching is constant — it is wrong often.
 
-`audible` mode has no such problem, and is arguably *more* correct on Android: media that keeps
-playing while you switch apps genuinely is still being consumed.
-
 Options if this matters, in rough order of preference:
 
-1. **`browser.idle`**, if Android provides it — `dumpPlatform()` answers that. Backgrounding the
-   app is not idleness, so this is a partial fix at best.
+1. **`browser.idle`**, if Android provides it. Still unknown: the namespace only exists with the
+   `idle` permission, which the manifest does not request, so `dumpPlatform()`'s `idle: false`
+   says nothing (desktop reports the same). Backgrounding the app is not idleness, so this is a
+   partial fix at best.
 2. **A content script** using the Page Visibility API, which does fire when the app is
    backgrounded. Costs host permissions and their MV3 grant problem (§2) — the thing this design
    has deliberately avoided throughout.
-3. **Use `audible` rules on Android and keep `focus` rules for desktop.** The rule set is per
-   device already, since `settings` lives in `storage.local`.
+
+The emulator confirmed the gap: about 85 seconds of a 90-second budget were charged while
+Settings was in front. The alarms kept working with Firefox in the background, so the block
+still landed on time.
+
+### `audible` mode does not exist on Android
+
+This section used to say `audible` mode was *more* correct on Android than `focus`. It is not
+available at all: Firefox for Android's `tab.audible` is a stub
+(`mobile/shared/components/extensions/ext-android.js`: `get audible() { // TODO bug 2032751 …
+return undefined; }`). With a tab audibly playing on the emulator, every tab reported
+`undefined`, `tabs.query({ audible: true })` found nothing and `tabs.onUpdated` stayed silent.
+MDN's compatibility data lists it as supported since 54; it is wrong.
+
+So on Android an `audible` rule counts as `focus` (`effectiveMode()` in `rules.js`), and the
+options page hides "Count time" (it would be a choice with no effect). The stored mode is left
+alone: settings are per device, but export and import carry rules between devices, and a rule
+from desktop should still count while playing when it goes back. New rules default to `focus`
+anyway. The popup names what the rule does on the device in front of you.
+
+The platform is detected with `runtime.getPlatformInfo()` (`common/platform.js`), not by
+feature: the property exists and returns `undefined`, which only a tab that is playing could
+expose. If bug 2032751 lands, that one function is what changes.
 
 ### What testing it would involve
 
@@ -526,9 +550,10 @@ says why. A phone also needs *USB debugging* in Android's developer options, and
 its store.
 
 Then `dumpPlatform()` from the remote console (`about:debugging` on desktop, connected over USB)
-answers the open questions in one shot: whether `windows` focus events exist, whether `idle` and
-`notifications` are available, and whether `storage.session` behaves. Enforcement, the ledger and
-the alarms should port unchanged; the popup opens from the ⋮ menu rather than a toolbar.
+reports what the device offers: `windows` focus events, whether the `tabs.onUpdated` filter was
+accepted, whether tabs report `audible`. Its `idle` and `notifications` lines only mean anything
+once the manifest asks for those permissions. The popup opens from the ⋮ menu rather than a
+toolbar.
 
 ### Running it on the emulator
 
