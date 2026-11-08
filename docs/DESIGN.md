@@ -515,15 +515,92 @@ Options if this matters, in rough order of preference:
 ### What testing it would involve
 
 ```bash
-# add pkgs.android-tools to flake.nix for adb
-adb devices
+nix develop .#android   # adb, plus a headless emulator (next section)
+adb devices             # a phone with USB debugging on, or emulator-5554
 web-ext run -t firefox-android --adb-device <ID> --firefox-apk org.mozilla.firefox
 ```
+
+Firefox has to allow it too: ⋮ → Settings → Advanced → **Remote debugging via USB**. Until that
+is on, `web-ext` prints "Waiting for org.mozilla.firefox Remote Debugging Server..." and never
+says why. A phone also needs *USB debugging* in Android's developer options, and Firefox from
+its store.
 
 Then `dumpPlatform()` from the remote console (`about:debugging` on desktop, connected over USB)
 answers the open questions in one shot: whether `windows` focus events exist, whether `idle` and
 `notifications` are available, and whether `storage.session` behaves. Enforcement, the ledger and
 the alarms should port unchanged; the popup opens from the ⋮ menu rather than a toolbar.
+
+### Running it on the emulator
+
+The emulator has no window: watch and drive it from T3's Device panel (next section), or with
+`screenshot`, `ui-list` and `tap-text`.
+
+**Once per AVD.** The Google APIs image has no Play Store, so Firefox comes from Mozilla's
+release archive. The AVD keeps Firefox and its settings across `emu-stop`, so none of this
+repeats:
+
+```bash
+nix develop .#android
+emu-create
+emu-start
+v=$(curl -fsS https://product-details.mozilla.org/1.0/mobile_versions.json \
+  | sed -n 's/^ *"version": "\(.*\)".*/\1/p')   # current release, e.g. 159.0.1
+curl -fLO "https://archive.mozilla.org/pub/fenix/releases/$v/android/fenix-$v-android-x86_64/fenix-$v.multi.android-x86_64.apk"
+adb install "fenix-$v.multi.android-x86_64.apk"
+```
+
+Then open Firefox on the emulator, go through its welcome screens, and turn on Remote debugging
+via USB as above. If `archive.mozilla.org` times out, add `-4` to both `curl` calls: on the
+maintainer's machine its IPv6 route hangs.
+
+**Each session:**
+
+```bash
+nix develop .#android
+emu-start   # about 2½ minutes from a cold boot
+web-ext run -t firefox-android --adb-device emulator-5554 --firefox-apk org.mozilla.firefox
+```
+
+`web-ext` starts Firefox and installs the working tree as a temporary add-on, reloading it on
+every change under `extension/`. The options page is ⋮ → Extensions → SelfControl → Settings;
+under software rendering it stays blank for a few seconds before it draws. To stop, Ctrl-C
+`web-ext` (the add-on is temporary, so it goes with that Firefox session), then `emu-stop`.
+
+### Watching the emulator in T3 Code
+
+T3 Code's Device panel shows the headless emulator live and lets you (or an agent) tap and type
+in it, which beats `screenshot` and `tap-text` for anything interactive. It looks for its tools
+outside any dev shell, on the machine running the T3 server, and each step below fixes one error
+it reports otherwise:
+
+```bash
+# An Android SDK outside the dev shell. On the maintainer's machine that is
+# ~/dev-envs/android#android-sdk in the user profile: same nixpkgs revision, same store paths.
+nix profile add ~/dev-envs/android#android-sdk
+
+# "Android SDK was not found": T3 insists on cmdline-tools/latest/bin/avdmanager, and the Nix
+# SDK names that directory by version. Mirror the SDK at ~/Android/Sdk, where T3 looks on its own.
+S=~/.nix-profile/libexec/android-sdk
+mkdir -p ~/Android/Sdk/cmdline-tools
+for e in "$S"/*; do [ "${e##*/}" = cmdline-tools ] || ln -sfn "$e" ~/Android/Sdk/"${e##*/}"; done
+ln -sfn "$S"/cmdline-tools/* ~/Android/Sdk/cmdline-tools/latest
+
+# "requires Node.js" and "needs working ffmpeg with the libx264 encoder". Taking both from
+# flake.lock's nixpkgs revision means they are already in the store, not downloaded.
+rev=$(sed -n 's/.*"rev": "\([0-9a-f]*\)".*/\1/p' flake.lock | head -1)
+nix profile add "github:NixOS/nixpkgs/$rev#nodejs_22" "github:NixOS/nixpkgs/$rev#ffmpeg-headless"
+```
+
+None of this needs a T3 restart, which matters because a restart ends every running agent
+thread. T3 re-checks `~/Android/Sdk` on each call, and `~/.nix-profile/bin` is already on its
+`PATH`. One trap: an `ANDROID_HOME` in the T3 server's environment overrides `~/Android/Sdk`, so
+it must point there rather than at the Nix SDK, or T3 rejects the SDK again after its next
+restart. `~/.profile` exports `ANDROID_HOME=~/Android/Sdk` for that reason.
+
+Once `emu-start` has booted it, the emulator appears in the Device panel as `emulator-5554`; open
+it there. T3 also lists the AVDs that are not running, but booting through `emu-start` is the
+path that has been checked. After a nixpkgs bump that changes the cmdline-tools version,
+`latest` dangles: re-run the `ln … latest` line.
 
 ---
 
