@@ -15,6 +15,7 @@ web-ext lint                 # must stay at 0 errors, 0 warnings
 web-ext run                  # Firefox with live reload
 web-ext build                # unsigned zip, for inspecting what would ship
 nix develop .#browser        # Linux: adds Firefox on a virtual display, for tools/browser.mjs
+nix develop .#android        # x86_64 Linux: adb + a headless emulator, for Firefox for Android
 ```
 
 Nix flakes only see **git-tracked** files. A new file needs `git add` before `nix develop` sees

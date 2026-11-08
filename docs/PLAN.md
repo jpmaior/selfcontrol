@@ -351,7 +351,7 @@ rules are unaffected.
 
 ### Checkpoint 9 — *deferred*
 
-When you do want to run it on a device: add `pkgs.android-tools` to `flake.nix`, then
+When you do want to run it on a device: `nix develop .#android` (see DESIGN.md §12), then
 
 ```bash
 adb devices
