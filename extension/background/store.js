@@ -274,6 +274,31 @@ function projected(rule, nowMs) {
   return commit(copy, since, nowMs, { maxChunkMs: MAX_CHUNK_MS, pass: usage.pass });
 }
 
+/**
+ * Keep the ledger's `blockedUntil` in step with the rolling cap (DESIGN.md §8):
+ * set when a block is seen, moved when its unlock instant moves (a second
+ * leaked in before the block page loaded, a settings change), cleared once the
+ * rule reopens. It lives here because every decision passes through status()
+ * — the alarm at the instant the budget runs out, the re-open guard, the popup
+ * — so a block cannot be acted on without being recorded. Flushed at once: it
+ * changes once per block and once per unlock, and losing it to a killed event
+ * page would bring the drip-feed back.
+ *
+ * Left alone during a pass, which suspends the rolling cap: its unlock instant
+ * moves every minute the pass is used, and the alarm at the pass end
+ * records the hold that follows it.
+ */
+function syncHold(rule, decision, nowMs) {
+  if (decision.pass.active) return;
+  const rolling = decision.caps.rolling;
+  const next = rolling.exhausted ? rolling.unlockAtMs : null;
+  const usage = ledgerFor(rule.id);
+  if (usage.blockedUntil === next) return;
+  usage.blockedUntil = next;
+  dirty.add(rule.id);
+  flush(nowMs);
+}
+
 /** Used and pass time since a local period start, for the popup. */
 function period(usage, startMs) {
   const all = usedInPeriod(usage, startMs);
@@ -290,6 +315,7 @@ export function status(rule, nowMs) {
   const usage = projected(rule, nowMs);
   const counting = openSince.has(rule.id);
   const decision = evaluate(rule, usage, nowMs, { counting });
+  syncHold(rule, decision, nowMs);
 
   return {
     id: rule.id,

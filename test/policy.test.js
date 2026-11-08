@@ -313,3 +313,84 @@ test("lockInPreview during a pass: ends it and spends what the rolling cap has l
   assert.equal(preview.reason, "rolling");
   assert.ok(preview.unlockAtMs > now, "blocked once the pass is ended");
 });
+
+// --- the hold: once blocked, stay blocked (DESIGN.md §8) ------------------
+//
+// rule() spends 20 minutes from T0. usedMs keeps a bucket until it expires, so
+// the first one ages out at T0+61 and frees one minute; the fifth, at T0+65,
+// brings back the five minutes minUnlockCreditSec asks for. Without a hold,
+// the first freed minute reopened the rule: the drip-feed §8 exists to stop.
+
+const HELD_UNTIL = T0 + 65 * MIN;
+
+/** What the store leaves in the ledger once the block has landed. */
+function heldUsage() {
+  const u = spent(20 * MIN);
+  u.blockedUntil = HELD_UNTIL;
+  return u;
+}
+
+test("hold: the unlock instant at the block is the one the hold records", () => {
+  const e = evaluate(rule(), spent(20 * MIN), T0 + 20 * MIN);
+  assert.equal(e.unlockAtMs, HELD_UNTIL);
+});
+
+test("hold: a blocked rule stays blocked when its first bucket ages out", () => {
+  const now = T0 + 61 * MIN + 30_000;
+  const e = evaluate(rule(), heldUsage(), now);
+  assert.equal(e.caps.rolling.remainingMs, MIN, "one minute is back");
+  assert.equal(e.exhausted, true, "the rule asks for five");
+  assert.equal(e.reason, "rolling");
+  assert.equal(e.remainingMs, 0);
+  assert.equal(e.unlockAtMs, HELD_UNTIL, "the instant the block page promised");
+  assert.equal(e.nextChangeAtMs, HELD_UNTIL);
+});
+
+test("hold: released once the unlock credit is back", () => {
+  const e = evaluate(rule(), heldUsage(), HELD_UNTIL);
+  assert.equal(e.exhausted, false);
+  assert.equal(e.remainingMs, 5 * MIN);
+});
+
+test("hold: short of the unlock credit but never blocked is still open", () => {
+  // 17 of 20 minutes used: 3 left, less than the 5 minUnlockCreditSec names,
+  // and no block ever landed. Only a block that landed holds.
+  const e = evaluate(rule(), spent(17 * MIN), T0 + 17 * MIN);
+  assert.equal(e.exhausted, false);
+  assert.equal(e.remainingMs, 3 * MIN);
+});
+
+test("hold: one that has run out does nothing", () => {
+  const u = spent(17 * MIN);
+  u.blockedUntil = T0 + 17 * MIN;
+  assert.equal(evaluate(rule(), u, T0 + 17 * MIN).exhausted, false);
+});
+
+test("hold: yields as soon as the rule's own unlock credit is back", () => {
+  // The rule was loosened after the block landed: one minute is now enough.
+  const e = evaluate(rule({ minUnlockCreditSec: 60 }), heldUsage(), T0 + 61 * MIN);
+  assert.equal(e.exhausted, false);
+  assert.equal(e.remainingMs, MIN);
+});
+
+test("hold: minUnlockCreditSec 0 is still the drip-feed", () => {
+  const e = evaluate(rule({ minUnlockCreditSec: 0 }), heldUsage(), T0 + 61 * MIN);
+  assert.equal(e.exhausted, false);
+  assert.equal(e.remainingMs, MIN);
+});
+
+test("hold: a pass suspends it like the rest of the rolling cap", () => {
+  const r = withPasses();
+  const u = heldUsage();
+  startPass(u, r, T0 + 61 * MIN);
+  const e = evaluate(r, u, T0 + 62 * MIN, { counting: true });
+  assert.equal(e.exhausted, false);
+  assert.equal(e.pass.active, true);
+  assert.equal(e.caps.rolling.exhausted, true, "still held underneath");
+});
+
+test("hold: lock-in is refused while held, like any block", () => {
+  const now = T0 + 61 * MIN;
+  assert.equal(lockInAmount(rule(), heldUsage(), now), 0);
+  assert.equal(typeof canLockIn(rule(), heldUsage(), now), "string");
+});

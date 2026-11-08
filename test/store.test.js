@@ -163,7 +163,7 @@ test("load() normalises a ledger stored by an older build", async () => {
   flush(T0 + MIN);
   await settled();
   const stored = local.data.get("usage:legacy");
-  assert.deepEqual(Object.keys(stored).sort(), ["b", "d", "p", "pass", "passUses"]);
+  assert.deepEqual(Object.keys(stored).sort(), ["b", "blockedUntil", "d", "p", "pass", "passUses"]);
 });
 
 test("status reports today's and this week's totals from the projection", async () => {
@@ -249,4 +249,55 @@ test("flush persists ledgers through the queue", async () => {
   const stored = local.data.get("usage:flushed");
   const total = Object.values(stored.b).reduce((a, ms) => a + ms, 0);
   assert.equal(total, 3 * MIN);
+});
+
+// --- the hold (DESIGN.md §8) ----------------------------------------------
+//
+// A block must outlast the first bucket that ages out, and the event page
+// that saw the block land is not the one that will be asked an hour later.
+
+/** 20 of 20 minutes spent from T0, flushed; unlock credit five minutes. */
+async function spentRule(id) {
+  const r = { ...rule(id), minUnlockCreditSec: 5 * 60 };
+  await load([r]);
+  startCounting(r, T0);
+  // Checkpointed as a real session is: one 20-minute commit would hit the
+  // sleep clamp and credit only MAX_CHUNK_MS.
+  for (let at = T0 + CHECKPOINT_MS; at < T0 + 20 * MIN; at += CHECKPOINT_MS) checkpointRule(r, at);
+  stopCounting(r, T0 + 20 * MIN);
+  flush(T0 + 20 * MIN);
+  return r;
+}
+
+/** The first bucket ages out at T0+61; five minutes are back at T0+65. */
+const RELEASE = T0 + 65 * MIN;
+
+test("hold: status records it when the block lands, and flushes it", async () => {
+  const r = await spentRule("held-set");
+  const s = status(r, T0 + 20 * MIN);
+  assert.equal(s.exhausted, true);
+  assert.equal(s.unlockAtMs, RELEASE);
+
+  await settled();
+  assert.equal(local.data.get("usage:held-set").blockedUntil, RELEASE);
+});
+
+test("hold: survives a reload and keeps the rule blocked past the first bucket", async () => {
+  const r = await spentRule("held-reload");
+  status(r, T0 + 20 * MIN);
+  await settled();
+
+  await load([r]); // a later event page, from storage alone
+  const s = status(r, T0 + 61 * MIN + 30_000);
+  assert.equal(s.exhausted, true, "one minute back is not five");
+  assert.equal(s.unlockAtMs, RELEASE);
+});
+
+test("hold: cleared once the rule reopens", async () => {
+  const r = await spentRule("held-clear");
+  status(r, T0 + 20 * MIN);
+  assert.equal(status(r, RELEASE).exhausted, false);
+
+  await settled();
+  assert.equal(local.data.get("usage:held-clear").blockedUntil, null);
 });

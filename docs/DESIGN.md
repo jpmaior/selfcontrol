@@ -406,8 +406,35 @@ One knob spans every variant, so it is built in from the start rather than disco
 > trivially satisfied *right now*, so passing `minUnlockCreditSec: 0` straight into
 > `creditAvailableAt` would mean the rule **never blocks at all** — the exact opposite of the
 > drip-feed. The threshold is therefore `max(minUnlockCreditSec, 1ms)`, and that clamp lives in
-> `accountant.unlockAt()`, the one function that owns rule semantics. `creditAvailableAt` stays
-> mathematically honest.
+> `accountant.unlockCreditMs()`, the one function that owns rule semantics. `creditAvailableAt`
+> stays mathematically honest.
+
+### The hold: "once blocked" needs remembering
+
+Until 2026-11-08 only half of this was built. `minUnlockCreditSec` set the unlock instant the
+block page counted down to, but the decision itself was `exhausted = remaining <= 0`, with no
+memory of having been blocked. So the first bucket to age out reopened the rule with whatever
+little it freed, a minute before the countdown ended, which is precisely the drip-feed above.
+Found on the Android emulator ("available again" at `0:22 of 0:30`); it was never
+platform-specific.
+
+The fix cannot be derived from the buckets: by the time the first bucket ages out it has been
+folded into its day (§13), and the ledger no longer shows that the budget was ever full. So the
+ledger gains one member, `blockedUntil`, and the rolling cap is exhausted when it is spent *or*
+when `now < blockedUntil` and the credit back is still short of `minUnlockCreditSec`.
+
+- **It only marks the block; it does not decide the release.** Release is still "enough credit
+  is back", computed from the buckets, so a rule loosened mid-block lets go at once, and an
+  expired hold does nothing.
+- **`status()` keeps it in step**: set when a block is seen, moved when the unlock instant moves
+  (a leaked second, a settings change), cleared on release. Every decision passes through
+  `status()` — the alarm at the instant the budget runs out, the re-open guard, the popup — so a
+  block cannot be acted on without being recorded. It is flushed at once: one write per block
+  and one per unlock.
+- **Left alone during a pass**, whose unlock instant moves every minute; the alarm at the pass
+  end records the hold that follows it.
+- `minUnlockCreditSec: 0` needs 1 ms back, which is what `remaining > 0` already meant: the
+  drip-feed is unchanged where it is asked for.
 
 ---
 
@@ -543,7 +570,8 @@ usage = {
   b: { "29384756": 60000 },                  // live buckets, as before
   p: {},                                     // live buckets accrued under a pass (§17)
   d: { "2026-09-19": { used: 60000, pass: 0 } },  // folded whole days
-  pass: null, passUses: []                   // §17
+  pass: null, passUses: [],                  // §17
+  blockedUntil: null                         // the hold, §8
 }
 ```
 
