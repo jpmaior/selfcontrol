@@ -1,8 +1,8 @@
 # TODO
 
 Open work first; findings that were fixed stay below for the record. Android findings from the
-first on-device test are tracked separately in [TODO-ANDROID.md](./TODO-ANDROID.md) and are
-still open.
+first on-device test are tracked separately in [TODO-ANDROID.md](./TODO-ANDROID.md), and were
+checked on the emulator on 2026-11-08.
 
 ## Roadmap: the v0.2 features (planned 2026-09-19)
 

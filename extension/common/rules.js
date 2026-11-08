@@ -12,6 +12,17 @@ export const MODES = [
   { value: "focus", label: "While the tab is focused", hint: "counts while focused" },
 ];
 
+/**
+ * The mode a rule actually counts in. Firefox for Android has no `tab.audible`
+ * (a stub returning undefined, bug 2032751; DESIGN.md §12), so there an
+ * `audible` rule would never count: it counts as `focus` instead. The stored
+ * mode is left alone, so the same rule still counts while playing on desktop
+ * after an export and import.
+ */
+export function effectiveMode(rule, { audible = true } = {}) {
+  return rule.mode === "audible" && !audible ? "focus" : rule.mode;
+}
+
 export const ON_EXCEED = [
   { value: "block", label: "Show the block page" },
   { value: "close", label: "Close the tab" },

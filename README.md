@@ -92,9 +92,11 @@ No bundler, no framework, no build step. Plain ES modules.
 
 - **Muting is a loophole.** Muting a tab stops the clock, so muted playback with captions is
   unlimited. Deliberate: closing it would mean giving up the hover-preview immunity.
-- **Android is prepared, not verified.** The code is safe on Android but has never run there, and
-  `while focused` rules would keep counting while the browser is backgrounded. See
-  [DESIGN.md §12](./docs/DESIGN.md).
+- **On Android every rule counts while focused.** Firefox for Android does not report which tabs
+  are playing sound, so a `while playing` rule counts while focused there, and the options page
+  does not offer the choice. Firefox for Android also cannot say when Firefox itself is in the
+  background, so a rule keeps counting while you are in another app. See
+  [DESIGN.md §12](./docs/DESIGN.md#12-firefox-for-android).
 - **It is a speed bump, not a lock.** Disabling the add-on is always two clicks away, and it does
   not run in private windows unless you allow it.
 
