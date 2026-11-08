@@ -5,20 +5,23 @@
    and block pages. */
 
 body {
-  /* A plain minimum: min(21.25rem, 100vw) measured ~300px wide in a desktop
-     popup, because 100vw there is the panel Firefox is still sizing, not
-     the screen. */
-  min-width: 21.25rem;
-  max-width: 100%;
+  /* A fixed width, not a minimum. Firefox sizes the panel to the page's
+     widest unwrapped line, so with a minimum an armed "… Confirm" laid
+     beside its neighbour (or a long label) widened the panel while it was
+     open. Not min(21.25rem, 100vw) either: that measured ~300px, because
+     100vw there is the panel Firefox is still sizing, not the screen. */
+  width: 21.25rem;
   font-size: 14px;
   background: var(--card);
 }
 
 /* Android opens this as a full-screen sheet: there the viewport must win, or
-   a narrow phone scrolls sideways. */
-@media (pointer: coarse) {
+   a narrow phone scrolls sideways. hover: none as well as a coarse pointer,
+   because Firefox for Android on the emulator reports pointer: fine; only
+   hover told it apart from desktop there. */
+@media (pointer: coarse), (hover: none) {
   body {
-    min-width: 0;
+    width: auto;
   }
 }
 
@@ -67,11 +70,15 @@ body {
   padding: 1rem;
 }
 
+/* minmax(0, 1fr), here and on .rule: an auto column is as wide as its widest
+   unwrapped content, so a long label pushed the rows past the fixed width
+   instead of ellipsizing. */
 .rules {
   margin: 0;
   padding: 0;
   list-style: none;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
 }
 
@@ -81,6 +88,7 @@ body {
 
 .rule {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
 }
 
@@ -228,6 +236,8 @@ body {
 .action {
   flex: 0 1 auto;
   justify-content: center;
+  /* A confirm line too long for the row wraps rather than overflowing. */
+  text-align: center;
   padding: 0.4rem 0.8rem;
   font-size: 0.8rem;
   font-weight: 600;
@@ -244,11 +254,18 @@ body {
   border-radius: 0.2rem;
 }
 
+/* The armed button takes the whole row and its neighbour steps out until it
+   disarms. Wrapping the neighbour onto a second row instead made the popup
+   grow by a row for the five seconds of the confirm step. */
 .action.armed {
   flex-basis: 100%;
   color: #fff;
   background: var(--accent);
   border-color: var(--accent);
+}
+
+.actions:has(.armed) .action:not(.armed) {
+  display: none;
 }
 
 .action.armed img {
