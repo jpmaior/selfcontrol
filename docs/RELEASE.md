@@ -59,6 +59,11 @@ PR; nothing but the release commit below goes to `main` directly. The release no
 from the merged PRs, so write each PR's title and description for the person reading the notes,
 not for the reviewer: what changed for them, in plain language.
 
+Before tagging, `node --test` and `web-ext lint` must pass, and the desktop scenarios in
+[SCENARIOS.md](./SCENARIOS.md) must hold in a real Firefox; the Android ones too when the
+release touches anything Android sees. Once the tag is pushed, a successful sign makes the
+version permanent (Notes, below).
+
 ```bash
 # 1. Bump the version. AMO permanently rejects a version it has already seen,
 #    including from a submission that failed review.
@@ -94,7 +99,7 @@ compare link. Once it finishes, replace the body with a curated changelist:
 - **Every relevant PR merged since the previous tag gets a bullet** that names it (`#N`), so a
   reader can follow the bullet to the discussion and the diff. Relevant means it changed what
   ships or how the user experiences it. A PR that touched only docs, CI or tooling may be left
-  out.
+  out; those carry the `dev` label.
 - Bullets are plain language, one line each, written for the user. The PR title is the starting
   point; rewrite it if it reads like a commit message.
 - Direct commits to `main` (the release bump) do not need bullets.
@@ -139,6 +144,11 @@ the file with Firefox.
 
 ## Notes
 
+**A successful sign claims the version number for good**, even when a later step of the
+workflow fails (the Pages deploy, say). That tag is then stranded: the version can never be
+signed again, the only way forward is another bump, and a failed release is never re-tagged with
+the same number. This is why every check runs before the push.
+
 **`web-ext lint` must run with `selfHosted: true`** (set in `web-ext-config.mjs`). `update_url`
 is *forbidden* for AMO-listed add-ons and *required* for self-hosted ones, and the linter assumes
 listed unless told otherwise — without it the manifest fails with `MANIFEST_UPDATE_URL`.
@@ -154,9 +164,9 @@ so no privacy policy is needed.
 established macOS app in the same category, and AMO policy prohibits names likely to be confused
 with existing products. Irrelevant while self-distributing.
 
-**The debug console handles stay in.** `dumpUsage()`, `dumpStats()`, `dumpPlatform()`,
-`dumpRaw()`, `setLimits()`, `resetRules()` and `resetUsage()` are reachable only from the
-extension's own background console, and they are the diagnostic surface this was built with.
+**The debug console handles stay in** (`dumpUsage()` and the rest, DEVELOPMENT.md). They are
+reachable only from the extension's own background console, and they are the diagnostic surface
+this was built with.
 
 **`web-ext build`** produces an *unsigned* zip — useful for inspecting what would be uploaded,
 not installable on release Firefox.

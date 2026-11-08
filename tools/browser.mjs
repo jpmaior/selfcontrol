@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Drives a real Firefox with this extension installed, on a virtual display, so
-// the hand checkpoints in PLAN.md and TODO.md can be run — and screenshotted —
-// on a machine with no desktop, by an agent or by anyone else.
+// the scenarios in docs/SCENARIOS.md can be run — and screenshotted — on a
+// machine with no desktop, by an agent or by anyone else.
 //
 //   nix develop .#browser --command node tools/browser.mjs <command> [args]
 //
@@ -10,8 +10,8 @@
 // so the browser outlives them. Everything it keeps is in .browser/.
 //
 // Choices that look arbitrary:
-// - A virtual display, not --headless: headless has no toolbar, so no badge
-//   and no real popup, and the checkpoints look at both.
+// - A virtual display, not --headless: headless has no toolbar, so no real
+//   popup, and the scenarios look at it.
 // - --remote-allow-system-access: reading the moz-extension UUID, pinning the
 //   button and terminating the event page all need the browser's own window.
 // - The add-on is installed temporarily, as about:debugging does, because
@@ -35,7 +35,7 @@ const USAGE = `usage: node tools/browser.mjs <command>   (inside \`nix develop .
                                 Reload, it also clears storage.session
   open <target> [--new-tab]     a URL, a bare host, popup | options | blocked[?query],
                                 or /path inside the extension
-  shot [file] [--page]          PNG of the whole screen: toolbar, badge, popup.
+  shot [file] [--page]          PNG of the whole screen: toolbar, popup.
                                 --page: only the active tab's viewport
   popup                         click the toolbar button, opening the real popup
   eval <expr> [--bg]            evaluate in the active tab, print the JSON. --bg: in

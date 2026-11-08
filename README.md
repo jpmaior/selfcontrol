@@ -70,24 +70,17 @@ data for all websites". Nothing leaves the browser.
 ```bash
 nix develop        # web-ext + node, pinned via flake.lock
 web-ext run        # launches Firefox with the extension, live-reloading
-node --test        # 40 tests over the pure modules, no browser needed
+node --test        # the pure modules, no browser needed
 web-ext lint       # AMO validation
 ```
 
-The rolling-window arithmetic (`accountant.js`) and the rule validation (`rules.js`) are pure —
-no `browser.*`, no `Date.now()`, the clock is always an argument — which is what makes them
-testable without a browser. Everything else is verified by hand against the checkpoints in
-[PLAN.md](./docs/PLAN.md).
-
-No desktop? On Linux, `nix develop .#browser` adds Firefox on a virtual display, and
-`node tools/browser.mjs` drives it: screenshots, the real popup, the event page's console. Run
-it with no arguments for the commands.
-
-For Firefox for Android, `nix develop .#android` (x86_64 Linux) adds adb and a headless
-emulator, and `node tools/android.mjs` runs the extension there and reaches its console; see
-[DESIGN.md §12](./docs/DESIGN.md#12-firefox-for-android).
-
 No bundler, no framework, no build step. Plain ES modules.
+
+Every decision (the rolling-window arithmetic, the caps, rule validation) lives in a pure module
+with the clock as an argument, so `node --test` covers it in milliseconds. What needs a browser
+is checked by driving a real Firefox, on desktop or Android, through the
+[scenarios](./docs/SCENARIOS.md). [DEVELOPMENT.md](./docs/DEVELOPMENT.md) has the dev shells,
+the tools that drive Firefox on a machine with no desktop, and the Android emulator.
 
 ## Known limitations
 
@@ -106,6 +99,8 @@ No bundler, no framework, no build step. Plain ES modules.
 | | |
 |---|---|
 | [DESIGN.md](./docs/DESIGN.md) | Architecture and the reasoning behind every decision |
-| [PLAN.md](./docs/PLAN.md) | How it was built, step by step, with the manual checkpoints |
+| [DEVELOPMENT.md](./docs/DEVELOPMENT.md) | Building, running and inspecting it, on desktop and Android |
+| [SCENARIOS.md](./docs/SCENARIOS.md) | The checks run in a real Firefox |
 | [RELEASE.md](./docs/RELEASE.md) | Signing and publishing a new version |
+| [Issues](https://github.com/jpmaior/selfcontrol/issues) | Open work, bugs and ideas |
 | [CLAUDE.md](./CLAUDE.md) | Conventions and invariants for AI-assisted work |

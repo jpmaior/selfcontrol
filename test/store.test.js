@@ -97,7 +97,7 @@ test("reconcile: a dead interval is credited up to now", async () => {
   // of when playback actually stopped. A 5-minute checkpoint opened this
   // interval; 2 more minutes were watched before the pause landed on an
   // unloaded page. Crediting only up to the checkpoint lost those 2 minutes —
-  // a 7-minute video showed as exactly 5:00 (TODO.md, 2026-09-05).
+  // a 7-minute video showed as exactly 5:00 (DESIGN.md §5, 2026-09-05).
   assert.equal(reconcile(r, T0 + 2 * MIN, false), 2 * MIN);
   assert.ok(!hasOpenInterval(r.id));
   assert.equal(status(r, T0 + 2 * MIN).usedMs, 2 * MIN);

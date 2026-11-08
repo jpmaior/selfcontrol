@@ -19,28 +19,53 @@ nix develop .#android        # x86_64 Linux: adb + a headless emulator, for tool
 ```
 
 Nix flakes only see **git-tracked** files. A new file needs `git add` before `nix develop` sees
-it.
+it. [DEVELOPMENT.md](./docs/DEVELOPMENT.md) has the rest: the console handles, both browser
+tools, the emulator.
 
 ## Layout
 
 ```
-extension/background/   event page: index (wiring), observers, accountant, store, enforcer
-extension/common/       shared with the UI: rules, settings, format; policy, calendar,
-                        schedule, transfer and badge arrive with the roadmap in TODO.md
+extension/background/   the event page: wiring, observers, accounting, storage, enforcement
+extension/common/       shared with the pages: the pure decision modules, settings, formatting
 extension/popup|options|blocked/
 test/                   node --test
-tools/                  make-updates-json (release), browser (Firefox on a virtual display),
-                        android (the extension's console on Firefox for Android)
-docs/                   DESIGN.md, PLAN.md, RELEASE.md, TODO.md (open findings)
+tools/                  browser.mjs and android.mjs (Firefox to drive), make-updates-json.mjs
+docs/                   see Docs below
 ```
+
+The module-by-module map is DESIGN.md §10.
+
+## Docs
+
+Each fact has one home. Anywhere else gets at most a one-line summary and a link, never the
+details: copies drift. Prose does not carry numbers that change on their own (test counts,
+line numbers); name the function instead.
+
+| File | Holds | Update it |
+|---|---|---|
+| [DESIGN.md](./docs/DESIGN.md) | why the code is the way it is | in the same PR as the behaviour change, in its section |
+| [SCENARIOS.md](./docs/SCENARIOS.md) | the browser checks | in the same PR as the browser behaviour change |
+| [DEVELOPMENT.md](./docs/DEVELOPMENT.md) | building, running, inspecting | when a shell, tool or setup step changes |
+| [RELEASE.md](./docs/RELEASE.md) | signing and publishing | when the process changes; the `/release` skill follows it |
+| [README.md](./README.md) | what users need | when what they see or install changes |
+| GitHub issues | open work, bugs and ideas | when something is found, decided or finished |
+
+Open work is not kept in the repo: check `gh issue list` before starting on something. Each
+issue gets one type label (`bug`, `enhancement`, or `dev` for what does not ship) and, when
+they apply, `idea` (not decided yet), `upstream` (waiting on Firefox) and `android`. When a
+bug is fixed, its reasoning goes into DESIGN.md, its story into the PR description, and the PR
+closes its issue (`Closes #N`).
+
+DESIGN.md's section numbers are cited from code comments and merged PRs, so a section is never
+renumbered: a dropped one keeps a short stub.
 
 ## Invariants — breaking these causes subtle, hard-to-see bugs
 
-**The pure modules stay pure.** `accountant.js`, `rules.js`, and every module the roadmap adds
-for decisions (`policy`, `calendar`, `schedule`, `transfer`, the badge decision) take no
-`browser.*` and no `Date.now()` — time is always an argument. This is what makes the whole
-test suite run in milliseconds with no browser. Do not import browser APIs into them; put that
-in `store.js`, `settings.js` or the page scripts.
+**The pure modules stay pure.** `accountant`, `rules`, `calendar`, `policy`, `transfer`, and
+any module added later to make decisions, take no `browser.*` and no `Date.now()` — time is
+always an argument. This is what makes the whole test suite run in milliseconds with no
+browser. Do not import browser APIs into them; put that in `store.js`, `settings.js`,
+`platform.js` or the page scripts.
 
 **Never tick.** Time is accrued by committing intervals between state transitions, never by a
 timer incrementing a counter. A playing video should cost zero writes and zero wake-ups.
@@ -70,6 +95,9 @@ orphans its history. Ids are minted once, at save time, only for rules that have
 *not* granted at install time; the user must grant them manually, and until they do the extension
 silently does nothing. The whole design avoids them.
 
+**Do not change `update_url` in the manifest casually.** It is read from the copy already
+installed, so the old URL has to keep serving until every install has moved (RELEASE.md).
+
 ## Testing
 
 **Every test is automated: nothing is left for the user to check by hand.** Behaviour is
@@ -81,63 +109,43 @@ modules and `store.js` — write the test cases for the new or changed behaviour
 `node --test` and see them fail for the right reason, and only then implement until they pass.
 Do not write the implementation and back-fill tests afterwards; a test written after the code
 tends to describe what the code does rather than what it must do. If a change makes an existing
-test fail, that is a design question to raise, not a test to edit into silence. Each step in
-[TODO.md](./docs/TODO.md) lists its tests first for this reason.
+test fail, that is a design question to raise, not a test to edit into silence.
 
 Browser behaviour (observers, enforcement, alarms, the pages) is tested in Firefox, and you run
-those tests: desktop Firefox through `tools/browser.mjs` (below), Firefox for Android on the
-emulator (`nix develop .#android`, DESIGN.md §12). Several design decisions came from what such
-runs revealed, so they are not optional. The tests-first rule applies here too: before writing
-the code, decide the scenario (what to do, what must be observed), run it against the current
-code and see it fail where it can, then make it pass. Report what you ran and what you saw. If
-something cannot be tested this way, say so plainly rather than claiming it works or asking the
-user to check it. The checkpoints in [PLAN.md](./docs/PLAN.md) and the "Check by hand" lists
-in TODO.md predate this: they are scenarios for you to run, not tasks for the user.
+those tests: the scenarios in [SCENARIOS.md](./docs/SCENARIOS.md), on desktop through
+`tools/browser.mjs` and on Firefox for Android through `tools/android.mjs`. Several design
+decisions came from what such runs revealed, so they are not optional. The tests-first rule
+applies here too: before writing the code, write or pick the scenario, run it against the
+current code and see it fail where it can, then make it pass. Report what you ran and what you
+saw. If something cannot be tested this way, say so plainly rather than claiming it works or
+asking the user to check it.
 
 ⚠️ **An attached devtools console pins the event page alive**, so the suspend/restart cycle never
-happens while you are watching. Force it with **Terminate Background Script** in `about:debugging`
-(*Terminate* keeps `storage.session`; *Reload* clears it).
-
-**On a machine with no desktop**, `node tools/browser.mjs` (inside `nix develop .#browser`) runs
-Firefox on a virtual display with the extension installed temporarily. `shot` takes a
-screenshot, `popup` opens the real popup, `eval --bg 'dumpUsage()'` reaches the console
-handles, `terminate` is *Terminate Background Script* and `log` is the event page's console.
-Run it with no arguments for the rest. It attaches no devtools, so the event page suspends as it
-would for a user. On a fresh profile YouTube opens behind an EU consent dialog that pauses
-playback; reject it once and the profile in `.browser/` remembers.
-
-**On Firefox for Android**, `node tools/android.mjs` (inside `nix develop .#android`) is the
-counterpart. `start` boots the emulator if needed and loads the extension with `web-ext run`,
-`log` and `eval 'dumpUsage()'` reach the event page's console (`eval` wakes it first),
-`terminate` and `wake` drive its lifecycle, and `eval … --page options.html` reaches an open
-extension page. `status`, `wake` and `terminate` attach nothing, so the page still suspends;
-`log` and `eval` attach only briefly, and `follow` keeps it alive while it streams. Taps and
-screenshots go through T3 Code's Device panel, or the dev shell's `tap-text` and `screenshot`.
-Firefox for Android has to be installed on the AVD once (DESIGN.md §12).
+happens while you are watching. Neither tool attaches by default; `terminate` is *Terminate
+Background Script* (keeps `storage.session`) and `reload` is *Reload* (clears it).
 
 ## Workflow
 
 Feature work goes on a branch and lands on `main` through a pull request. The release notes
 are built from the merged PRs, so a PR's title and description are user-facing copy: say what
-changed for the user, in plain language, with no list of things to test.
+changed for the user, in plain language, with no list of things to test. A PR where nothing
+ships (tools, tests, docs, CI) gets the `dev` label, and the release notes leave it out.
 `gh` is installed and authenticated on this machine (system-wide, not in the nix shell) for PRs,
 watching runs and editing releases.
 
+The repo merges by squash only, and merged branches are deleted:
+`gh pr merge --squash --delete-branch`. Prefer PRs that branch off `main`. A PR stacked on
+another keeps the lower PR's original commit after that one is squashed, and GitHub does not
+retarget it: `git rebase --onto origin/main <lower PR's commit> <branch>`, re-run `node --test`
+and `web-ext lint`, `git push --force-with-lease`, `gh pr edit <n> --base main`, then merge.
+
 ## Releasing
 
-Tag `vX.Y.Z` after bumping `extension/manifest.json`; the bump is the one commit that goes to
-`main` directly. See [RELEASE.md](./docs/RELEASE.md), or run the `/release` skill, which walks
-the checklist with the guardrails. Every relevant PR merged since the previous tag gets a bullet
-in the release notes.
+Run the `/release` skill; [RELEASE.md](./docs/RELEASE.md) is the process it follows. The
+`extension/manifest.json` bump is the one commit that goes to `main` directly.
 
-**AMO permanently claims a version number on a successful sign.** A failure in a later workflow
-step strands that tag — the version cannot be reused.
-
-**`update_url` is read from the copy already installed.** Changing it means keeping the old URL
-serving until every install has moved to a version carrying the new one.
-
-**`web-ext lint` needs `selfHosted: true`** (already in `web-ext-config.mjs`). `update_url` is
-forbidden for AMO-listed add-ons and required for self-hosted ones.
+⚠️ **AMO permanently claims a version number on a successful sign**, even when a later step of
+the workflow fails, so every check runs before the tag is pushed.
 
 ## Style
 
