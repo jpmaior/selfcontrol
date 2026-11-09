@@ -9,8 +9,10 @@ import {
   MODES,
   ON_EXCEED,
   blankRule,
+  droppedPath,
+  hasPath,
   makeRuleId,
-  parseDomain,
+  parsePatterns,
   strip,
   validateRule,
 } from "../common/rules.js";
@@ -115,8 +117,31 @@ function buildForm(draft) {
   const root = templateEl.content.firstElementChild.cloneNode(true);
   const field = (name) => root.querySelector(`[data-field="${name}"]`);
 
+  // Form-only state, which strip() leaves out of what is saved. "Match paths"
+  // is not stored: it is on for a rule that has a path. `matchText` is what
+  // was last typed or pasted, so turning paths off and on again gives back the
+  // path the field had dropped.
+  draft.matchPaths ??= draft.match.some(hasPath);
+  draft.matchText ??= draft.match.join(", ");
+
+  const showPaths = () => {
+    // With paths off, "youtube.com/shorts" quietly becoming "youtube.com"
+    // would limit the whole site, so say so and point at the checkbox.
+    const dropped = draft.matchPaths ? null : droppedPath(draft.matchText);
+    const note = root.querySelector('[data-role="path-dropped"]');
+    note.hidden = !dropped;
+    if (dropped) {
+      note.textContent = `Only the site is kept, so this covers all of ${dropped.split("/")[0]}. Tick Match paths to limit ${dropped} alone.`;
+    }
+    field("matchPaths").checked = draft.matchPaths;
+    root.querySelector('[data-role="paths-hint"]').hidden = !draft.matchPaths;
+    root.querySelector('[data-role="match-label"]').textContent = draft.matchPaths ? "Domains and paths" : "Domains";
+    field("match").placeholder = draft.matchPaths ? "youtube.com/shorts" : "youtube.com, vimeo.com";
+  };
+
   field("label").value = draft.label;
   field("match").value = draft.match.join(", ");
+  showPaths();
   field("budgetMin").value = toMin(draft.budgetSec);
   field("windowMin").value = toMin(draft.windowSec);
   field("unlockMin").value = toMin(draft.minUnlockCreditSec);
@@ -137,12 +162,15 @@ function buildForm(draft) {
 
   // Read every field back into the draft on any change, so validation and Save
   // always see exactly what is on screen.
-  root.addEventListener("input", () => {
+  root.addEventListener("input", (event) => {
     draft.label = field("label").value;
-    draft.match = field("match")
-      .value.split(/[,\s]+/)
-      .map(parseDomain)
-      .filter(Boolean);
+    // Only from the field itself: once it has been normalised on leaving, its
+    // text no longer has the paths that were dropped.
+    if (event.target === field("match")) draft.matchText = field("match").value;
+    draft.matchPaths = field("matchPaths").checked;
+    draft.match = parsePatterns(draft.matchText, { path: draft.matchPaths });
+    if (event.target === field("matchPaths")) field("match").value = draft.match.join(", ");
+    if (event.target === field("match") || event.target === field("matchPaths")) showPaths();
     draft.mode = field("mode").value;
     draft.onExceed = field("onExceed").value;
     draft.budgetSec = toSec(field("budgetMin").value);
@@ -164,7 +192,8 @@ function buildForm(draft) {
 
   // Normalise the domain field once the user leaves it, so they can see what
   // was actually understood — "https://www.YouTube.com/feed" becoming
-  // "youtube.com" is reassuring rather than mysterious.
+  // "youtube.com" (or "youtube.com/feed" with paths on) is reassuring rather
+  // than mysterious.
   field("match").addEventListener("change", (event) => {
     event.target.value = draft.match.join(", ");
   });
