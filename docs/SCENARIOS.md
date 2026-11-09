@@ -118,8 +118,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    `dumpRaw()` has no `usage:<id>` left.
 4. **Renaming keeps it.** Rename a rule and Save → its used time is unchanged.
 5. **The form shows what was understood.** Paste `https://www.reddit.com/r/all` into Domains and
-   leave the field → it reads `reddit.com`. A budget equal to the window is refused with the
-   reason shown.
+   leave the field → it reads `reddit.com`. Tick *Match paths* → `reddit.com/r/all`, the label
+   reads `Domains and paths` and one sentence on matching appears; untick → `reddit.com` again.
+   A budget equal to the window is refused with the reason shown, and so is a pattern another
+   rule already has, naming that rule.
 6. **History.** Once buckets have folded (a short window helps) → the rule's history shows
    today's bar and the 7- and 30-day totals; pass time is the lighter segment.
 
@@ -143,6 +145,27 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 8. **Pass time and the caps.** `countsTowardCaps: true` with a 3-minute daily cap → the block
    lands mid-pass at 3 minutes, `done for today`. With `false` the daily total does not move
    during the pass, but the rolling window still counts it (DESIGN §17).
+
+## Part of a site
+
+Two rules that count the same way, one for the site (`127.0.0.1`, or `youtube.com`) and one for
+part of it (`127.0.0.1/shorts`, or `youtube.com/shorts`), with short budgets (DESIGN §21). The
+local page needs links that move between `/watch` and `/shorts/<n>` with `history.pushState`,
+as YouTube does. On Android both rules count while focused.
+
+1. **In-page handover.** Playing on `/watch` → `▶ COUNTING` for the site. Move to a Short without
+   loading a page → `■ stopped` for the site and `▶ COUNTING` for the part, at that moment; back
+   to `/watch` → the reverse. On YouTube itself: open the menu and choose Shorts.
+2. **The move wakes the page.** `terminate`, then move to a Short → the page starts, credits the
+   site up to then (`reconciled …`), and the part counts.
+3. **A spent part blocks only itself.** Run the part out → its tab goes to the block page under
+   the part's name, `You were on …/shorts/…`. `/watch` still plays, and moving from it to a Short
+   in-page is blocked at once: `⛔ blocked re-opened <part>`.
+4. **A spent site leaves the part alone.** A Short playing in one tab, `/watch` in another; run
+   the site out → `⛔ <site> spent — blocked 1 tab(s)`, the `/watch` one, and the Short keeps
+   counting toward its own rule. From that Short, moving to `/watch` in-page is blocked at once.
+5. **A subdomain.** A `music.youtube.com` focus rule saved after the `youtube.com` rule →
+   focusing `music.youtube.com` counts toward it, not toward YouTube.
 
 ## Export and import
 

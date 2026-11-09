@@ -56,7 +56,7 @@ const primed = start({
       log("▶ COUNTING", `${rule.id} (${modeOf(rule)})`, `— ${why}`);
       // A rule can start counting while already spent (the tab was opened
       // before the block landed), so check before scheduling.
-      await enforceRule(rule, now);
+      await enforceRule(rules, rule, now);
     } else {
       const credited = stopCounting(rule, now);
       flush(now);
@@ -101,7 +101,7 @@ async function settleAndArm(why) {
   for (const rule of rules) {
     // A rule may have run out while we were unloaded, or have just been given
     // a smaller budget than it has already spent.
-    await enforceRule(rule, now);
+    await enforceRule(rules, rule, now);
     await syncRuleAlarm(rule, now);
   }
   log(`state re-armed (${why})`);
@@ -201,7 +201,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   // The alarm fires at every instant the answer could flip: a cap running out
   // or an unlock. Enforce if spent; either way, re-sync so the next flip has
   // its alarm.
-  const acted = await enforceRule(rule, now);
+  const acted = await enforceRule(rules, rule, now);
   if (acted === 0) log(`${ruleId}: ${describe(rule, now)}`);
   await syncRuleAlarm(rule, now);
 });
@@ -232,7 +232,7 @@ const handlers = {
       `🔒 locked in ${rule.id}: spent ${clock(ms)} on purpose,`,
       `blocked until ${wallClock(snapshot.unlockAtMs, now)} (${snapshot.reason})`,
     );
-    await enforceRule(rule, now);
+    await enforceRule(rules, rule, now);
     await syncRuleAlarm(rule, now);
     return { ok: true, ms };
   },

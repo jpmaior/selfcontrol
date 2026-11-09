@@ -50,6 +50,17 @@ test("parseImport: a version-1 file imports with the new fields defaulted", () =
   assert.equal(result.rules[0].id, "youtube", "ids are kept as-is");
 });
 
+test("parseImport: a rule for part of a site imports beside the whole site", () => {
+  const shorts = { ...DEFAULT_RULES[0], id: "shorts", label: "Shorts", match: ["youtube.com/shorts"] };
+  const music = { ...DEFAULT_RULES[0], id: "music", label: "Music", match: ["music.youtube.com"] };
+  const result = parseImport(JSON.stringify(serializeRules([...DEFAULT_RULES, shorts, music], NOW)));
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(
+    result.rules.map((r) => r.match),
+    [["youtube.com"], ["instagram.com"], ["youtube.com/shorts"], ["music.youtube.com"]],
+  );
+});
+
 test("parseImport: refuses what is not a rules file", () => {
   const cases = [
     ["not json", "{"],

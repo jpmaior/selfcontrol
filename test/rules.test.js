@@ -11,9 +11,11 @@ import {
   DEFAULT_RULES,
   blankRule,
   effectiveMode,
+  hasPath,
   hostMatches,
   makeRuleId,
   parseDomain,
+  parsePatterns,
   returnUrlFrom,
   ruleForUrl,
   strip,
@@ -64,6 +66,86 @@ test("ruleForUrl: a fully-qualified trailing dot is not a bypass", () => {
   assert.equal(ruleForUrl(DEFAULT_RULES, "https://www.youtube.com./watch").id, "youtube");
 });
 
+// --- part of a site (#21) --------------------------------------------------
+
+const YOUTUBE = rule({ id: "youtube", label: "YouTube", match: ["youtube.com"] });
+const SHORTS = rule({ id: "shorts", label: "Shorts", match: ["youtube.com/shorts"] });
+
+test("ruleForUrl: a path pattern covers that path and everything under it, on any subdomain", () => {
+  const rules = [YOUTUBE, SHORTS];
+  for (const url of [
+    "https://www.youtube.com/shorts/abc",
+    "https://m.youtube.com/shorts/abc",
+    "https://youtube.com/shorts",
+    "https://youtube.com/shorts/",
+  ]) {
+    assert.equal(ruleForUrl(rules, url)?.id, "shorts", url);
+  }
+  for (const url of ["https://www.youtube.com/watch?v=abc", "https://youtube.com/", "https://youtube.com"]) {
+    assert.equal(ruleForUrl(rules, url)?.id, "youtube", url);
+  }
+});
+
+test("ruleForUrl: a path matches whole segments, from the start", () => {
+  assert.equal(ruleForUrl([YOUTUBE, SHORTS], "https://youtube.com/shortsfoo").id, "youtube");
+  assert.equal(ruleForUrl([SHORTS], "https://youtube.com/shortsfoo"), null);
+  assert.equal(ruleForUrl([SHORTS], "https://youtube.com/feed/shorts"), null);
+});
+
+test("ruleForUrl: the query string and fragment are not part of the path", () => {
+  const rules = [YOUTUBE, SHORTS];
+  assert.equal(ruleForUrl(rules, "https://youtube.com/watch?next=/shorts/abc").id, "youtube");
+  assert.equal(ruleForUrl(rules, "https://youtube.com/#/shorts/abc").id, "youtube");
+  assert.equal(ruleForUrl(rules, "https://youtube.com/shorts/abc?feature=share#t=3").id, "shorts");
+});
+
+test("ruleForUrl: a path is not escaped by its case or a doubled slash", () => {
+  // Sites commonly serve /Shorts and //shorts as /shorts; each would otherwise
+  // be a one-character way around the rule, like the trailing dot above.
+  const rules = [YOUTUBE, SHORTS];
+  assert.equal(ruleForUrl(rules, "https://youtube.com/Shorts/AbC").id, "shorts");
+  assert.equal(ruleForUrl(rules, "https://youtube.com//shorts/abc").id, "shorts");
+  assert.equal(ruleForUrl(rules, "https://youtube.com./shorts/abc").id, "shorts");
+});
+
+test("ruleForUrl: the most specific rule wins, whatever the order", () => {
+  const music = rule({ id: "music", match: ["music.youtube.com"] });
+  for (const rules of [
+    [YOUTUBE, music],
+    [music, YOUTUBE],
+  ]) {
+    assert.equal(ruleForUrl(rules, "https://music.youtube.com/watch?v=1").id, "music");
+    assert.equal(ruleForUrl(rules, "https://www.youtube.com/watch?v=1").id, "youtube");
+  }
+  for (const rules of [
+    [YOUTUBE, SHORTS],
+    [SHORTS, YOUTUBE],
+  ]) {
+    assert.equal(ruleForUrl(rules, "https://youtube.com/shorts/abc").id, "shorts");
+  }
+});
+
+test("ruleForUrl: a longer path beats a longer host, and a deeper path a shallower one", () => {
+  const mobile = rule({ id: "mobile", match: ["m.youtube.com"] });
+  assert.equal(ruleForUrl([mobile, SHORTS], "https://m.youtube.com/shorts/abc").id, "shorts");
+  assert.equal(ruleForUrl([mobile, SHORTS], "https://m.youtube.com/watch?v=1").id, "mobile");
+
+  const a = rule({ id: "a", match: ["example.com/a"] });
+  const ab = rule({ id: "ab", match: ["example.com/a/b"] });
+  for (const rules of [
+    [a, ab],
+    [ab, a],
+  ]) {
+    assert.equal(ruleForUrl(rules, "https://example.com/a/b/c").id, "ab");
+    assert.equal(ruleForUrl(rules, "https://example.com/a/c").id, "a");
+  }
+});
+
+test("ruleForUrl: a path typed with characters a URL encodes still matches", () => {
+  const cafe = rule({ id: "cafe", match: [parseDomain("example.com/Café", { path: true })] });
+  assert.equal(ruleForUrl([cafe], "https://example.com/caf%C3%A9/menu")?.id, "cafe");
+});
+
 // --- domain parsing ------------------------------------------------------
 
 test("parseDomain: accepts what a person would actually paste", () => {
@@ -94,6 +176,48 @@ test("parseDomain: stripping www keeps the pattern broad", () => {
   assert.equal(parseDomain("www.youtube.com"), "youtube.com");
   assert.ok(hostMatches("www.youtube.com", parseDomain("www.youtube.com")));
   assert.ok(hostMatches("youtube.com", parseDomain("www.youtube.com")));
+});
+
+test("parseDomain: keeps the path when asked, without the query or fragment", () => {
+  const cases = [
+    ["youtube.com/shorts", "youtube.com/shorts"],
+    ["https://www.youtube.com/shorts/abc?feature=share#t=3", "youtube.com/shorts/abc"],
+    ["YouTube.com/Shorts/", "youtube.com/shorts"],
+    ["m.youtube.com:443/shorts", "m.youtube.com/shorts"],
+    ["youtube.com//shorts", "youtube.com/shorts"],
+    ["youtube.com/", "youtube.com"],
+    ["youtube.com?x=1", "youtube.com"],
+    ["youtube.com", "youtube.com"],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(parseDomain(input, { path: true }), expected, input);
+  }
+});
+
+test("parseDomain: drops the path unless asked", () => {
+  assert.equal(parseDomain("youtube.com/shorts"), "youtube.com");
+  assert.equal(parseDomain("https://www.youtube.com/shorts/abc?feature=share"), "youtube.com");
+  assert.equal(parseDomain("youtube.com?x=1"), "youtube.com");
+});
+
+test("parseDomain: a path still needs a site in front of it", () => {
+  for (const input of ["/shorts", "localhost/shorts", "https:///shorts", "youtube/shorts"]) {
+    assert.equal(parseDomain(input, { path: true }), null, input);
+  }
+});
+
+test("parsePatterns: reads the whole field, without duplicates or junk", () => {
+  assert.deepEqual(parsePatterns("youtube.com, vimeo.com"), ["youtube.com", "vimeo.com"]);
+  assert.deepEqual(parsePatterns(""), []);
+  const typed = "https://youtube.com/shorts/abc youtube.com/feed, nope";
+  assert.deepEqual(parsePatterns(typed), ["youtube.com"], "two paths on one site become one site");
+  assert.deepEqual(parsePatterns(typed, { path: true }), ["youtube.com/shorts/abc", "youtube.com/feed"]);
+});
+
+test("hasPath: tells part of a site from the whole of it", () => {
+  assert.equal(hasPath("youtube.com/shorts"), true);
+  assert.equal(hasPath("youtube.com"), false);
+  assert.equal(hasPath("news.bbc.co.uk"), false);
 });
 
 // --- ids -----------------------------------------------------------------
@@ -152,17 +276,45 @@ test("validateRule: flags a domain already claimed by an earlier rule", () => {
   );
 });
 
-test("validateRule: flags a subdomain shadowed by an earlier rule's suffix match", () => {
-  // ruleForUrl matches by suffix, so "youtube.com" claims music.youtube.com too.
-  const first = rule({ id: "a", label: "First", match: ["youtube.com"] });
-  const second = rule({ id: "b", label: "Second", match: ["music.youtube.com"] });
+test("validateRule: a subdomain or a path beside the whole site is not a conflict", () => {
+  // The most specific pattern wins (ruleForUrl), so "music.youtube.com" and
+  // "youtube.com/shorts" each take their part of the site from "youtube.com",
+  // in either order. This used to be refused as shadowing.
+  const site = rule({ id: "a", label: "YouTube", match: ["youtube.com"] });
+  for (const narrow of [
+    rule({ id: "b", label: "Music", match: ["music.youtube.com"] }),
+    rule({ id: "b", label: "Shorts", match: ["youtube.com/shorts"] }),
+  ]) {
+    for (const all of [
+      [site, narrow],
+      [narrow, site],
+    ]) {
+      assert.deepEqual(validateRule(site, all), [], `${narrow.label}: the whole site`);
+      assert.deepEqual(validateRule(narrow, all), [], `${narrow.label}: the part`);
+    }
+  }
+});
+
+test("validateRule: flags a path another rule already claims", () => {
+  const first = rule({ id: "a", label: "First", match: ["youtube.com/shorts"] });
+  const second = rule({ id: "b", label: "Second", match: ["vimeo.com", "youtube.com/shorts"] });
   const all = [first, second];
 
   assert.deepEqual(validateRule(first, all), [], "the earlier rule is fine");
   assert.ok(
-    validateRule(second, all).some((e) => /already claimed by First/.test(e)),
-    "the shadowed subdomain rule is flagged",
+    validateRule(second, all).some((e) => /"youtube.com\/shorts" is already claimed by First/.test(e)),
+    "the later one is flagged",
   );
+});
+
+test("validateRule: a pattern must be written the way the form writes it", () => {
+  // Matching relies on lower case, no scheme, no www. and no trailing slash.
+  // An import file or setLimits() could otherwise store a pattern that matches
+  // nothing, or one that two rules claim under different spellings.
+  for (const bad of ["YouTube.com", "https://youtube.com", "www.youtube.com", "youtube.com/", "youtube.com/Shorts", "", 42, null]) {
+    assert.ok(validateRule(rule({ match: [bad] })).length > 0, `${bad} should be refused`);
+  }
+  assert.deepEqual(validateRule(rule({ match: ["youtube.com/shorts", "127.0.0.1", "news.bbc.co.uk"] })), []);
 });
 
 test("validateRule: flags duplicate ids", () => {

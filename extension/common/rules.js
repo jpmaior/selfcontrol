@@ -4,8 +4,9 @@
 // both agree on what a valid rule is; storage lives in settings.js.
 //
 // A rule is the single abstraction in this extension (DESIGN.md §1): a set of
-// domains, a counting mode that decides when the clock runs, a budget over a
-// rolling window, and what to do when the budget is spent.
+// sites, a counting mode that decides when the clock runs, a budget over a
+// rolling window, and what to do when the budget is spent. A site is a domain,
+// optionally narrowed to a path ("youtube.com/shorts").
 
 export const MODES = [
   { value: "audible", label: "While media is playing", hint: "counts while playing" },
@@ -106,36 +107,103 @@ export function hostMatches(hostname, pattern) {
   return hostname === pattern || hostname.endsWith(`.${pattern}`);
 }
 
-/** The first rule matching this URL, or null. */
+/**
+ * A URL path in the form patterns store it: lower case, no doubled or trailing
+ * slashes, "" for the root. Sites commonly serve /Shorts and //shorts as
+ * /shorts, so either spelling would otherwise be a one-character way around a
+ * path rule. Encoding is left as the URL parser leaves it, on both sides.
+ */
+function normalizePath(pathname) {
+  return pathname.toLowerCase().replace(/\/{2,}/g, "/").replace(/\/+$/, "");
+}
+
+/** Whole segments from the start: "/shorts" covers /shorts/abc, not /shortsfoo. */
+function pathMatches(path, prefix) {
+  return prefix === "" || path === prefix || path.startsWith(`${prefix}/`);
+}
+
+/** "youtube.com/shorts" -> ["youtube.com", "/shorts"]; no path is "". */
+function splitPattern(pattern) {
+  const slash = pattern.indexOf("/");
+  return slash === -1 ? [pattern, ""] : [pattern.slice(0, slash), pattern.slice(slash)];
+}
+
+/** Whether a pattern covers only part of a site. */
+export function hasPath(pattern) {
+  return splitPattern(pattern)[1] !== "";
+}
+
+/**
+ * The rule that owns this URL, or null: the most specific matching pattern
+ * wins, by the longest path first and then the longest host (DESIGN.md §21).
+ * Among patterns that all match one URL, longer means more segments, so string
+ * length is enough. Rule order only breaks a tie between identical patterns,
+ * which validateRule refuses.
+ */
 export function ruleForUrl(rules, url) {
   const hostname = hostnameOf(url);
   if (!hostname) return null;
-  return rules.find((rule) => rule.match.some((p) => hostMatches(hostname, p))) ?? null;
+  const path = normalizePath(new URL(url).pathname);
+
+  let best = null;
+  let bestPath = -1;
+  let bestHost = -1;
+  for (const rule of rules) {
+    for (const pattern of rule.match) {
+      const [host, prefix] = splitPattern(pattern);
+      if (!hostMatches(hostname, host) || !pathMatches(path, prefix)) continue;
+      if (prefix.length > bestPath || (prefix.length === bestPath && host.length > bestHost)) {
+        best = rule;
+        bestPath = prefix.length;
+        bestHost = host.length;
+      }
+    }
+  }
+  return best;
 }
 
 // --- authoring -----------------------------------------------------------
 
 /**
- * Coerce whatever the user typed into a bare hostname, or null if it cannot be
- * one. Accepts a pasted URL, a `*.` wildcard, a trailing path, a port.
+ * Coerce whatever the user typed into a pattern, or null if it cannot be one.
+ * Accepts a pasted URL, a `*.` wildcard, a port, a query. The path is dropped
+ * unless `path` is set, which is the rule form's "Match paths" toggle: a URL
+ * pasted from the address bar usually means the whole site.
  *
  * `www.` is stripped deliberately: as a pattern it would be narrower than the
  * user expects, failing to match the bare domain.
  */
-export function parseDomain(raw) {
+export function parseDomain(raw, { path = false } = {}) {
   let value = String(raw ?? "")
     .trim()
     .toLowerCase();
   if (!value) return null;
 
   value = value.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // scheme
-  value = value.split("/")[0]; // path
-  value = value.split("@").pop(); // userinfo
-  value = value.split(":")[0]; // port
-  if (value.startsWith("*.")) value = value.slice(2);
-  if (value.startsWith("www.")) value = value.slice(4);
+  const cut = value.search(/[/?#]/);
+  let host = cut === -1 ? value : value.slice(0, cut);
+  const rest = cut === -1 ? "" : value.slice(cut);
+  host = host.split("@").pop(); // userinfo
+  host = host.split(":")[0]; // port
+  if (host.startsWith("*.")) host = host.slice(2);
+  if (host.startsWith("www.")) host = host.slice(4);
 
-  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value) ? value : null;
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return null;
+  if (!path) return host;
+
+  // Through the URL parser, so the path is encoded exactly as a tab's URL will
+  // be when ruleForUrl compares them.
+  const prefix = normalizePath(new URL(`http://${host}${rest.split(/[?#]/)[0]}`).pathname);
+  return host + prefix;
+}
+
+/** Every pattern in the rule form's domain field, in order, each once. */
+export function parsePatterns(text, { path = false } = {}) {
+  const patterns = String(text ?? "")
+    .split(/[,\s]+/)
+    .map((part) => parseDomain(part, { path }))
+    .filter(Boolean);
+  return [...new Set(patterns)];
 }
 
 /** A stable id derived from the label, unique against `taken`. */
@@ -288,18 +356,26 @@ export function validateRule(rule, allRules = []) {
     if (duplicate) errors.push("Duplicate rule id.");
   }
 
-  // A domain claimed by an earlier rule would never reach this one, since
-  // ruleForUrl returns the first match. Match the way ruleForUrl matches —
-  // suffix, not equality — or "music.youtube.com" after a "youtube.com" rule
-  // would validate cleanly and be dead code.
-  for (const domain of rule.match ?? []) {
-    const shadowing = allRules.find(
+  // Matching assumes the form's spelling (lower case, no scheme, no www., no
+  // trailing slash). An import file or setLimits() could otherwise store a
+  // pattern that matches nothing, or one two rules claim under two spellings.
+  const patterns = Array.isArray(rule.match) ? rule.match : [];
+  for (const pattern of patterns) {
+    if (typeof pattern !== "string" || parseDomain(pattern, { path: true }) !== pattern) {
+      errors.push(`"${pattern}" is not a domain, or a domain and a path.`);
+    }
+  }
+
+  // The most specific pattern wins (ruleForUrl), so "music.youtube.com" or
+  // "youtube.com/shorts" beside "youtube.com" is a carve-out, not a conflict.
+  // Only the same pattern in two rules is: one of them would never count. The
+  // later rule is the one flagged, as the one being added.
+  for (const pattern of patterns) {
+    const claimed = allRules.find(
       (other) =>
-        other !== rule &&
-        other.match?.some((pattern) => hostMatches(domain, pattern)) &&
-        allRules.indexOf(other) < allRules.indexOf(rule),
+        other !== rule && other.match?.includes(pattern) && allRules.indexOf(other) < allRules.indexOf(rule),
     );
-    if (shadowing) errors.push(`"${domain}" is already claimed by ${shadowing.label || shadowing.id}.`);
+    if (claimed) errors.push(`"${pattern}" is already claimed by ${claimed.label || claimed.id}.`);
   }
 
   return errors;

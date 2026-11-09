@@ -41,6 +41,12 @@ Toolbar button → **Edit rules**, or *about:addons → SelfControl → Preferen
 Each rule takes a name, some domains, a counting mode, a budget, a window, and what to do when
 the budget is spent. Edits apply immediately — no restart.
 
+A rule can also cover just part of a site: tick **Match paths** and enter `youtube.com/shorts`.
+Where two rules cover a page, the more specific one counts it, so Shorts can have 5 minutes an
+hour beside 30 for the rest of YouTube. Each keeps its own budget: when YouTube runs out, Shorts
+stay open until theirs does. Shorts played from the home page's Shorts shelf count as YouTube,
+since they are not on `/shorts`.
+
 The one setting worth explaining is **"stay blocked until this much is free again"**. On a
 rolling window, a spent budget starts returning one minute at a time, which would let you back in
 for a minute, then block you, then let you back in. Setting this to 5 minutes means you come back

@@ -483,6 +483,16 @@
   gap: 1rem 1.25rem;
 }
 
+/* The domain field and its "Match paths" toggle read as one control. */
+.match-group {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.match-group .hint {
+  padding-left: 1.6rem;
+}
+
 @container (min-width: 32rem) {
   .cols {
     grid-template-columns: 1fr 1fr;

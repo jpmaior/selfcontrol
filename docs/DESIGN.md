@@ -13,7 +13,7 @@ Sitting on a paused video costs nothing.
 
 Everything is one concept with a swappable predicate:
 
-> A **rule** watches a set of domains. Its **counting mode** decides, at any instant, whether
+> A **rule** watches a set of sites. Its **counting mode** decides, at any instant, whether
 > the clock is running. It has a **budget** over a **rolling window**. When the budget is
 > spent, an **enforcement action** fires.
 
@@ -21,7 +21,7 @@ Everything is one concept with a swappable predicate:
 {
   id: "youtube",
   label: "YouTube",
-  match: ["youtube.com"],       // hostname suffix match (covers m./www./music.)
+  match: ["youtube.com"],       // hostname suffix (covers m./www./music.), optional path (§21)
   mode: "audible",              // clock runs while a matching tab produces sound
   budgetSec: 300,               // 5 minutes ...
   windowSec: 3600,              // ... per rolling hour
@@ -49,6 +49,9 @@ feature, only modes.
 
 Later sections add optional fields to the rule (daily and weekly caps, §14; passes, §17).
 `DEFAULT_RULES` and `withDefaults()` in `rules.js` are the full shape.
+
+A tab belongs to at most one rule: the one with the most specific matching pattern, so a
+`youtube.com/shorts` rule can sit beside a `youtube.com` one (§21).
 
 ### Counting modes
 
@@ -369,8 +372,9 @@ never the concern; write amplification was, and the transition model eliminates 
 
 ## 7. Enforcement
 
-React to `tabs.onCreated` and `tabs.onUpdated`: if a tab's URL matches a rule that is
-currently over budget, act immediately. `tabs.onActivated` needs no guard — the moment a rule
+React to `tabs.onCreated` and `tabs.onUpdated`: if a tab's URL belongs to a rule that is
+currently over budget, act immediately. "Belongs" is `ruleForUrl` over the whole rule set, both
+here and in the sweep when a rule runs out (§21). `tabs.onActivated` needs no guard — the moment a rule
 runs out, every matching tab is swept, so a spent rule has no tab left to activate.
 
 - **`onExceed: "block"`** → `tabs.update(tabId, { url: runtime.getURL("blocked.html?...") })`.
@@ -465,7 +469,7 @@ background/ (event page — the only stateful component)
   └─ log.js         the prefixed console logger
 
 common/ (shared by the background and the UI pages)
-  ├─ rules.js       pure: rule shape, hostname matching, domain parsing, validation
+  ├─ rules.js       pure: rule shape, URL matching, pattern parsing, validation
   ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
@@ -841,3 +845,90 @@ ordinary `save()` path, so import can never bypass validation. `strip()` moved i
 locking in all touch what a rule allows. A cooling-off period, in which a rule that
 loosens takes effect only after a delay the user chose while tightening is immediate,
 would close the first two; it was deliberately left out when these features were built.
+
+---
+
+## 21. Part of a site
+
+A rule can cover part of a site with its own limits, beside a rule for the rest of it: YouTube
+at 30 minutes an hour, Shorts at 5. The same applies to subdomains, such as a generous
+`music.youtube.com` beside a strict `youtube.com`. Issue #21 has the original proposal.
+
+### Patterns
+
+A pattern is a host, optionally followed by a path: `youtube.com/shorts`.
+
+- **The host matches as it always has**, as a suffix, so `m.youtube.com/shorts` is covered.
+- **The path matches whole segments from the start:** `/shorts` covers `/shorts` and
+  `/shorts/abc`, not `/shortsfoo` and not `/feed/shorts`. The query string and fragment are
+  ignored.
+- **Case and doubled slashes do not count.** Sites commonly serve `/Shorts` and `//shorts` as
+  `/shorts`, so each would be a one-character way around a path rule, like the trailing dot
+  `hostnameOf` already strips. Both sides are lower-cased with repeated and trailing slashes
+  dropped. Percent-encoding is left as the URL parser leaves it, on both sides: `parseDomain`
+  passes a typed path through `new URL()`, so `café` is stored the way a tab's URL spells it.
+- **A pattern without a path means what it meant before**, so stored rules and older export
+  files need no migration.
+
+### The most specific pattern wins
+
+`ruleForUrl` used to return the first matching rule. It now returns the rule with the most
+specific matching pattern: the longest path first, then the longest host. Among patterns that all
+match one URL, longer means more segments, so string length is enough. Rule order stops
+mattering, which also fixed subdomains: a `music.youtube.com` rule added after `youtube.com` used
+to be refused as shadowed, and the options page cannot reorder rules.
+
+`validateRule` follows: the only conflict left is the same pattern in two rules, and it is
+reported on the later one. It also refuses a pattern not spelled the way the form would write it
+(`YouTube.com`, `www.`, a scheme, a trailing slash). An import file or `setLimits()` could
+otherwise store a pattern that matches nothing, or one that two rules claim under two spellings.
+
+### Separate, not nested
+
+Decided 2026-11-09. Time on a page counts toward the one rule that owns it, so Shorts time is not
+YouTube time, and when YouTube is spent Shorts stay open until their own budget runs out. Two
+alternatives were considered and set aside:
+
+- **Separate counting, shared block** (a page is blocked when *any* rule covering it is spent)
+  closes the "go watch Shorts instead" gap, but blocks a lenient `music.youtube.com` whenever
+  `youtube.com` is spent.
+- **Nested** (Shorts time spends both budgets) is closer to "an hour of YouTube, at most 10
+  minutes of it Shorts", but a URL then belongs to several rules. Counting, focus, the popup and
+  the block page would all work over sets of rules, and lenient carve-outs would be impossible.
+
+Separate keeps one rule per tab, so `observers.js` and `enforcer.js` only had to use the new
+matcher, and it serves stricter and more lenient parts of a site alike.
+
+### The sweep acts on what a rule owns
+
+`enforceRule` used to sweep every tab matching the spent rule's own patterns,
+`ruleForUrl([rule], url)`. With a Shorts rule present that was wrong: a spent `youtube.com` rule
+also blocked a tab on `/shorts`, which `youtube.com` matches but does not own, and the block page
+said "YouTube" over a Short. A browser scenario caught it before the fix. The sweep now takes the
+whole rule set and acts on the tabs whose owner, `ruleForUrl(rules, url)`, is the spent rule.
+
+### In-page navigation
+
+YouTube moves between `/watch` and `/shorts` without loading a page (the History API). Checked
+before anything relied on it, on Firefox 158 desktop and Firefox for Android 159: a same-document
+URL change arrives in `tabs.onUpdated` with `url`, and wakes a suspended event page like any
+other event. So the observers move the counting from one rule to the other at that moment, and
+the navigation guard blocks the tab as soon as it reaches a spent part of the site. SCENARIOS.md
+re-runs it.
+
+### The form: "Match paths"
+
+A URL pasted from the address bar usually means the whole site, so the domain field still cuts
+it to its host. A per-rule "Match paths" checkbox keeps the path instead, and shows one sentence
+on how matching works. It is not stored: it is on for a rule that has a path. The form keeps what
+was last typed or pasted in the field, so turning paths on gives back a path that was cut away
+when the field was normalised.
+
+### Honest limits
+
+- **Shorts outside `/shorts`.** The Shorts shelf on the home page and in search results plays on
+  `/` or `/results`, so that time counts toward YouTube.
+- **`close` closes the whole tab**, even when only part of the site is spent. `block` replaces it
+  with the block page, whose return link (§19) brings the Short back once it unlocks.
+- **No path can be blocked outright.** A budget has to be more than zero, as before. Wildcards and
+  regular expressions are not supported either.

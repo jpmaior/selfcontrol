@@ -67,15 +67,17 @@ async function act(rule, tab, snapshot) {
 }
 
 /**
- * A rule has just run out: sweep every open tab that matches it.
+ * A rule has just run out: sweep every open tab it owns. Owns, not matches: a
+ * tab on youtube.com/shorts matches a "youtube.com" rule too, but belongs to a
+ * "youtube.com/shorts" rule if there is one, and is left to it (DESIGN.md §21).
  * Returns the number of tabs acted on.
  */
-export async function enforceRule(rule, nowMs) {
+export async function enforceRule(rules, rule, nowMs) {
   const snapshot = status(rule, nowMs);
   if (!snapshot.exhausted) return 0;
 
   const tabs = await browser.tabs.query({});
-  const matching = tabs.filter((tab) => ruleForUrl([rule], tab.url));
+  const matching = tabs.filter((tab) => ruleForUrl(rules, tab.url)?.id === rule.id);
 
   let acted = 0;
   for (const tab of matching) {
