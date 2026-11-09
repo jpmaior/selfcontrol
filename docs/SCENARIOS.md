@@ -118,8 +118,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    `dumpRaw()` has no `usage:<id>` left.
 4. **Renaming keeps it.** Rename a rule and Save → its used time is unchanged.
 5. **The form shows what was understood.** Paste `https://www.reddit.com/r/all` into Domains and
-   leave the field → it reads `reddit.com`. Tick *Match paths* → `reddit.com/r/all`, the label
-   reads `Domains and paths` and one sentence on matching appears; untick → `reddit.com` again.
+   leave the field → it reads `reddit.com`, with a note that only the site is kept and how to
+   limit `reddit.com/r/all` alone. Tick *Match paths* → `reddit.com/r/all`, the note goes, the
+   label reads `Domains and paths` and a short explanation of matching appears; untick →
+   `reddit.com` again.
    A budget equal to the window is refused with the reason shown, and so is a pattern another
    rule already has, naming that rule.
 6. **History.** Once buckets have folded (a short window helps) → the rule's history shows

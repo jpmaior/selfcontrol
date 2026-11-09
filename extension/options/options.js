@@ -9,6 +9,7 @@ import {
   MODES,
   ON_EXCEED,
   blankRule,
+  droppedPath,
   hasPath,
   makeRuleId,
   parsePatterns,
@@ -124,6 +125,14 @@ function buildForm(draft) {
   draft.matchText ??= draft.match.join(", ");
 
   const showPaths = () => {
+    // With paths off, "youtube.com/shorts" quietly becoming "youtube.com"
+    // would limit the whole site, so say so and point at the checkbox.
+    const dropped = draft.matchPaths ? null : droppedPath(draft.matchText);
+    const note = root.querySelector('[data-role="path-dropped"]');
+    note.hidden = !dropped;
+    if (dropped) {
+      note.textContent = `Only the site is kept, so this covers all of ${dropped.split("/")[0]}. Tick Match paths to limit ${dropped} alone.`;
+    }
     field("matchPaths").checked = draft.matchPaths;
     root.querySelector('[data-role="paths-hint"]').hidden = !draft.matchPaths;
     root.querySelector('[data-role="match-label"]').textContent = draft.matchPaths ? "Domains and paths" : "Domains";
@@ -160,10 +169,8 @@ function buildForm(draft) {
     if (event.target === field("match")) draft.matchText = field("match").value;
     draft.matchPaths = field("matchPaths").checked;
     draft.match = parsePatterns(draft.matchText, { path: draft.matchPaths });
-    if (event.target === field("matchPaths")) {
-      field("match").value = draft.match.join(", ");
-      showPaths();
-    }
+    if (event.target === field("matchPaths")) field("match").value = draft.match.join(", ");
+    if (event.target === field("match") || event.target === field("matchPaths")) showPaths();
     draft.mode = field("mode").value;
     draft.onExceed = field("onExceed").value;
     draft.budgetSec = toSec(field("budgetMin").value);

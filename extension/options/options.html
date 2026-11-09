@@ -130,16 +130,18 @@
             <label class="field">
               <span data-role="match-label">Domains</span>
               <input data-field="match" type="text" placeholder="youtube.com, vimeo.com" />
-              <small>Subdomains are included. A pasted URL works too.</small>
+              <small>Subdomains are included, unless another rule names one. A pasted URL works too.</small>
+              <small class="path-dropped" data-role="path-dropped" hidden></small>
             </label>
             <label class="check">
               <input data-field="matchPaths" type="checkbox" />
               <span>Match paths, to limit part of a site such as youtube.com/shorts</span>
             </label>
             <p class="hint" data-role="paths-hint" hidden>
-              youtube.com/shorts covers /shorts and every page under it, on any subdomain; the
-              query string is ignored. Where two rules cover a page, the more specific one
-              counts it.
+              youtube.com/shorts covers every page under /shorts, on any subdomain, whatever the
+              query string; youtube.com/shorts/abc would cover a single Short. Where two rules
+              cover a page, the more specific one counts it, on its own budget, even after the
+              broader one runs out.
             </p>
           </div>
           <label class="field">

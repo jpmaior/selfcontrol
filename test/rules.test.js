@@ -11,6 +11,7 @@ import {
   DEFAULT_RULES,
   blankRule,
   effectiveMode,
+  droppedPath,
   hasPath,
   hostMatches,
   makeRuleId,
@@ -141,6 +142,14 @@ test("ruleForUrl: a longer path beats a longer host, and a deeper path a shallow
   }
 });
 
+test("ruleForUrl: a path is not escaped by percent-encoding what needs none", () => {
+  // %73 is "s": the same one-character way around a path rule as /Shorts.
+  assert.equal(ruleForUrl([YOUTUBE, SHORTS], "https://youtube.com/%73horts/abc").id, "shorts");
+  const tilde = rule({ id: "tilde", match: ["example.com/~user"] });
+  assert.equal(ruleForUrl([tilde], "https://example.com/%7Euser/page")?.id, "tilde");
+  assert.equal(ruleForUrl([tilde], "https://example.com/%7euser")?.id, "tilde");
+});
+
 test("ruleForUrl: a path typed with characters a URL encodes still matches", () => {
   const cafe = rule({ id: "cafe", match: [parseDomain("example.com/Café", { path: true })] });
   assert.equal(ruleForUrl([cafe], "https://example.com/caf%C3%A9/menu")?.id, "cafe");
@@ -200,6 +209,31 @@ test("parseDomain: drops the path unless asked", () => {
   assert.equal(parseDomain("youtube.com?x=1"), "youtube.com");
 });
 
+test("parseDomain: refuses hosts no tab can have, instead of throwing", () => {
+  for (const input of ["10.0.0.256", "1.2.3.4.5", "example.123"]) {
+    for (const path of [false, true]) {
+      let parsed;
+      assert.doesNotThrow(() => (parsed = parseDomain(input, { path })), `${input}, path ${path}`);
+      assert.equal(parsed, null, `${input}, path ${path}`);
+    }
+  }
+  assert.equal(parseDomain("127.0.0.1:8765/shorts", { path: true }), "127.0.0.1/shorts");
+});
+
+test("parseDomain: a trailing wildcard means the path and everything under it", () => {
+  // A path already covers everything under it, so "/shorts/*" is what someone
+  // used to wildcards types for "/shorts". Stored as typed it matched nothing.
+  assert.equal(parseDomain("youtube.com/shorts/*", { path: true }), "youtube.com/shorts");
+  assert.equal(parseDomain("youtube.com/shorts*", { path: true }), "youtube.com/shorts");
+  assert.equal(parseDomain("youtube.com/*", { path: true }), "youtube.com");
+  assert.equal(parseDomain("youtube.com/*/shorts", { path: true }), null, "wildcards elsewhere are not supported");
+});
+
+test("parseDomain: a path is stored without needless percent-encoding", () => {
+  assert.equal(parseDomain("youtube.com/%73horts", { path: true }), "youtube.com/shorts");
+  assert.equal(parseDomain("example.com/%7Euser", { path: true }), "example.com/~user");
+});
+
 test("parseDomain: a path still needs a site in front of it", () => {
   for (const input of ["/shorts", "localhost/shorts", "https:///shorts", "youtube/shorts"]) {
     assert.equal(parseDomain(input, { path: true }), null, input);
@@ -212,6 +246,14 @@ test("parsePatterns: reads the whole field, without duplicates or junk", () => {
   const typed = "https://youtube.com/shorts/abc youtube.com/feed, nope";
   assert.deepEqual(parsePatterns(typed), ["youtube.com"], "two paths on one site become one site");
   assert.deepEqual(parsePatterns(typed, { path: true }), ["youtube.com/shorts/abc", "youtube.com/feed"]);
+});
+
+test("droppedPath: the first path the field cuts away while paths are off", () => {
+  assert.equal(droppedPath("youtube.com/shorts"), "youtube.com/shorts");
+  assert.equal(droppedPath("vimeo.com, https://www.youtube.com/shorts/abc?si=x"), "youtube.com/shorts/abc");
+  assert.equal(droppedPath("youtube.com, vimeo.com"), null);
+  assert.equal(droppedPath("youtube.com/ youtube.com?x=1 nope/x"), null, "a bare slash, a query or junk is no path");
+  assert.equal(droppedPath(""), null);
 });
 
 test("hasPath: tells part of a site from the whole of it", () => {
@@ -315,6 +357,23 @@ test("validateRule: a pattern must be written the way the form writes it", () =>
     assert.ok(validateRule(rule({ match: [bad] })).length > 0, `${bad} should be refused`);
   }
   assert.deepEqual(validateRule(rule({ match: ["youtube.com/shorts", "127.0.0.1", "news.bbc.co.uk"] })), []);
+});
+
+test("validateRule: says how to write a pattern when it can tell", () => {
+  const errors = (pattern) => validateRule(rule({ match: [pattern] })).join(" ");
+  assert.match(errors("www.youtube.com"), /"youtube\.com"/, "names the spelling to use");
+  assert.match(errors("https://YouTube.com/Shorts/"), /"youtube\.com\/shorts"/);
+  assert.match(errors("localhost"), /"localhost" is not a domain/);
+});
+
+test("validateRule: never throws, whatever a stored pattern holds", () => {
+  // The URL parser rejects hosts the domain pattern lets through, such as an
+  // IP with an octet over 255. A throw here broke Save for every rule.
+  for (const bad of ["10.0.0.256", "1.2.3.4.5", "example.123", 42, null, {}, "youtube.com/shorts/*"]) {
+    let errors;
+    assert.doesNotThrow(() => (errors = validateRule(rule({ match: [bad] }))), String(bad));
+    assert.ok(errors.length > 0, `${bad} should be refused`);
+  }
 });
 
 test("validateRule: flags duplicate ids", () => {

@@ -374,8 +374,8 @@ never the concern; write amplification was, and the transition model eliminates 
 
 React to `tabs.onCreated` and `tabs.onUpdated`: if a tab's URL belongs to a rule that is
 currently over budget, act immediately. "Belongs" is `ruleForUrl` over the whole rule set, both
-here and in the sweep when a rule runs out (§21). `tabs.onActivated` needs no guard — the moment a rule
-runs out, every matching tab is swept, so a spent rule has no tab left to activate.
+here and in the sweep when a rule runs out (§21). `tabs.onActivated` needs no guard — the
+moment a rule runs out, every tab it owns is swept, so a spent rule has no tab left to activate.
 
 - **`onExceed: "block"`** → `tabs.update(tabId, { url: runtime.getURL("blocked.html?...") })`.
   The default. The message lands, the countdown is visible, and Back does not rescue you because
@@ -842,7 +842,9 @@ ordinary `save()` path, so import can never bypass validation. `strip()` moved i
 `rules.js` so export and the form share one definition of what a rule is made of.
 
 **A loosening path, on purpose.** Editing a rule, importing a file, using a pass and
-locking in all touch what a rule allows. A cooling-off period, in which a rule that
+locking in all touch what a rule allows. Adding a rule for part of a spent site (§21), say
+`youtube.com/watch`, is one more: the new rule owns those pages at once, with a fresh budget,
+without the spent rule being touched. A cooling-off period, in which a rule that
 loosens takes effect only after a delay the user chose while tightening is immediate,
 would close the first two; it was deliberately left out when these features were built.
 
@@ -862,11 +864,16 @@ A pattern is a host, optionally followed by a path: `youtube.com/shorts`.
 - **The path matches whole segments from the start:** `/shorts` covers `/shorts` and
   `/shorts/abc`, not `/shortsfoo` and not `/feed/shorts`. The query string and fragment are
   ignored.
-- **Case and doubled slashes do not count.** Sites commonly serve `/Shorts` and `//shorts` as
-  `/shorts`, so each would be a one-character way around a path rule, like the trailing dot
-  `hostnameOf` already strips. Both sides are lower-cased with repeated and trailing slashes
-  dropped. Percent-encoding is left as the URL parser leaves it, on both sides: `parseDomain`
-  passes a typed path through `new URL()`, so `café` is stored the way a tab's URL spells it.
+- **Case, doubled slashes and needless encoding do not count.** Sites commonly serve `/Shorts`,
+  `//shorts` and `/%73horts` as `/shorts`, so each would be a one-character way around a path
+  rule, like the trailing dot `hostnameOf` already strips. Both sides are lower-cased, with
+  repeated and trailing slashes dropped and letters, digits and `-._~` decoded, which RFC 3986
+  says never need encoding. Any other encoding is left as the URL parser leaves it, on both
+  sides: `parseDomain` passes a typed pattern through `new URL()`, so `café` is stored the way a
+  tab's URL spells it.
+- **A trailing `*` or `/*` is dropped**, since a path already covers everything under it and
+  `/shorts/*` is what someone used to wildcards types. Stored as typed it matched nothing. A
+  `*` anywhere else is refused.
 - **A pattern without a path means what it meant before**, so stored rules and older export
   files need no migration.
 
@@ -878,10 +885,22 @@ match one URL, longer means more segments, so string length is enough. Rule orde
 mattering, which also fixed subdomains: a `music.youtube.com` rule added after `youtube.com` used
 to be refused as shadowed, and the options page cannot reorder rules.
 
+Path before host is a choice, and neither order is right every time. YouTube Music plays on
+`music.youtube.com/watch`, so a lenient `music.youtube.com` rule loses those pages to a strict
+`youtube.com/watch` rule. The other order would be worse: an `m.youtube.com` rule would take every
+Short on YouTube's mobile site. A path is the narrower claim far more often.
+
 `validateRule` follows: the only conflict left is the same pattern in two rules, and it is
 reported on the later one. It also refuses a pattern not spelled the way the form would write it
-(`YouTube.com`, `www.`, a scheme, a trailing slash). An import file or `setLimits()` could
-otherwise store a pattern that matches nothing, or one that two rules claim under two spellings.
+(`YouTube.com`, `www.`, a scheme, a trailing slash), and says how to write it. An import file or
+`setLimits()` could otherwise store a pattern that matches nothing, or one that two rules claim
+under two spellings.
+
+That check runs every pattern through `parseDomain`, so `parseDomain` must never throw. The URL
+parser refuses some hosts the domain check lets through, such as `10.0.0.256`; the first version
+let that throw escape, and one such saved rule would have broken Save for every rule. A host the
+parser refuses is now no host at all, and the parser's spelling is the one stored, so `127.1` is
+`127.0.0.1` as it will be in a tab's URL.
 
 ### Separate, not nested
 
@@ -919,10 +938,14 @@ re-runs it.
 ### The form: "Match paths"
 
 A URL pasted from the address bar usually means the whole site, so the domain field still cuts
-it to its host. A per-rule "Match paths" checkbox keeps the path instead, and shows one sentence
-on how matching works. It is not stored: it is on for a rule that has a path. The form keeps what
-was last typed or pasted in the field, so turning paths on gives back a path that was cut away
-when the field was normalised.
+it to its host. A per-rule "Match paths" checkbox keeps the path instead, and shows a short
+explanation of how matching works. It is not stored: it is on for a rule that has a path. The
+form keeps what was last typed or pasted in the field, so turning paths on gives back a path
+that was cut away when the field was normalised.
+
+While paths are off, a path in the field gets a note under it (`droppedPath`): "youtube.com/shorts"
+quietly becoming "youtube.com" would limit the whole site, and the error it then hits ("already
+claimed by YouTube") does not point at the checkbox.
 
 ### Honest limits
 

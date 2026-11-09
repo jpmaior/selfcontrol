@@ -493,6 +493,11 @@
   padding-left: 1.6rem;
 }
 
+/* Says that a typed path was cut away: unnoticed, it limits the whole site. */
+.field > .path-dropped {
+  color: var(--warn);
+}
+
 @container (min-width: 32rem) {
   .cols {
     grid-template-columns: 1fr 1fr;

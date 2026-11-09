@@ -109,12 +109,20 @@ export function hostMatches(hostname, pattern) {
 
 /**
  * A URL path in the form patterns store it: lower case, no doubled or trailing
- * slashes, "" for the root. Sites commonly serve /Shorts and //shorts as
- * /shorts, so either spelling would otherwise be a one-character way around a
- * path rule. Encoding is left as the URL parser leaves it, on both sides.
+ * slashes, "" for the root, and letters, digits and -._~ never percent-encoded.
+ * Sites commonly serve /Shorts, //shorts and /%73horts as /shorts, so each
+ * would otherwise be a one-character way around a path rule. Any other
+ * encoding is left as the URL parser leaves it, on both sides.
  */
 function normalizePath(pathname) {
-  return pathname.toLowerCase().replace(/\/{2,}/g, "/").replace(/\/+$/, "");
+  return pathname
+    .replace(/%([0-9a-f]{2})/gi, (escape, hex) => {
+      const char = String.fromCharCode(parseInt(hex, 16));
+      return /[a-z0-9._~-]/i.test(char) ? char : escape;
+    })
+    .toLowerCase()
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/, "");
 }
 
 /** Whole segments from the start: "/shorts" covers /shorts/abc, not /shortsfoo. */
@@ -168,7 +176,8 @@ export function ruleForUrl(rules, url) {
  * Coerce whatever the user typed into a pattern, or null if it cannot be one.
  * Accepts a pasted URL, a `*.` wildcard, a port, a query. The path is dropped
  * unless `path` is set, which is the rule form's "Match paths" toggle: a URL
- * pasted from the address bar usually means the whole site.
+ * pasted from the address bar usually means the whole site. A trailing `*` or
+ * `/*` is dropped too, since a path already covers everything under it.
  *
  * `www.` is stripped deliberately: as a pattern it would be narrower than the
  * user expects, failing to match the bare domain.
@@ -189,12 +198,34 @@ export function parseDomain(raw, { path = false } = {}) {
   if (host.startsWith("www.")) host = host.slice(4);
 
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return null;
-  if (!path) return host;
 
-  // Through the URL parser, so the path is encoded exactly as a tab's URL will
-  // be when ruleForUrl compares them.
-  const prefix = normalizePath(new URL(`http://${host}${rest.split(/[?#]/)[0]}`).pathname);
-  return host + prefix;
+  const typedPath = path ? rest.split(/[?#]/)[0].replace(/\/?\*+$/, "") : "";
+  if (typedPath.includes("*")) return null; // no wildcards inside a path (§21)
+
+  // Through the URL parser, so the pattern is spelled exactly as a tab's URL
+  // will be when ruleForUrl compares them (127.1 is 127.0.0.1). It also refuses
+  // hosts the check above lets through, such as 10.0.0.256, and a throw here
+  // would escape validateRule and break Save for every rule.
+  let url;
+  try {
+    url = new URL(`http://${host}${typedPath}`);
+  } catch {
+    return null;
+  }
+  return path ? url.hostname + normalizePath(url.pathname) : url.hostname;
+}
+
+/**
+ * The first path in the domain field that is cut away while "Match paths" is
+ * off, or null. The form says so, since "youtube.com/shorts" quietly becoming
+ * "youtube.com" would limit the whole site.
+ */
+export function droppedPath(text) {
+  for (const part of String(text ?? "").split(/[,\s]+/)) {
+    const pattern = parseDomain(part, { path: true });
+    if (pattern && hasPath(pattern)) return pattern;
+  }
+  return null;
 }
 
 /** Every pattern in the rule form's domain field, in order, each once. */
@@ -361,9 +392,9 @@ export function validateRule(rule, allRules = []) {
   // pattern that matches nothing, or one two rules claim under two spellings.
   const patterns = Array.isArray(rule.match) ? rule.match : [];
   for (const pattern of patterns) {
-    if (typeof pattern !== "string" || parseDomain(pattern, { path: true }) !== pattern) {
-      errors.push(`"${pattern}" is not a domain, or a domain and a path.`);
-    }
+    const written = typeof pattern === "string" ? parseDomain(pattern, { path: true }) : null;
+    if (written !== null && written === pattern) continue;
+    errors.push(written ? `Write "${pattern}" as "${written}".` : `"${pattern}" is not a domain.`);
   }
 
   // The most specific pattern wins (ruleForUrl), so "music.youtube.com" or
