@@ -236,7 +236,7 @@ function showOutright(root, draft) {
       : ["Blocked outright.", `${name || "This site"} is blocked the moment it is opened, and any tab already on it is blocked when you save.`];
   notice.replaceChildren(
     strong(what[0]),
-    ` ${what[1]} That lasts until you raise the budget. Nothing is counted, so the counting mode, the window, the daily and weekly caps, the cool-down and the passes are switched off.`,
+    ` ${what[1]} That lasts until you raise the budget. Nothing is counted, so the window, the daily and weekly caps, the cool-down and the passes are switched off.`,
   );
 }
 
