@@ -1071,5 +1071,60 @@ claimed by YouTube") does not point at the checkbox.
   `/` or `/results`, so that time counts toward YouTube.
 - **`close` closes the whole tab**, even when only part of the site is spent. `block` replaces it
   with the block page, whose return link (§19) brings the Short back once it unlocks.
-- **No path can be blocked outright.** A budget has to be more than zero, as before. Wildcards and
-  regular expressions are not supported either.
+- **Wildcards and regular expressions are not supported.** A path can be blocked outright with
+  a budget of zero (§22).
+
+---
+
+## 22. Blocking outright
+
+Added 2026-11-10. A budget of zero blocks a rule's sites the moment they are opened, and keeps
+them blocked until the budget is raised: no time allowed, rather than a little.
+
+### Not a rolling cap of zero
+
+Run through the rolling arithmetic, a zero budget gives the wrong answer. With nothing used,
+`creditAvailableAt` is asked for zero credit (the 1 ms clamp of §8 is capped at the budget), which
+is available now, so the unlock instant is *now*: the block page counted down to it and unlocked
+at once, and the rule's alarm would have been set to the instant it fires, forever. So
+`policy.evaluate()` answers before any cap is looked at (`blocksOutright()` in `rules.js`, exactly
+`budgetSec === 0`): spent, with `reason: "always"`, `unlockAtMs: null` and `nextChangeAtMs: null`.
+Nothing changes on its own, so there is no alarm; a settings change is what lifts it, and that
+already re-runs everything (§10).
+
+`null` is the one new thing every reader of `unlockAtMs` has to know. The enforcer leaves `until`
+out of the block page's URL, since `"null"` read back as now. The block page drops its meter and
+countdown and says what lifts the block, the popup says `always blocked` and `no time allowed`,
+and the logs say `no budget, stays blocked`.
+
+### Everything else is the same path
+
+A spent rule never counts (§7), so a rule with no budget never opens an interval, and costs no
+writes and no wake-ups. The re-open guard and the sweep act on it as on any spent rule, so tabs
+already on the site are blocked (or closed) when the settings are saved, and new ones as they
+open. `onExceed` is the one limit it keeps.
+
+### What it ignores
+
+The window, the daily and weekly caps, the cool-down, the passes and the counting mode. The caps
+report nothing, a pass in the ledger is ignored, and no pass or lock-in is offered: a pass suspends
+the rolling cap, which a rule with no time does not have, and there is nothing to lock in. "Blocked
+except with a pass" would be a different feature. Calendar caps of zero are still refused, so
+there is one way to say "blocked outright".
+
+The ignored values are kept, not cleared. The form greys them out with their values showing, so
+raising the budget gives back exactly what was there. For the same reason `validateRule` does not
+check them while the budget is zero: a value the user cannot edit must not be what refuses Save.
+They are checked again as soon as the budget is above zero. The background never reads them for
+such a rule, so an import file carrying odd ones costs nothing until then, when they are refused
+like any others.
+
+A blank budget is not zero. The form reads an emptied field as no budget at all, which Save
+refuses, because clearing a field to retype it is not a decision to block a site.
+
+### The hold is left alone
+
+`status()` keeps `blockedUntil` in step with the rolling cap (§8), and a rule with no budget has no
+rolling cap, so the hold is not touched. Setting the budget to zero and back in the middle of a
+cool-down therefore keeps the cool-down, rather than turning the detour into a way to clear it.
+

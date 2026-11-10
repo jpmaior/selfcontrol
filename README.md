@@ -7,7 +7,7 @@ paused YouTube tab costs nothing. Sitting on Instagram in a background tab costs
 open tabs you are not looking at cost nothing.
 
 When the budget runs out, the site is blocked or the tab is closed — and it stays that way if
-you reopen it.
+you reopen it. A budget of zero blocks a site outright.
 
 ---
 
@@ -40,6 +40,10 @@ Toolbar button → **Edit rules**, or *about:addons → SelfControl → Preferen
 
 Each rule takes a name, some domains, a counting mode, a budget, a window, and what to do when
 the budget is spent. Edits apply immediately — no restart.
+
+A budget of `0` blocks a site outright: it is blocked (or its tabs closed) the moment it is
+opened, until you raise the budget again. The rule's other limits are greyed out while it is `0`,
+and come back as they were.
 
 A rule can also cover just part of a site: tick **Match paths** and enter `youtube.com/shorts`.
 Where two rules cover a page, the more specific one counts it, so Shorts can have 5 minutes an

@@ -144,7 +144,7 @@
               broader one runs out.
             </p>
           </div>
-          <label class="field">
+          <label class="field" data-limit>
             <span>Count time</span>
             <select data-field="mode"></select>
           </label>
@@ -156,25 +156,25 @@
             <label class="tile">
               <span>Budget</span>
               <span class="with-unit">
-                <input data-field="budgetMin" type="number" min="1" step="1" />
+                <input data-field="budgetMin" type="number" min="0" step="1" />
                 <small>min</small>
               </span>
             </label>
-            <label class="tile">
+            <label class="tile" data-limit>
               <span>Per rolling window</span>
               <span class="with-unit">
                 <input data-field="windowMin" type="number" min="2" step="1" />
                 <small>min</small>
               </span>
             </label>
-            <label class="tile">
+            <label class="tile" data-limit>
               <span>Per day</span>
               <span class="with-unit">
                 <input data-field="dailyMin" type="number" min="1" step="1" placeholder="none" />
                 <small>min</small>
               </span>
             </label>
-            <label class="tile">
+            <label class="tile" data-limit>
               <span>Per week</span>
               <span class="with-unit">
                 <input data-field="weeklyMin" type="number" min="1" step="1" placeholder="none" />
@@ -182,9 +182,11 @@
               </span>
             </label>
           </div>
-          <p class="hint">
+          <!-- What a budget of 0 does, said before Save rather than found out after. -->
+          <p class="notice" data-role="outright" hidden></p>
+          <p class="hint" data-limit>
             Calendar caps on top of the rolling window: a day ends at local midnight, a week
-            on Sunday night. Leave blank for none.
+            on Sunday night. Leave blank for none. A budget of 0 blocks the site outright.
           </p>
         </section>
 
@@ -192,10 +194,10 @@
           <h2 class="section-title">3. Blocking &amp; cool-down</h2>
           <div class="cols">
             <label class="field">
-              <span>When it runs out</span>
+              <span data-role="on-exceed-label">When it runs out</span>
               <select data-field="onExceed"></select>
             </label>
-            <label class="field">
+            <label class="field" data-limit>
               <span>Stay blocked until this much is free again</span>
               <span class="with-unit">
                 <input data-field="unlockMin" type="number" min="0" step="1" />
@@ -203,7 +205,7 @@
               </span>
             </label>
           </div>
-          <p class="hint">
+          <p class="hint" data-limit>
             0 unblocks the moment any time frees up, which on a rolling window means a
             minute at a time. Set it higher to come back in usable chunks.
           </p>
@@ -211,7 +213,7 @@
 
         <section class="card">
           <h2 class="section-title">4. Passes</h2>
-          <div class="cols">
+          <div class="cols" data-limit>
             <label class="field">
               <span>Passes per week</span>
               <input data-field="passesPerWeek" type="number" min="0" step="1" />
@@ -224,11 +226,11 @@
               </span>
             </label>
           </div>
-          <label class="check">
+          <label class="check" data-limit>
             <input data-field="passCounts" type="checkbox" />
             <span>Pass time counts toward the daily and weekly caps</span>
           </label>
-          <p class="hint">
+          <p class="hint" data-limit>
             A pass suspends the rolling window for one long session, for the video that is
             longer than the window allows. The time still goes into the window afterwards,
             so a pass is followed by the usual cool-down. 0 passes disables them.

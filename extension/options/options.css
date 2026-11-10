@@ -572,6 +572,32 @@
   accent-color: var(--accent);
 }
 
+/* What a budget of 0 does (DESIGN.md §22), in the warning colour, since it
+   blocks a site with no time to count down. */
+.notice {
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  font-size: 0.82rem;
+  text-wrap: pretty;
+}
+
+.notice strong {
+  color: var(--warn);
+}
+
+/* A part a budget of 0 switches off: greyed, with its value still showing,
+   so it is plain what comes back when the budget does. */
+.off {
+  opacity: 0.45;
+}
+
+.off,
+.off input,
+.off select {
+  cursor: not-allowed;
+}
+
 /* --- controls ------------------------------------------------------------- */
 
 input,

@@ -152,3 +152,10 @@ h1 {
 body.unlocked .meter-fill {
   width: 100% !important;
 }
+
+/* A budget of zero: nothing to count down to, so no meter and no countdown;
+   the usage line says what lifts it (DESIGN.md §22). */
+body.outright .meter,
+body.outright .slot {
+  display: none;
+}

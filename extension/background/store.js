@@ -295,8 +295,11 @@ function projected(rule, nowMs) {
  * records the hold that follows it.
  */
 function syncHold(rule, decision, nowMs) {
-  if (decision.pass.active) return;
   const rolling = decision.caps.rolling;
+  // A rule that blocks outright has no rolling cap to hold, and a hold already
+  // recorded is kept, so setting the budget to zero and back mid-block does not
+  // lift it (DESIGN.md §22).
+  if (decision.pass.active || !rolling) return;
   const next = rolling.exhausted ? rolling.unlockAtMs : null;
   const usage = ledgerFor(rule.id);
   if (usage.blockedUntil === next) return;
@@ -328,8 +331,9 @@ export function status(rule, nowMs) {
     label: rule.label,
     mode: rule.mode,
     counting,
-    usedMs: decision.caps.rolling.usedMs,
-    budgetMs: decision.caps.rolling.budgetMs,
+    // A rule that blocks outright has no rolling cap, and no time to show.
+    usedMs: decision.caps.rolling?.usedMs ?? 0,
+    budgetMs: decision.caps.rolling?.budgetMs ?? 0,
     windowMs: windowOf(rule).windowMs,
     lockIn: lockInPreview(rule, usage, nowMs),
     passOffer:

@@ -394,3 +394,61 @@ test("hold: lock-in is refused while held, like any block", () => {
   assert.equal(lockInAmount(rule(), heldUsage(), now), 0);
   assert.equal(typeof canLockIn(rule(), heldUsage(), now), "string");
 });
+
+// --- a zero budget blocks outright -----------------------------------------
+//
+// Spent from the start, never counting, never unlocking on its own: the rule
+// has no time to give back, so there is no instant to count down to and no
+// alarm to set. Everything else the rule carries is ignored.
+
+const outright = (overrides = {}) => withPasses({ budgetSec: 0, ...overrides });
+
+test("evaluate: a zero budget is spent from the start and never unlocks", () => {
+  for (const counting of [false, true]) {
+    const e = evaluate(outright(), createUsage(), T0, { counting });
+    assert.equal(e.exhausted, true, `counting=${counting}`);
+    assert.equal(e.reason, "always");
+    assert.equal(e.remainingMs, 0);
+    assert.equal(e.unlockAtMs, null, "no instant to count down to");
+    assert.equal(e.nextChangeAtMs, null, "and nothing to wake up for");
+    assert.equal(e.binding, null);
+  }
+});
+
+test("evaluate: a zero budget ignores the caps, and they report nothing", () => {
+  // The daily cap would otherwise be the binding one and unlock at midnight.
+  const e = evaluate(outright({ dailyBudgetSec: 5 * 60, weeklyBudgetSec: 60 * 60 }), spent(3 * MIN), T0 + 3 * MIN);
+  assert.equal(e.reason, "always");
+  assert.equal(e.unlockAtMs, null);
+  assert.deepEqual(e.caps, { rolling: null, daily: null, weekly: null });
+});
+
+test("evaluate: a zero budget ignores a pass that is still running", () => {
+  // Used before the budget was set to zero: the rule still blocks, and the pass
+  // has nothing to wake up for at its end.
+  const r = withPasses();
+  const { u, now } = midPass(r);
+  const e = evaluate({ ...r, budgetSec: 0 }, u, now, { counting: true });
+  assert.equal(e.exhausted, true);
+  assert.equal(e.reason, "always");
+  assert.equal(e.nextChangeAtMs, null);
+  assert.deepEqual(e.pass, { active: false, endsAtMs: null, leftThisWeek: 0 });
+});
+
+test("a zero budget offers no pass and no lock-in", () => {
+  const u = createUsage();
+  assert.equal(typeof canUsePass(outright(), u, T0), "string", "passes are configured, but ignored");
+  assert.equal(typeof canLockIn(outright(), u, T0), "string");
+  assert.equal(lockInAmount(outright(), u, T0), 0);
+  assert.equal(lockInPreview(outright(), u, T0), null);
+});
+
+test("evaluate: raising a zero budget back counts the ledger as it stands", () => {
+  // Nothing accrued while it blocked outright, so what was used before is
+  // what counts once it has a budget again.
+  const u = spent(3 * MIN);
+  assert.equal(evaluate(outright(), u, T0 + 3 * MIN).exhausted, true);
+  const e = evaluate(rule(), u, T0 + 3 * MIN);
+  assert.equal(e.exhausted, false);
+  assert.equal(e.remainingMs, 17 * MIN);
+});

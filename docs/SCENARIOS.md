@@ -184,12 +184,37 @@ as YouTube does. On Android both rules count while focused.
    the part's rule and Save → that page says `<part> is available again`, and its
    `Back to …/shorts/…` is blocked at once under the site's name: `⛔ blocked re-opened <site>`.
 
+## Blocking outright
+
+A budget of 0 blocks a site the moment it is opened, until the budget is raised (DESIGN §22).
+Serve a page on `127.0.0.1` and give the rule under test that domain with `setLimits`.
+
+1. **Blocked on sight.** With the site open in a tab, `setLimits(id, { budgetSec: 0 })` → that
+   tab goes to the block page at once, `⛔ <id> spent — blocked 1 tab(s); no budget, stays
+   blocked`. The page reads `<label> is blocked`, with no meter and no countdown, and says it
+   stays blocked until its budget is raised; it stays that way past a minute, and
+   `browser.alarms.getAll()` has no `rule:<id>`. Opening the site again is blocked at once,
+   `⛔ blocked re-opened <id>`, and nothing ever logs `▶ COUNTING` for it.
+2. **Close instead.** The same with `onExceed: "close"` → the tab closes at once, and again when
+   reopened.
+3. **The popup.** The row reads `always blocked` and `no time allowed`, with a full meter, and
+   offers neither Lock in nor a pass, even with passes configured on the rule.
+4. **The options page.** Type 0 into Budget → a notice says the site is blocked (or its tabs
+   closed, following *When it runs out*) the moment it is opened, and stays that way until the
+   budget is raised; Count time, the window, the daily and weekly caps, the cool-down and every
+   pass field are greyed out and cannot be edited, still showing their values; the label above
+   the action reads `When it is opened`, and the rule list says `blocked outright`. Save works
+   even when a greyed field holds a value Save would otherwise refuse. Type 5 back → everything
+   is editable again with the values it had. A blank Budget is refused, not read as 0.
+5. **Raising the budget lifts it.** With the block page open, raise the budget → the page says
+   `<label> is available again` on its next refresh, `Back to …` opens the site, and it counts.
+
 ## Export and import
 
 1. **Round trip.** Export, delete a rule, import the file → the summary says the rule comes back
    without its history; after confirming, it does.
 2. **Edited file.** Change a budget in an exported file and import it → the popup shows the new
-   budget and the old usage. A file with `"budgetSec": 0` is refused, naming the rule, and
+   budget and the old usage. A file with `"budgetSec": -60` is refused, naming the rule, and
    nothing changes.
 
 ## Firefox for Android only

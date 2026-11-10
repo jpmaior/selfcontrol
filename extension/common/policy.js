@@ -8,6 +8,9 @@
 //   weekly    a calendar-week cap, local time, back on Monday
 //   pass      a single-use unlock that suspends the rolling cap (DESIGN.md §17)
 //
+// A budget of zero overrides all of them: the rule blocks outright, with no
+// unlock instant at all (DESIGN.md §22).
+//
 // Exhausted = any constraint says so. The unlock instant is the MAX over the
 // exhausted constraints, because the site is usable only once all of them
 // allow it. The remaining time is the MIN over the caps, because the first one
@@ -26,6 +29,7 @@ import {
   windowOf,
 } from "../background/accountant.js";
 import { startOfDay, startOfNextDay, startOfNextWeek, startOfWeek } from "./calendar.js";
+import { blocksOutright } from "./rules.js";
 
 /** Tie-break order when several constraints release at the same instant: the
  * longer period is the more useful thing to tell the user. */
@@ -38,7 +42,28 @@ const NAME = {
   rolling: "already blocked",
   daily: "done for today",
   weekly: "done for the week",
+  always: "always blocked",
 };
+
+/**
+ * A rule with a budget of zero (DESIGN.md §22): spent from the start, and with
+ * no time to give back there is no instant to count down to (`unlockAtMs`) and
+ * nothing to wake up for (`nextChangeAtMs`); only raising the budget lifts it.
+ * The caps report nothing and a pass in the ledger is ignored, since nothing
+ * but the zero applies.
+ */
+function outright() {
+  return {
+    exhausted: true,
+    reason: "always",
+    binding: null,
+    remainingMs: 0,
+    unlockAtMs: null,
+    nextChangeAtMs: null,
+    caps: { rolling: null, daily: null, weekly: null },
+    pass: { active: false, endsAtMs: null, leftThisWeek: 0 },
+  };
+}
 
 function rollingCap(rule, usage, nowMs) {
   const limits = windowOf(rule);
@@ -86,6 +111,8 @@ function calendarCap(budgetSec, usage, nowMs, startMs, nextStartMs, includePass)
  * on its own, so there is nothing to wake up for.
  */
 export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
+  if (blocksOutright(rule)) return outright();
+
   const includePass = rule.passes?.countsTowardCaps ?? true;
 
   const caps = {
@@ -171,6 +198,8 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
  * because the cap is already spent.
  */
 export function canUsePass(rule, usage, nowMs) {
+  // Its passes are kept for when the budget is raised, but ignored until then.
+  if (blocksOutright(rule)) return NAME.always;
   if (!(rule.passes?.perWeek > 0)) return "no passes on this rule";
   if (passActive(usage, nowMs)) return "a pass is already active";
   if (passesLeft(rule, usage, nowMs) <= 0) return "no passes left this week";

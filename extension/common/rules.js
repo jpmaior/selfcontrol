@@ -61,6 +61,17 @@ export const DEFAULT_RULES = [
   },
 ];
 
+/**
+ * Whether a rule has no time at all: a budget of zero blocks its sites the
+ * moment they are opened, and keeps them blocked until the budget is raised
+ * (DESIGN.md §22). Its window, caps, cool-down, passes and counting mode are
+ * ignored. Exactly zero: a blank budget field is not a choice to block a site,
+ * and validateRule refuses it.
+ */
+export function blocksOutright(rule) {
+  return rule.budgetSec === 0;
+}
+
 /** The longest a calendar cap can be: the period itself. */
 export const MAX_DAILY_SEC = 24 * 60 * 60;
 export const MAX_WEEKLY_SEC = 7 * MAX_DAILY_SEC;
@@ -331,22 +342,10 @@ function validateCap(value, maxSec, what, errors) {
 }
 
 /**
- * Validate one rule. Returns a list of human-readable problems; empty means the
- * rule is safe to persist.
+ * The window, the cool-down, the calendar caps and the passes: everything a
+ * budget of zero ignores. Appends to `errors`.
  */
-export function validateRule(rule, allRules = []) {
-  const errors = [];
-
-  if (!String(rule.label ?? "").trim()) errors.push("Needs a name.");
-  if (!Array.isArray(rule.match) || rule.match.length === 0) {
-    errors.push("Needs at least one domain.");
-  }
-  if (!MODES.some((m) => m.value === rule.mode)) errors.push("Unknown counting mode.");
-  if (!ON_EXCEED.some((a) => a.value === rule.onExceed)) errors.push("Unknown action.");
-
-  if (!(rule.budgetSec > 0)) {
-    errors.push("Budget must be more than zero.");
-  }
+function validateLimits(rule, errors) {
   if (!(rule.windowSec > 0)) {
     errors.push("Window must be more than zero.");
   } else if (rule.budgetSec >= rule.windowSec) {
@@ -380,6 +379,31 @@ export function validateRule(rule, allRules = []) {
       }
     }
   }
+}
+
+/**
+ * Validate one rule. Returns a list of human-readable problems; empty means the
+ * rule is safe to persist.
+ */
+export function validateRule(rule, allRules = []) {
+  const errors = [];
+
+  if (!String(rule.label ?? "").trim()) errors.push("Needs a name.");
+  if (!Array.isArray(rule.match) || rule.match.length === 0) {
+    errors.push("Needs at least one domain.");
+  }
+  if (!MODES.some((m) => m.value === rule.mode)) errors.push("Unknown counting mode.");
+  if (!ON_EXCEED.some((a) => a.value === rule.onExceed)) errors.push("Unknown action.");
+
+  if (!Number.isFinite(rule.budgetSec) || rule.budgetSec < 0) {
+    errors.push("Budget must be zero or more.");
+  }
+
+  // A rule that blocks outright ignores the rest of its limits, so they are
+  // not checked: the form greys them out with whatever they held, and a value
+  // the user cannot edit must never be what refuses the save. Raising the
+  // budget brings them back, checked as usual (DESIGN.md §22).
+  if (!blocksOutright(rule)) validateLimits(rule, errors);
 
   // Unsaved rules have no id yet, so two of them are not "duplicates".
   if (rule.id) {
