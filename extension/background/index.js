@@ -8,7 +8,7 @@ import { log } from "./log.js";
 import { isCountingNow, modeOf, onTabUpdated, platform, setRules, start } from "./observers.js";
 import { clock, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
-import { validateRule } from "../common/rules.js";
+import { blocksOutright, validateRule } from "../common/rules.js";
 import { enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
 import {
   CHECKPOINT_MS,
@@ -248,6 +248,9 @@ const handlers = {
   async lockIn({ ruleId }) {
     const rule = rules.find((r) => r.id === ruleId);
     if (!rule) return { ok: false, error: `no such rule: ${ruleId}` };
+    // The popup offers no lock-in here, but one armed before the budget went
+    // to zero can still be confirmed (DESIGN.md §22).
+    if (blocksOutright(rule)) return { ok: false, error: `${rule.label} has no budget to lock in.` };
     const now = Date.now();
     const ms = lockInRule(rule, now);
     flush(now);
@@ -307,7 +310,7 @@ browser.runtime.onSuspend.addListener(() => {
 /**
  * Quick budget tweaks without opening the options page. Writes the same
  * `settings` key, so it travels the same onRulesChanged path an edit does —
- * and passes the same validation, or a console typo like `budgetSec: 0` would
+ * and passes the same validation, or a console typo like `windowSec: 0` would
  * persist a rule the options page refuses to save.
  */
 globalThis.setLimits = async (ruleId, patch) => {
@@ -347,7 +350,7 @@ globalThis.dumpUsage = async (ruleId) => {
       used: clock(s.usedMs),
       budget: clock(s.budgetMs),
       remaining: clock(s.remainingMs),
-      unlocksIn: s.exhausted ? clock(s.unlockAtMs - now) : "-",
+      unlocksIn: !s.exhausted ? "-" : s.unlockAtMs === null ? "never (no budget)" : clock(s.unlockAtMs - now),
     };
   });
   console.table(table);

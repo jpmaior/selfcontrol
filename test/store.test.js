@@ -398,3 +398,52 @@ test("spent: a settings change opens or closes the interval with the new limits"
   assert.equal(reconcile(r, now + MIN, true), MIN);
   assert.ok(!hasOpenInterval(r.id), "spent again, so not counting");
 });
+
+// --- a zero budget blocks outright ------------------------------------------
+
+test("outright: in use never opens an interval", async () => {
+  const r = { ...rule("outright"), budgetSec: 0 };
+  await load([r]);
+  assert.equal(reconcile(r, T0, true), 0);
+  assert.ok(!hasOpenInterval(r.id), "a rule with no budget never counts");
+
+  const s = status(r, T0 + MIN);
+  assert.equal(s.exhausted, true);
+  assert.equal(s.reason, "always");
+  assert.equal(s.unlockAtMs, null);
+  assert.equal(s.nextChangeAtMs, null);
+  assert.equal(s.usedMs, 0);
+  assert.equal(s.budgetMs, 0);
+  assert.equal(s.lockIn, null);
+  assert.equal(s.passOffer, null);
+});
+
+test("outright: an interval open when the budget goes to zero closes at that instant", async () => {
+  const r = rule("to-zero");
+  await load([r]);
+  startCounting(r, T0);
+  assert.equal(reconcile({ ...r, budgetSec: 0 }, T0 + 2 * MIN, true), 2 * MIN, "credited up to the save");
+  assert.ok(!hasOpenInterval(r.id), "and closed, though the tab is still on the site");
+});
+
+test("outright: no pass, whatever the rule's passes say", async () => {
+  const r = { ...rule("outright-pass"), budgetSec: 0, passes: { perWeek: 3, durationSec: 600, countsTowardCaps: true } };
+  await load([r]);
+  assert.equal(usePassOnRule(r, T0), false);
+  assert.equal(lockInRule(r, T0), 0, "and nothing to lock in");
+});
+
+test("outright: the hold is left alone, so a detour through zero does not lift it", async () => {
+  const r = await spentRule("outright-hold");
+  status(r, T0 + 20 * MIN); // the block lands, and records its hold
+  await settled();
+
+  // Set to zero, then back, before the cool-down is over.
+  status({ ...r, budgetSec: 0 }, T0 + 30 * MIN);
+  await settled();
+  assert.equal(local.data.get("usage:outright-hold").blockedUntil, RELEASE, "untouched while blocking outright");
+
+  const s = status(r, T0 + 61 * MIN + 30_000);
+  assert.equal(s.exhausted, true, "one minute back is still not five");
+  assert.equal(s.unlockAtMs, RELEASE);
+});

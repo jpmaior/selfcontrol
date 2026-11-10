@@ -98,10 +98,19 @@ const HEADLINE = {
   rolling: (name) => `${name} is done for now`,
   daily: (name) => `${name} is done for today`,
   weekly: (name) => `${name} is done for the week`,
+  always: (name) => `${name} is blocked`,
 };
+
+/**
+ * A rule with a budget of zero blocks outright (DESIGN.md §22): there is no
+ * instant to count down to, so the meter and the countdown go, and only
+ * raising the budget, seen on a refresh, unlocks the page.
+ */
+const outright = () => reason === "always";
 
 function setHeadline() {
   el.headline.textContent = (HEADLINE[reason] ?? HEADLINE.rolling)(label);
+  document.body.classList.toggle("outright", outright());
 }
 
 /** "YouTube: 4:57 of 5:00 used today.", with the two figures in bold. */
@@ -115,6 +124,9 @@ function describeCap(mine) {
     strong(clock(budgetMs)),
     ` used ${period}.`,
   ];
+  if (outright()) {
+    return [`${label} has `, strong("no time"), " allowed, and stays blocked until its budget is raised."];
+  }
   switch (cap && reason) {
     case "daily":
       return line(cap.usedMs, cap.budgetMs, "today");
@@ -178,6 +190,7 @@ function unlock() {
   // The tick keeps calling this once the time is up; rebuilding the link
   // every second would drop keyboard focus from it.
   if (document.body.classList.contains("unlocked")) return;
+  document.body.classList.remove("outright");
   document.body.classList.add("unlocked");
   el.icon.src = "../icons/available.svg";
   el.headline.textContent = `${label} is available again`;
@@ -191,6 +204,7 @@ function unlock() {
 }
 
 function tick() {
+  if (outright()) return; // nothing to count down to
   const now = Date.now();
   const remaining = unlockAtMs - now;
 

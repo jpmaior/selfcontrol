@@ -84,12 +84,20 @@ test("parseImport: refuses what is not a rules file", () => {
 
 test("parseImport: one invalid rule refuses the whole file and names it", () => {
   const file = serializeRules(DEFAULT_RULES, NOW);
-  file.rules[1] = { ...file.rules[1], budgetSec: 0 };
+  file.rules[1] = { ...file.rules[1], budgetSec: -60 };
   const result = parseImport(JSON.stringify(file));
   assert.equal(result.ok, false);
   assert.match(result.error, /Instagram/, "names the rule");
   assert.match(result.error, /2/, "and its position");
-  assert.match(result.error, /zero/i, "and what is wrong");
+  assert.match(result.error, /zero or more/i, "and what is wrong");
+});
+
+test("parseImport: a rule that blocks outright imports, whatever its ignored limits hold", () => {
+  const file = serializeRules(DEFAULT_RULES, NOW);
+  file.rules[1] = { ...file.rules[1], budgetSec: 0, windowSec: 0, minUnlockCreditSec: 600 };
+  const result = parseImport(JSON.stringify(file));
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.rules[1].budgetSec, 0);
 });
 
 test("parseImport: a rule that is not an object is refused", () => {

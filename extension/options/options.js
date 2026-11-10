@@ -9,6 +9,7 @@ import {
   MODES,
   ON_EXCEED,
   blankRule,
+  blocksOutright,
   droppedPath,
   hasPath,
   makeRuleId,
@@ -142,7 +143,7 @@ function buildForm(draft) {
   field("label").value = draft.label;
   field("match").value = draft.match.join(", ");
   showPaths();
-  field("budgetMin").value = toMin(draft.budgetSec);
+  field("budgetMin").value = toMinOrBlank(draft.budgetSec);
   field("windowMin").value = toMin(draft.windowSec);
   field("unlockMin").value = toMin(draft.minUnlockCreditSec);
   field("dailyMin").value = toMinOrBlank(draft.dailyBudgetSec);
@@ -159,6 +160,7 @@ function buildForm(draft) {
   field("mode").closest(".field").hidden = !AUDIBLE;
   if (!AUDIBLE) field("match").closest("section").querySelector(".section-title").textContent = "1. Domains";
   fillOptions(field("onExceed"), ON_EXCEED, draft.onExceed);
+  showOutright(root, draft);
 
   // Read every field back into the draft on any change, so validation and Save
   // always see exactly what is on screen.
@@ -173,7 +175,9 @@ function buildForm(draft) {
     if (event.target === field("match") || event.target === field("matchPaths")) showPaths();
     draft.mode = field("mode").value;
     draft.onExceed = field("onExceed").value;
-    draft.budgetSec = toSec(field("budgetMin").value);
+    // Blank is no budget at all, refused on Save, not 0: an emptied field is
+    // not a choice to block the site outright.
+    draft.budgetSec = toSecOrNull(field("budgetMin").value);
     draft.windowSec = toSec(field("windowMin").value);
     draft.minUnlockCreditSec = toSec(field("unlockMin").value);
     draft.dailyBudgetSec = toSecOrNull(field("dailyMin").value);
@@ -183,6 +187,7 @@ function buildForm(draft) {
       durationSec: toSec(field("passMin").value),
       countsTowardCaps: field("passCounts").checked,
     };
+    showOutright(root, draft);
     if (validating) validateAll();
     message = null;
     renderList();
@@ -205,11 +210,43 @@ function buildForm(draft) {
   return root;
 }
 
+/**
+ * A budget of 0 blocks the site outright, and nothing that limits time applies
+ * any more (DESIGN.md §22). The parts marked `data-limit` are greyed out and
+ * disabled rather than cleared or hidden, so it is plain what comes back when
+ * the budget does; a notice says what will happen, before Save.
+ */
+function showOutright(root, draft) {
+  const outright = blocksOutright(draft);
+  for (const part of root.querySelectorAll("[data-limit]")) {
+    part.classList.toggle("off", outright);
+    for (const control of part.querySelectorAll("input, select")) control.disabled = outright;
+  }
+  root.querySelector('[data-role="on-exceed-label"]').textContent = outright
+    ? "When it is opened"
+    : "When it runs out";
+
+  const notice = root.querySelector('[data-role="outright"]');
+  notice.hidden = !outright;
+  if (!outright) return;
+  const name = nameOf(draft);
+  const what =
+    draft.onExceed === "close"
+      ? ["Closed outright.", `A tab on ${name || "this site"} is closed the moment it opens, and any tab already on it is closed when you save.`]
+      : ["Blocked outright.", `${name || "This site"} is blocked the moment it is opened, and any tab already on it is blocked when you save.`];
+  notice.replaceChildren(
+    strong(what[0]),
+    ` ${what[1]} That lasts until you raise the budget. Nothing is counted, so the window, the daily and weekly caps, the cool-down and the passes are switched off.`,
+  );
+}
+
 // --- the list ------------------------------------------------------------
 
 /** "5m / 1h window": the rolling cap, the one every rule has. */
 const capSummary = (draft) =>
-  `${shortDuration(draft.budgetSec * 1000)} / ${shortDuration(draft.windowSec * 1000)} window`;
+  blocksOutright(draft)
+    ? "blocked outright"
+    : `${shortDuration(draft.budgetSec * 1000)} / ${shortDuration(draft.windowSec * 1000)} window`;
 
 function itemState(draft) {
   if (errors.get(draft)?.length > 0) return ["invalid", "Needs fixing"];

@@ -33,9 +33,11 @@ export function blockedUrlFor(rule, snapshot, originalUrl = null) {
   const params = new URLSearchParams({
     rule: rule.id,
     label: rule.label,
-    until: String(snapshot.unlockAtMs),
     reason: snapshot.reason ?? "",
   });
+  // None for a rule that blocks outright, which has no instant to unlock at
+  // (DESIGN.md §22): "null" would read as now, and the page would unlock itself.
+  if (snapshot.unlockAtMs !== null) params.set("until", String(snapshot.unlockAtMs));
   if (originalUrl) params.set("url", originalUrl);
   return browser.runtime.getURL(`blocked/blocked.html?${params}`);
 }
@@ -122,7 +124,7 @@ export async function enforceRule(rules, rule, nowMs) {
   if (acted > 0) {
     log(
       `⛔ ${rule.id} spent — ${rule.onExceed === "close" ? "closed" : "blocked"} ${acted} tab(s);`,
-      `unlocks in ${clock(snapshot.unlockAtMs - nowMs)}`,
+      snapshot.unlockAtMs === null ? "no budget, stays blocked" : `unlocks in ${clock(snapshot.unlockAtMs - nowMs)}`,
     );
   }
   return acted;

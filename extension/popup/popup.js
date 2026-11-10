@@ -30,6 +30,7 @@ const BLOCKED_STATE = {
   rolling: "blocked",
   daily: "done for today",
   weekly: "done for the week",
+  always: "always blocked",
 };
 
 const CAP_NAME = { rolling: "window", daily: "today", weekly: "this week" };
@@ -105,9 +106,16 @@ function render(status, nowMs) {
   parts.li.classList.toggle("spent", status.exhausted);
   parts.li.classList.toggle("pass", Boolean(status.pass?.active) && !status.exhausted);
 
+  // A budget of zero: blocked until the budget is raised, so there is no
+  // unlock to count down to and no time to measure (DESIGN.md §22).
+  const outright = status.reason === "always";
+
   // An SVG element has no .hidden property; the attribute is what the CSS reads.
-  parts.clockIcon.toggleAttribute("hidden", !status.exhausted);
-  if (status.exhausted) {
+  parts.clockIcon.toggleAttribute("hidden", !status.exhausted || outright);
+  if (outright) {
+    parts.state.textContent = BLOCKED_STATE.always;
+    parts.right.textContent = "";
+  } else if (status.exhausted) {
     parts.state.textContent = BLOCKED_STATE[status.reason] ?? "blocked";
     parts.right.textContent = `unlocks in ${countdown(status.unlockAtMs - nowMs)}`;
   } else if (status.pass?.active) {
@@ -125,7 +133,7 @@ function render(status, nowMs) {
     parts.right.textContent = `${clock(status.remainingMs)} left${which}`;
   }
 
-  parts.used.textContent = `${clock(status.usedMs)} / ${clock(status.budgetMs)}`;
+  parts.used.textContent = outright ? "no time allowed" : `${clock(status.usedMs)} / ${clock(status.budgetMs)}`;
 
   const preview = status.lockIn;
   parts.lockIn.button.hidden = !preview;
@@ -150,7 +158,7 @@ function render(status, nowMs) {
   parts.calendar.textContent = lines.join(" · ");
   parts.calendar.hidden = lines.length === 0;
 
-  const ratio = status.budgetMs > 0 ? status.usedMs / status.budgetMs : 0;
+  const ratio = outright ? 1 : status.budgetMs > 0 ? status.usedMs / status.budgetMs : 0;
   parts.fill.style.width = `${Math.min(100, ratio * 100)}%`;
 }
 

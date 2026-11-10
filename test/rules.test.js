@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_RULES,
   blankRule,
+  blocksOutright,
   effectiveMode,
   droppedPath,
   hasPath,
@@ -298,6 +299,54 @@ test("validateRule: unlock credit must fit inside the budget", () => {
   assert.deepEqual(validateRule(rule({ minUnlockCreditSec: 5 * MIN })), [], "equal to budget is strict mode");
   assert.ok(validateRule(rule({ minUnlockCreditSec: 6 * MIN })).length > 0);
   assert.ok(validateRule(rule({ minUnlockCreditSec: -1 })).length > 0);
+});
+
+// --- a zero budget blocks outright ------------------------------------------
+
+test("blocksOutright: a budget of exactly zero, and nothing else", () => {
+  assert.equal(blocksOutright(rule({ budgetSec: 0 })), true);
+  assert.equal(blocksOutright(rule({ budgetSec: 60 })), false);
+  // A blank budget field is not a choice to block the site; validation refuses it.
+  for (const budgetSec of [null, undefined, Number.NaN, -60]) {
+    assert.equal(blocksOutright(rule({ budgetSec })), false, String(budgetSec));
+  }
+});
+
+test("validateRule: a zero budget is valid, and blocks outright", () => {
+  assert.deepEqual(validateRule(rule({ budgetSec: 0 })), []);
+  // A cool-down longer than the budget would otherwise be refused.
+  assert.deepEqual(validateRule(rule({ budgetSec: 0, minUnlockCreditSec: 5 * MIN })), []);
+});
+
+test("validateRule: a zero budget does not check the limits it ignores", () => {
+  // The form greys these out with whatever they held, so a value the user
+  // cannot edit must never be the reason Save is refused.
+  const ignored = {
+    budgetSec: 0,
+    windowSec: 0,
+    minUnlockCreditSec: -1,
+    dailyBudgetSec: 0,
+    weeklyBudgetSec: 99 * 24 * 60 * MIN,
+    passes: { perWeek: 2, durationSec: 0, countsTowardCaps: true },
+  };
+  assert.deepEqual(validateRule(rule(ignored)), []);
+  // Raise the budget and they all count again.
+  assert.ok(validateRule(rule({ ...ignored, budgetSec: 5 * MIN })).length >= 4);
+});
+
+test("validateRule: a zero budget still needs a name, a domain, a mode and an action", () => {
+  for (const broken of [{ label: "" }, { match: [] }, { mode: "telepathy" }, { onExceed: "explode" }]) {
+    assert.ok(validateRule(rule({ budgetSec: 0, ...broken })).length > 0, JSON.stringify(broken));
+  }
+});
+
+test("validateRule: a negative or missing budget is refused", () => {
+  for (const budgetSec of [-60, null, undefined, Number.NaN, "300"]) {
+    assert.ok(
+      validateRule(rule({ budgetSec })).some((e) => /budget must be zero or more/i.test(e)),
+      String(budgetSec),
+    );
+  }
 });
 
 test("validateRule: rejects unknown mode or action", () => {
