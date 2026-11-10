@@ -101,33 +101,39 @@ export async function load(rules) {
 }
 
 /**
- * Settle an interval that was left open when the event page died.
+ * Make the open interval agree with what is true now: open while the observers
+ * say the rule is in use (`inUse`) and it is not spent, closed otherwise. The
+ * one place that decides whether a rule counts (DESIGN.md §7), called whenever
+ * either half of that can change.
  *
- * If the observers confirm the rule is still being consumed, the interval is a
- * legitimate resume and is kept untouched. Otherwise the stop happened while we
- * were unloaded — and the stop is what woke us, so `now` is within startup
- * latency of the truth. Credit right up to it.
+ * A spent rule never counts: an interval open when the rule runs out closes at
+ * that instant, and one opens again only once the rule is not spent (its
+ * unlock, a pass, a looser rule). Otherwise the moment a tab spends on a blocked
+ * site before the guard redirects it is credited, and moves the unlock time the
+ * block page had promised.
  *
- * An earlier version credited only up to the last flush, reasoning that the
- * stop time was unknown. It is not: a browser exit clears storage.session (so
- * there is no interval left to settle), and every other stop — pause, ending,
- * tab closed, a quiet stretch dropping `audible` — is itself the waking event.
- * The cautious version discarded up to a whole checkpoint per stop, and a video
- * with silent gaps stops many times; a 7-minute video showed as exactly 5:00
- * (2026-09-05). settle() applies the sleep clamp, so a suspended machine still
- * cannot credit more than MAX_CHUNK_MS here.
+ * Closing credits right up to `now`, which is also how an interval left open
+ * when the event page died is settled at startup. The stop that left it is what
+ * woke us, so `now` is within startup latency of the truth. An earlier version
+ * credited only up to the last flush, reasoning that the stop time was unknown.
+ * It is not: a browser exit clears storage.session (so there is no interval
+ * left to settle), and every other stop — pause, ending, tab closed, a quiet
+ * stretch dropping `audible` — is itself the waking event. The cautious version
+ * discarded up to a whole checkpoint per stop, and a video with silent gaps
+ * stops many times; a 7-minute video showed as exactly 5:00 (2026-09-05).
+ * settle() applies the sleep clamp, so a suspended machine still cannot credit
+ * more than MAX_CHUNK_MS here.
  *
- * Returns the milliseconds credited, or 0 if there was nothing to settle.
+ * Returns the milliseconds credited, or 0 if nothing was closed.
  */
-export function reconcile(rule, nowMs, stillCounting) {
-  const since = openSince.get(rule.id);
-  if (since === undefined) return 0;
-  if (stillCounting) return 0;
-
-  openSince.delete(rule.id);
-  enqueue(() => browser.storage.session.remove(openKey(rule.id)));
-
-  return settle(rule, since, nowMs);
+export function reconcile(rule, nowMs, inUse) {
+  // status() projects the open interval, so this asks whether the rule is spent
+  // with everything up to now counted.
+  if (inUse && !status(rule, nowMs).exhausted) {
+    startCounting(rule, nowMs);
+    return 0;
+  }
+  return stopCounting(rule, nowMs);
 }
 
 // --- counting ------------------------------------------------------------
@@ -186,12 +192,12 @@ export function checkpointRule(rule, nowMs) {
 
 /**
  * Spend the rest of the rule's budget on purpose (DESIGN.md §16). The open
- * interval is checkpointed first so it is credited exactly once, and the
- * interval stays open: it is the observers' job to close it when the tab is
- * swept. Returns the milliseconds locked in.
+ * interval is closed first, so it is credited exactly once, and not reopened:
+ * the rule is spent from here, and a spent rule never counts (§7), so the sweep
+ * that follows costs nothing. Returns the milliseconds locked in.
  */
 export function lockInRule(rule, nowMs) {
-  checkpointRule(rule, nowMs);
+  stopCounting(rule, nowMs);
   const usage = ledgerFor(rule.id);
   const amount = lockInAmount(rule, usage, nowMs);
   const active = passActive(usage, nowMs);
@@ -276,11 +282,11 @@ function projected(rule, nowMs) {
 
 /**
  * Keep the ledger's `blockedUntil` in step with the rolling cap (DESIGN.md §8):
- * set when a block is seen, moved when its unlock instant moves (a second
- * leaked in before the block page loaded, a settings change), cleared once the
- * rule reopens. It lives here because every decision passes through status()
- * — the alarm at the instant the budget runs out, the re-open guard, the popup
- * — so a block cannot be acted on without being recorded. Flushed at once: it
+ * set when a block is seen, moved when its unlock instant moves (a settings
+ * change), cleared once the rule reopens. It lives here because every decision
+ * passes through status() — the alarm at the instant the budget runs out, the
+ * re-open guard, the popup — so a block cannot be acted on without being
+ * recorded. Flushed at once: it
  * changes once per block and once per unlock, and losing it to a killed event
  * page would bring the drip-feed back.
  *

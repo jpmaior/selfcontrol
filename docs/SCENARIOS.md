@@ -82,6 +82,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    countdown that ticks; the log says `⛔ youtube spent — blocked 1 tab(s); unlocks in …`.
 2. **No way back in.** Navigate back → blocked again. Open the site in a new tab → blocked at
    once, `⛔ 1 re-opened youtube`.
+   Neither counts. Check it on a focus rule, since on desktop an audible one is redirected
+   before it makes a sound: going back in a minute or more after the block logs
+   `▷ spent, not counting` rather than `▶ COUNTING`, and the unlock time, on the block page and
+   in `dumpUsage()`, stays where it was (DESIGN §7).
 3. **Close instead of block.** A rule with `onExceed: "close"` (the default Instagram rule) →
    the tab closes at the budget, and reopening it closes it again at once.
 4. **Unlocked on time, not before.** Spend the budget across two buckets (say 12 s and 18 s) →

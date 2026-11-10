@@ -17,11 +17,11 @@ import {
   describe,
   flush,
   forget,
+  hasOpenInterval,
   load,
   lockInRule,
   reconcile,
   settled,
-  startCounting,
   stats,
   status,
   stopCounting,
@@ -47,21 +47,23 @@ const loaded = (async () => {
 // real rules arrive via setRules() below, which re-primes.
 const primed = start({
   rules,
-  async onChange(rule, counting, why) {
+  async onChange(rule, inUse, why) {
     await loaded;
     const now = Date.now();
 
-    if (counting) {
-      startCounting(rule, now);
-      log("▶ COUNTING", `${rule.id} (${modeOf(rule)})`, `— ${why}`);
-      // A rule can start counting while already spent (the tab was opened
-      // before the block landed), so check before scheduling.
-      await enforceRule(rules, rule, now);
-    } else {
-      const credited = stopCounting(rule, now);
-      flush(now);
-      log("■ stopped  ", `${rule.id} (${modeOf(rule)})`, `— ${why}`, `+${clock(credited)}`);
-    }
+    // In use counts only while the rule is not spent (DESIGN.md §7): going back
+    // into a blocked site opens nothing, so the moment before the guard
+    // redirects the tab cannot move the unlock time.
+    const credited = reconcile(rule, now, inUse);
+    flush(now);
+    const name = `${rule.id} (${modeOf(rule)})`;
+    if (hasOpenInterval(rule.id)) log("▶ COUNTING", name, `— ${why}`);
+    else if (inUse) log("▷ spent, not counting", name, `— ${why}`, `+${clock(credited)}`);
+    else log("■ stopped  ", name, `— ${why}`, `+${clock(credited)}`);
+
+    // In use while spent: the tab was opened before the block landed, or came
+    // back to the site. Sweep it.
+    if (inUse) await enforceRule(rules, rule, now);
 
     log("   ", describe(rule, now));
     await Promise.all([syncCheckpointAlarm(), syncRuleAlarm(rule, now)]);
@@ -105,6 +107,18 @@ async function settleAndArm(why) {
     await syncRuleAlarm(rule, now);
   }
   log(`state re-armed (${why})`);
+}
+
+/**
+ * Whether a rule is in use, for the paths that can change whether it is spent
+ * (its alarm, a pass) but not whether it is in use. The observers read every
+ * rule as idle until they are primed, and an alarm often wakes the event page
+ * before they are, so an open interval is taken at its word rather than closed
+ * on that say-so: only the observers end a rule's use, through onChange. A rule
+ * they have not reported yet is opened by that same report once they are primed.
+ */
+function inUse(rule) {
+  return isCountingNow(rule.id) || hasOpenInterval(rule.id);
 }
 
 // --- settings ------------------------------------------------------------
@@ -195,8 +209,16 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   const lateness = now - alarm.scheduledTime;
   log(`alarm for ${ruleId} fired ${lateness >= 0 ? "+" : ""}${lateness}ms vs scheduled`);
 
-  checkpointRule(rule, now);
+  // A rule that has just run out stops counting at this instant, so the sweep
+  // landing is not counted; one that has just unlocked under a tab still on
+  // the site starts again (DESIGN.md §7).
+  const wasCounting = hasOpenInterval(ruleId);
+  const credited = reconcile(rule, now, inUse(rule));
+  const counting = hasOpenInterval(ruleId);
+  if (wasCounting && !counting) log(`■ ${ruleId} spent — stopped counting +${clock(credited)}`);
+  if (!wasCounting && counting) log(`▶ COUNTING ${ruleId} — in use as it unlocked`);
   flush(now);
+  await syncCheckpointAlarm();
 
   // The alarm fires at every instant the answer could flip: a cap running out
   // or an unlock. Enforce if spent; either way, re-sync so the next flip has
@@ -233,7 +255,8 @@ const handlers = {
       `blocked until ${wallClock(snapshot.unlockAtMs, now)} (${snapshot.reason})`,
     );
     await enforceRule(rules, rule, now);
-    await syncRuleAlarm(rule, now);
+    // lockInRule closed the interval: the rule is spent now.
+    await Promise.all([syncCheckpointAlarm(), syncRuleAlarm(rule, now)]);
     return { ok: true, ms };
   },
 
@@ -245,6 +268,10 @@ const handlers = {
       flush(now);
       return { ok: false, error: "That pass is not available right now." };
     }
+    // A tab still on the site, one the sweep never reached, counts from now (§7).
+    const wasCounting = hasOpenInterval(ruleId);
+    reconcile(rule, now, inUse(rule));
+    if (!wasCounting && hasOpenInterval(ruleId)) log(`▶ COUNTING ${ruleId} — in use as the pass began`);
     flush(now);
     const snapshot = status(rule, now);
     log(
@@ -252,8 +279,8 @@ const handlers = {
       `${snapshot.pass.leftThisWeek} left this week`,
     );
     // The pass ending is just nextChangeAtMs firing; the alarm handler then
-    // finds the rolling cap spent and sweeps.
-    await syncRuleAlarm(rule, now);
+    // finds the rolling cap spent, stops counting and sweeps.
+    await Promise.all([syncCheckpointAlarm(), syncRuleAlarm(rule, now)]);
     return { ok: true, endsAtMs: snapshot.pass.endsAtMs };
   },
 };

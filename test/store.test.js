@@ -185,10 +185,14 @@ test("lockInRule: checkpoints the open interval first, then spends the rest", as
   const locked = lockInRule(r, now);
 
   assert.equal(locked, 17 * MIN, "what was left of the 20 minutes");
-  assert.ok(hasOpenInterval(r.id), "the interval stays open; the observers close it");
+  assert.ok(!hasOpenInterval(r.id), "closed: the rule is spent, and a spent rule never counts");
   const s = status(r, now);
   assert.equal(s.usedMs, 20 * MIN, "3 counted + 17 locked, not 3 + 3 + 17");
   assert.equal(s.exhausted, true);
+
+  // The sweep lands and the observers report the tab gone from the site.
+  assert.equal(reconcile(r, now + 700, false), 0, "the sweep landing costs nothing");
+  assert.equal(status(r, now + 700).usedMs, 20 * MIN);
 
   flush(now);
   await settled();
@@ -257,8 +261,8 @@ test("flush persists ledgers through the queue", async () => {
 // that saw the block land is not the one that will be asked an hour later.
 
 /** 20 of 20 minutes spent from T0, flushed; unlock credit five minutes. */
-async function spentRule(id) {
-  const r = { ...rule(id), minUnlockCreditSec: 5 * 60 };
+async function spentRule(id, extra = {}) {
+  const r = { ...rule(id), minUnlockCreditSec: 5 * 60, ...extra };
   await load([r]);
   startCounting(r, T0);
   // Checkpointed as a real session is: one 20-minute commit would hit the
@@ -300,4 +304,97 @@ test("hold: cleared once the rule reopens", async () => {
 
   await settled();
   assert.equal(local.data.get("usage:held-clear").blockedUntil, null);
+});
+
+// --- a spent rule never counts (DESIGN.md §7) -----------------------------
+//
+// reconcile() is how the background tells the store what the observers see.
+// Going back into a blocked site reported it in use for the moment before the
+// guard redirected the tab, and that moment, credited to a newer bucket than
+// any spent one, moved the unlock time the block page had promised (#24).
+
+test("spent: in use opens no interval, so going back in leaves the unlock alone", async () => {
+  const r = await spentRule("reentry");
+  assert.equal(status(r, T0 + 20 * MIN).unlockAtMs, RELEASE);
+
+  // Back into the site ten minutes later; the block page loads 500 ms after.
+  const back = T0 + 30 * MIN;
+  assert.equal(reconcile(r, back, true), 0);
+  assert.ok(!hasOpenInterval(r.id), "a spent rule does not count");
+  assert.equal(reconcile(r, back + 500, false), 0, "nothing to credit when it leaves");
+
+  const s = status(r, back + 500);
+  assert.equal(s.usedMs, 20 * MIN);
+  assert.equal(s.unlockAtMs, RELEASE, "the promised unlock stands");
+  await settled();
+  assert.equal(local.data.get("usage:reentry").blockedUntil, RELEASE);
+});
+
+test("spent: an interval open when the rule runs out closes at that instant", async () => {
+  const r = { ...rule("runs-out"), minUnlockCreditSec: 5 * 60 };
+  await load([r]);
+  startCounting(r, T0);
+  for (let at = T0 + CHECKPOINT_MS; at < T0 + 20 * MIN; at += CHECKPOINT_MS) checkpointRule(r, at);
+
+  // The rule's alarm, at the instant the budget runs out, with the tab still on the site.
+  const out = T0 + 20 * MIN;
+  assert.equal(reconcile(r, out, true), 5 * MIN, "credited up to that instant");
+  assert.ok(!hasOpenInterval(r.id), "and closed, though the tab is still in use");
+
+  // The sweep lands and the observers report the tab gone from the site.
+  assert.equal(reconcile(r, out + 700, false), 0, "the sweep landing costs nothing");
+  const s = status(r, out + 700);
+  assert.equal(s.usedMs, 20 * MIN);
+  assert.equal(s.unlockAtMs, RELEASE);
+});
+
+test("spent: a tab still in use when the rule unlocks counts from that instant", async () => {
+  const r = await spentRule("unlocked-in-use");
+  status(r, T0 + 20 * MIN); // the block lands, and records its hold
+
+  // The sweep never reached this tab, so the observers report it in use throughout.
+  assert.equal(reconcile(r, RELEASE - 1, true), 0);
+  assert.ok(!hasOpenInterval(r.id), "still spent a moment before the unlock");
+
+  assert.equal(reconcile(r, RELEASE, true), 0);
+  assert.ok(hasOpenInterval(r.id), "counting again at the unlock instant");
+  assert.equal(reconcile(r, RELEASE + MIN, false), MIN, "and the minute after it is credited");
+});
+
+test("spent: a pass under a tab still in use counts from the click to the pass end", async () => {
+  const passes = { perWeek: 1, durationSec: 10 * 60, countsTowardCaps: true };
+  const r = await spentRule("pass-in-use", { passes });
+
+  const click = T0 + 30 * MIN;
+  assert.equal(reconcile(r, click, true), 0);
+  assert.ok(!hasOpenInterval(r.id), "spent, so not counting before the pass");
+
+  assert.equal(usePassOnRule(r, click), true);
+  reconcile(r, click, true);
+  assert.ok(hasOpenInterval(r.id), "the pass opened the rule, and it is in use");
+
+  // The pass ends; its alarm finds the rolling cap spent again.
+  const end = click + 10 * MIN;
+  checkpointRule(r, click + 5 * MIN);
+  assert.equal(reconcile(r, end, true), 5 * MIN, "credited up to the pass end");
+  assert.ok(!hasOpenInterval(r.id), "and closed there");
+
+  flush(end);
+  await settled();
+  const stored = local.data.get("usage:pass-in-use");
+  assert.equal(Object.values(stored.p).reduce((a, ms) => a + ms, 0), 10 * MIN, "all of it pass time");
+});
+
+test("spent: a settings change opens or closes the interval with the new limits", async () => {
+  const r = await spentRule("edited");
+  const now = T0 + 30 * MIN;
+
+  // Loosened while the tab is in use: it counts at once.
+  const looser = { ...r, budgetSec: 40 * 60 };
+  assert.equal(reconcile(looser, now, true), 0);
+  assert.ok(hasOpenInterval(r.id), "no longer spent, so counting");
+
+  // Tightened back a minute later: closed at that instant.
+  assert.equal(reconcile(r, now + MIN, true), MIN);
+  assert.ok(!hasOpenInterval(r.id), "spent again, so not counting");
 });

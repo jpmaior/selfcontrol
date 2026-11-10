@@ -389,6 +389,40 @@ Known weakness: a brief flash of real content before the redirect lands. The upg
 `declarativeNetRequest` dynamic rules, which redirect at the network layer with nothing
 rendered — deferred, because the rules must be added and removed as quota changes.
 
+### A spent rule never counts
+
+Decided 2026-11-10 (#24). Going back into a blocked site, or reopening it, puts the tab on the
+site for the moment before the guard redirects it, and the observers report the rule in use for
+that moment. That moment used to count: an interval opened, and closed when the block page
+loaded. With the hold (§8), any time credited to a newer bucket than the spent ones moves the
+unlock to that bucket's expiry, so the countdown the block page had shown stopped being true. On
+the Android emulator each re-entry credited `+0:01`, and one moved the unlock from 21:06 to
+21:07. Desktop does the same, only faster: 31 ms, going Back a minute after the block, moved it
+from 16:19 to 16:20. The budget's end leaked the same way, from the alarm until the sweep's block
+page loaded.
+
+A tab that is blocked the moment it lands was not in use. So a rule counts while the observers
+say it is in use *and* it is not spent (`status().exhausted`, whichever cap binds), decided in
+one place, `store.reconcile()`:
+
+- **In use while spent opens nothing.** The guard and the sweep act as before.
+- **Becoming spent closes the interval at that instant**, credited up to it: the alarm at the
+  budget's end or at a pass's end, a lock-in (§16), a settings change that tightens the rule. The
+  sweep that follows costs nothing.
+- **Ceasing to be spent opens it again** if the observers still report the rule in use: the
+  alarm at the unlock, a pass (§17), a settings change that loosens the rule, startup. Normally
+  the tab is on the block page by then and nothing opens; this is for a tab the sweep could not
+  reach, which would otherwise go uncounted until the observers next change their answer.
+
+Every path that can change either half calls it: the observers' reports (`onChange`), the rule's
+alarm, both popup actions, and `settleAndArm` at startup and after a settings change. The
+observers read every rule as idle until they are primed, and an alarm often wakes the event page
+before they are, so the alarm and the pass take an open interval as in use rather than closing it
+on that say-so. A rule they have not reported yet is opened by the report priming always sends.
+
+The checkpoint alarm follows `anyCounting()`, which no longer includes a spent rule, so a tab left
+on a spent site costs no wake-ups.
+
 ---
 
 ## 8. `minUnlockCreditSec` — taming the drip-feed
@@ -434,9 +468,10 @@ when `now < blockedUntil` and the credit back is still short of `minUnlockCredit
   is back", computed from the buckets, so a rule loosened mid-block lets go at once, and an
   expired hold does nothing.
 - **`status()` keeps it in step**: set when a block is seen, moved when the unlock instant moves
-  (a leaked second, a settings change), cleared on release. Every decision passes through
-  `status()` — the alarm at the instant the budget runs out, the re-open guard, the popup — so a
-  block cannot be acted on without being recorded. It is flushed at once: one write per block
+  (a settings change; until §7 stopped spent rules counting, also a moment leaked in after the
+  block), cleared on release. Every decision passes through `status()` — the alarm at the
+  instant the budget runs out, the re-open guard, the popup — so a block cannot be acted on
+  without being recorded. It is flushed at once: one write per block
   and one per unlock.
 - **Left alone during a pass**, whose unlock instant moves every minute; the alarm at the pass
   end records the hold that follows it.
@@ -714,12 +749,13 @@ The amount is the *smallest* remainder across the caps (`policy.lockInAmount`). 
 a rule whose daily cap has two minutes left spends those two minutes, which exhausts the
 daily cap, which blocks until midnight. That is what "lock in" means for that rule.
 
-### Checkpoint first
+### Close the interval first
 
-`store.lockInRule()` checkpoints the open interval before spending, so the time counted so
-far is credited exactly once and the lock-in sits on top of it. The interval stays open;
-the sweep that follows closes the tab, and the observers close the interval as they
-always do.
+`store.lockInRule()` closes the open interval before spending, so the time counted so far
+is credited exactly once and the lock-in sits on top of it. It is not reopened: the rule
+is spent from that instant, and a spent rule never counts (§7), so the sweep that follows
+costs nothing. It used to stay open until the observers closed it behind the sweep, which
+counted the sweep as well.
 
 ### It also ends a pass
 
@@ -766,6 +802,10 @@ it was; it only changes *when* the block lands.
 `commit()` splits an interval at the pass boundaries, which is why the store checkpoints
 before starting a pass: the minutes before the click stay in `b`, and only what follows
 is pass time.
+
+Using a pass and the pass ending are among the moments §7 watches: a spent rule never
+counts. A tab still on the site when the pass is used counts from the click, and the
+interval closes at the pass's end, so the sweep that follows costs nothing.
 
 ### `p` exists so the calendar caps can leave it out
 
