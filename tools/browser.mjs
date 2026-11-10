@@ -434,6 +434,10 @@ const commands = {
       [display, "-screen", "0", `${width}x${height}x24`, "-dpi", "96", "-nolisten", "tcp"],
       path.join(DIR, "xvfb.log"),
     );
+    // Recorded as each process starts, so the next `start` or `stop` cleans
+    // up after a start that failed halfway.
+    const state = { display, width, height, xvfbPid };
+    writeState(state);
     await waitFor(() => fs.existsSync(`/tmp/.X11-unix/X${display.slice(1)}`), "Xvfb");
 
     fs.rmSync(PULSE_SOCKET, { force: true });
@@ -450,9 +454,18 @@ const commands = {
         "--load=module-null-sink sink_name=null",
       ],
       path.join(DIR, "pulse.log"),
-      // Its state stays here, not in ~/.config/pulse.
-      { PULSE_STATE_PATH: PULSE_DIR, PULSE_RUNTIME_PATH: PULSE_DIR },
+      {
+        // Its state stays here, not in ~/.config/pulse.
+        PULSE_STATE_PATH: PULSE_DIR,
+        PULSE_RUNTIME_PATH: PULSE_DIR,
+        // Off the session bus: a PulseAudio exits at once if another one holds
+        // org.PulseAudio1 there, be it the desktop's own or the tool's from
+        // another checkout. Nothing here reaches it over D-Bus anyway.
+        DBUS_SESSION_BUS_ADDRESS: "disabled:",
+      },
     );
+    state.pulsePid = pulsePid;
+    writeState(state);
     await waitFor(() => fs.existsSync(PULSE_SOCKET), "PulseAudio");
 
     const port = await freePort();
@@ -468,7 +481,7 @@ const commands = {
       "/dev/null",
       { DISPLAY: display, PULSE_SERVER: `unix:${PULSE_SOCKET}` },
     );
-    const state = { display, port, width, height, xvfbPid, pulsePid, firefoxPid };
+    Object.assign(state, { port, firefoxPid });
     writeState(state);
     await waitFor(() => fs.readFileSync(LOG, "utf8").includes(`ws://127.0.0.1:${port}`), "Firefox", 60_000);
 
