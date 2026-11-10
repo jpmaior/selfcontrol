@@ -4,7 +4,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { importSummary, parseImport, serializeRules } from "../extension/common/transfer.js";
+import {
+  describeImport,
+  importSummary,
+  parseImport,
+  serializeRules,
+} from "../extension/common/transfer.js";
 import { DEFAULT_RULES, strip, withDefaults } from "../extension/common/rules.js";
 
 const NOW = Date.UTC(2026, 8, 19, 10, 0);
@@ -119,4 +124,28 @@ test("importSummary: which ids are new, kept, and about to lose their history", 
     removed: ["instagram"],
   });
   assert.deepEqual(importSummary([], []), { added: [], kept: [], removed: [] });
+});
+
+test("describeImport: the confirm step says what happens to each rule's history", () => {
+  const current = [{ id: "youtube" }, { id: "instagram" }];
+  assert.equal(
+    describeImport(current, [{ id: "youtube" }, { id: "reddit" }]),
+    "2 rules replace your 2 rules. youtube keeps its history; instagram: history discarded. reddit: new.",
+  );
+});
+
+test("describeImport: several kept rules keep their history, not its", () => {
+  const current = [{ id: "youtube" }, { id: "instagram" }];
+  assert.equal(
+    describeImport(current, current),
+    "2 rules replace your 2 rules. youtube, instagram keep their history.",
+  );
+});
+
+test("describeImport: one incoming rule replaces, in the singular", () => {
+  assert.equal(
+    describeImport([{ id: "youtube" }], [{ id: "youtube" }]),
+    "1 rule replaces your 1 rule. youtube keeps its history.",
+  );
+  assert.equal(describeImport([], [{ id: "reddit" }]), "1 rule replaces your 0 rules. reddit: new.");
 });

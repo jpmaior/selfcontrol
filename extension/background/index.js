@@ -224,7 +224,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   // or an unlock. Enforce if spent; either way, re-sync so the next flip has
   // its alarm.
   const acted = await enforceRule(rules, rule, now);
-  if (acted === 0) log(`${ruleId}: ${describe(rule, now)}`);
+  if (acted === 0) log(describe(rule, now));
   await syncRuleAlarm(rule, now);
 });
 
@@ -326,12 +326,16 @@ globalThis.resetRules = async () => {
 };
 
 globalThis.resetUsage = async () => {
+  await loaded; // the rule ids, or nothing would be removed
   await browser.storage.local.remove(rules.map((r) => `usage:${r.id}`));
   await browser.storage.session.clear();
   return "usage cleared — reload the extension";
 };
 
-globalThis.dumpUsage = (ruleId) => {
+// Async because it may be the call that wakes the event page: read before the
+// ledger has loaded, every rule would show 0:00.
+globalThis.dumpUsage = async (ruleId) => {
+  await loaded;
   const now = Date.now();
   const chosen = ruleId ? rules.filter((r) => r.id === ruleId) : rules;
   const table = chosen.map((rule) => {
