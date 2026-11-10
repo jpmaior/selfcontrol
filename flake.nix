@@ -186,7 +186,7 @@
               pkgs.firefox
               pkgs.xvfb # the display itself; outlives any one command
               pkgs.xdotool # real clicks, e.g. on the toolbar button
-              pkgs.imagemagick # `import`: screenshots of the whole window
+              pkgs.imagemagick # `import`: screenshots; `display`: a window outside Firefox to focus
               # A null sink. With no audio device Firefox fails the media
               # element, so `tab.audible` never turns true and an audible rule
               # never counts.

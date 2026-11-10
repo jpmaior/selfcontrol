@@ -286,11 +286,15 @@ late**, because a rolling window only ever regenerates quota in the user's favou
 fires, recompute; if not actually exhausted, reschedule. Correct without simulating the window
 forward.
 
-> **Does Firefox clamp sub-minute alarm delays**, the way Chrome does (30 s minimum)? Firefox
-> for Android 159 does not: `fired +3ms` awake, `+147ms` when the alarm had to wake a suspended
-> event page. Desktop has not been measured. Every rule alarm logs `fired +Nms vs scheduled`, so
-> SCENARIOS.md records it on the next run. A clamp would show up as a block landing up to a
-> minute late, and only for the final alarm before exhaustion.
+> **Does Firefox clamp sub-minute alarm delays**, the way Chrome does (30 s minimum)? No. It arms
+> a one-shot timer for the exact delay; whatever lateness there is comes from delivering the
+> event. Firefox for Android 159: `fired +3ms` awake, `+147ms` when the alarm had to wake a
+> suspended event page. Desktop Firefox 158, on `tools/browser.mjs`'s virtual display, over two
+> runs on a host shared with other browsers: `+3ms` to `+587ms` awake, often single digits, and
+> `+138ms` to `+848ms` from suspended, which includes starting the page and loading the ledger
+> before the listener reads the clock. Every rule alarm logs `fired +Nms vs scheduled`, and SCENARIOS.md's
+> Enforcement 6 compares it with these. A clamp would show up as a block landing up to a minute
+> late, and only for the final alarm before exhaustion.
 
 ### Crash and sleep resilience
 

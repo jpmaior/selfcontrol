@@ -19,6 +19,27 @@
 //   uninstalled at every shutdown, hence the keep*OnUninstall prefs below.
 // - Nothing attaches devtools. An open console pins the event page alive; the
 //   extension's console output reaches `log` through stdout instead.
+// - `start` turns focusmanager.testmode off. The Remote Agent turns it on, so
+//   that every window acts focused, and Firefox then ignores focus changes:
+//   the focus scenarios could never fail. It sets its prefs once, at startup,
+//   and only those with no user value, so clearing it once BiDi answers holds
+//   for the session. user.js cannot get there first: false is the default,
+//   and Firefox keeps no user value equal to the default.
+//   remote.prefs.recommended=false would drop all its other prefs too.
+// - With no window manager nothing hands out focus, so the tool does, with
+//   xdotool: to Firefox at `start`, to a window `open --new-window` creates,
+//   to window N on `focus N`, and on `focus away` to a one-pixel window of
+//   another client, ImageMagick's `display`, already here for `import`. Not
+//   through Firefox's own window.focus(), which BiDi uses too: once X input
+//   has gone to Firefox (an `xdo` click), its requests stop taking effect, as
+//   if stamped too old for X to honour, while xdotool's always do. Firefox
+//   does not expose its X window ids, so a window is found by a title set
+//   for the moment.
+// - `reload` first opens a blank tab in any window holding nothing but the
+//   add-on's pages. Reinstalling closes them, the window goes with its last
+//   tab, and with the last window Firefox quits. Not by setting
+//   browser.tabs.closeWindowWithLastTab: that would also do the job of the
+//   guard in enforcer.js's act(), which the close scenario is there to test.
 
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -30,11 +51,15 @@ const USAGE = `usage: node tools/browser.mjs <command>   (inside \`nix develop .
 
   start [--fresh] [--size WxH]  launch; --fresh wipes the profile, storage included
   stop                          quit Firefox cleanly, then the display and audio
-  status                        what is running, the event page's state, the tabs
+  status                        what is running, the event page's state, the windows
+                                and their tabs
   reload                        reinstall from ./extension; like about:debugging's
                                 Reload, it also clears storage.session
-  open <target> [--new-tab]     a URL, a bare host, popup | options | blocked[?query],
-                                or /path inside the extension
+  open <target> [--new-tab | --new-window]
+                                a URL, a bare host, popup | options | blocked[?query],
+                                or /path inside the extension. A new window takes focus
+  focus [N | away]              give focus to Firefox's window N (default 1, numbered
+                                as \`status\` lists them), or to a window outside Firefox
   shot [file] [--page]          PNG of the whole screen: toolbar, popup.
                                 --page: only the active tab's viewport
   popup                         click the toolbar button, opening the real popup
@@ -56,6 +81,8 @@ const STATE = path.join(DIR, "state.json");
 const LOG = path.join(DIR, "firefox.log");
 const PULSE_DIR = path.join(DIR, "pulse");
 const PULSE_SOCKET = path.join(PULSE_DIR, "native");
+// The title of the window `focus away` gives focus to, which is how xdotool finds it.
+const OUTSIDE = "selfcontrol-outside-firefox";
 
 const EXT_ID = JSON.parse(fs.readFileSync(path.join(EXT_DIR, "manifest.json"), "utf8"))
   .browser_specific_settings.gecko.id;
@@ -249,16 +276,95 @@ async function chromeWindow(b) {
   return win.context;
 }
 
-/** The selected tab: the only top-level document Firefox reports as visible. */
+/**
+ * The selected tab of the focused window, or of the first one if Firefox has
+ * no focus. A selected tab is the one top-level document per window that
+ * Firefox reports as visible.
+ */
 async function activeTab(b) {
   const { contexts } = await b.send("browsingContext.getTree", { maxDepth: 0 });
-  for (const { context } of contexts) {
+  const { clientWindows } = await b.send("browser.getClientWindows");
+  const focused = clientWindows.find((w) => w.active)?.clientWindow;
+  const selected = [];
+  for (const c of contexts) {
     const r = await b
-      .send("script.evaluate", { expression: "document.visibilityState", target: { context }, awaitPromise: false })
+      .send("script.evaluate", { expression: "document.visibilityState", target: { context: c.context }, awaitPromise: false })
       .catch(() => null);
-    if (r?.result?.value === "visible") return context;
+    if (r?.result?.value === "visible") selected.push(c);
   }
-  return contexts[0].context;
+  return (selected.find((c) => c.clientWindow === focused) ?? selected[0] ?? contexts[0]).context;
+}
+
+/** See the header: a window left with none of its tabs would close, and Firefox with the last one. */
+async function keepWindowsOpen(b, uuid) {
+  const { contexts } = await b.send("browsingContext.getTree", { maxDepth: 0 });
+  const ours = (c) => c.url.startsWith(`moz-extension://${uuid}/`);
+  for (const tabs of Map.groupBy(contexts, (c) => c.clientWindow).values()) {
+    if (tabs.every(ours)) {
+      await b.send("browsingContext.create", { type: "tab", referenceContext: tabs[0].context, background: true });
+    }
+  }
+}
+
+const WINDOWS = `[...Services.wm.getEnumerator("navigator:browser")]`; // oldest first
+
+/** Raises the X window with this exact title and gives it the input focus. */
+function focusXWindow(state, title) {
+  execFileSync("xdotool", ["search", "--sync", "--name", `^${title}$`, "windowraise", "windowfocus", "--sync"], {
+    env: { ...process.env, DISPLAY: state.display },
+    timeout: 10_000,
+  });
+}
+
+/**
+ * Gives focus to Firefox's window `n`, counted from 1 as `status` lists them,
+ * or with `n` null to a window of another X client, started on first use.
+ * Returns once Firefox agrees, so the extension's onFocusChanged is under way.
+ * See the header for why xdotool does it and how it finds the window.
+ */
+async function giveFocus(b, state, n) {
+  const chrome = await chromeWindow(b);
+  if (n === null) {
+    if (!state.outsidePid || !alive(state.outsidePid)) {
+      state.outsidePid = daemon(
+        "display",
+        ["-title", OUTSIDE, "-size", "1x1", "-geometry", `+${state.width - 1}+${state.height - 1}`, "xc:gray"],
+        path.join(DIR, "outside.log"),
+        { DISPLAY: state.display },
+      );
+      writeState(state);
+    }
+    focusXWindow(state, OUTSIDE);
+  } else {
+    const marker = `selfcontrol-window-${n}`;
+    const count = await evaluate(
+      b,
+      chrome,
+      `(() => {
+        const win = ${WINDOWS}[${n - 1}];
+        if (win) win.document.title = ${q(marker)};
+        return ${WINDOWS}.length;
+      })()`,
+    );
+    if (n > count) throw new Error(`there are ${count} window(s)`);
+    try {
+      focusXWindow(state, marker);
+    } finally {
+      await evaluate(b, chrome, `${WINDOWS}[${n - 1}].gBrowser.updateTitlebar()`);
+    }
+  }
+  const followed = await evaluate(
+    b,
+    chrome,
+    `(async () => {
+      const want = ${n === null ? "null" : `${WINDOWS}[${n - 1}]`};
+      for (let i = 0; i < 50 && Services.focus.activeWindow !== want; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return Services.focus.activeWindow === want;
+    })()`,
+  );
+  if (!followed) throw new Error("X focus moved, but Firefox did not follow within 5 s");
 }
 
 /** A tab showing one of our pages, where `browser.*` exists; opened in the background if need be. */
@@ -271,7 +377,7 @@ async function extensionTab(b, uuid) {
   return { context, opened: true };
 }
 
-async function install(b, { width, height }) {
+async function install(b) {
   await b.send("webExtension.install", { extensionData: { type: "path", path: EXT_DIR } });
   const win = await chromeWindow(b);
   return evaluate(
@@ -283,9 +389,6 @@ async function install(b, { width, height }) {
       }
       // New extensions land in the overflow menu; the checkpoints look at the badge.
       CustomizableUI.addWidgetToArea(${q(BUTTON_ID)}, CustomizableUI.AREA_NAVBAR);
-      // With no window manager Firefox picks its own size; fill the screen.
-      window.moveTo(0, 0);
-      window.resizeTo(${width}, ${height});
       return WebExtensionPolicy.getByID(${q(EXT_ID)}).mozExtensionHostname;
     })()`,
   );
@@ -303,14 +406,16 @@ function resolveUrl(target, uuid) {
 
 const commands = {
   async start(args) {
-    requireTools(["firefox", "Xvfb", "pulseaudio", "xdotool", "import"]);
+    requireTools(["firefox", "Xvfb", "pulseaudio", "xdotool", "import", "display"]);
     const running = readState();
     if (running && alive(running.firefoxPid)) {
       console.log(`already running on DISPLAY=${running.display}`);
       return;
     }
     // Firefox died on its own; do not leave its display and sink behind.
-    for (const pid of [running?.pulsePid, running?.xvfbPid]) if (pid && alive(pid)) process.kill(pid, "SIGTERM");
+    for (const pid of [running?.outsidePid, running?.pulsePid, running?.xvfbPid]) {
+      if (pid && alive(pid)) process.kill(pid, "SIGTERM");
+    }
     if (args.includes("--fresh")) fs.rmSync(PROFILE, { recursive: true, force: true });
     const [width, height] = (option(args, "--size") ?? "1280x800").split("x").map(Number);
 
@@ -367,7 +472,21 @@ const commands = {
     writeState(state);
     await waitFor(() => fs.readFileSync(LOG, "utf8").includes(`ws://127.0.0.1:${port}`), "Firefox", 60_000);
 
-    state.uuid = await withBrowser((b) => install(b, state), state);
+    state.uuid = await withBrowser(async (b) => {
+      const uuid = await install(b);
+      await evaluate(
+        b,
+        await chromeWindow(b),
+        `// With no window manager Firefox picks its own size; fill the screen.
+        // Only here: on bare X it also takes focus, which \`reload\` must not.
+        window.moveTo(0, 0);
+        window.resizeTo(${width}, ${height});
+        // The Remote Agent set it at startup and will not again; see the header.
+        Services.prefs.setBoolPref("focusmanager.testmode", false);`,
+      );
+      await giveFocus(b, state, 1);
+      return uuid;
+    }, state);
     writeState(state);
     console.log(`running on DISPLAY=${display}, BiDi port ${port}`);
     console.log(`extension ${EXT_ID} at moz-extension://${state.uuid}/`);
@@ -385,7 +504,9 @@ const commands = {
         process.kill(state.firefoxPid, "SIGKILL"),
       );
     }
-    for (const pid of [state.pulsePid, state.xvfbPid]) if (alive(pid)) process.kill(pid, "SIGTERM");
+    for (const pid of [state.outsidePid, state.pulsePid, state.xvfbPid]) {
+      if (pid && alive(pid)) process.kill(pid, "SIGTERM");
+    }
     fs.rmSync(STATE);
     console.log("stopped");
   },
@@ -399,9 +520,12 @@ const commands = {
           await chromeWindow(b),
           `JSON.stringify({
             background: WebExtensionPolicy.getByID(${q(EXT_ID)})?.extension?.backgroundState ?? "not installed",
-            tabs: gBrowser.tabs.map((t) => ({
-              selected: t.selected, audible: t.soundPlaying, muted: t.muted,
-              url: t.linkedBrowser.currentURI.spec, title: t.label,
+            windows: ${WINDOWS}.map((w) => ({
+              focused: w === Services.focus.activeWindow,
+              tabs: w.gBrowser.tabs.map((t) => ({
+                selected: t.selected, audible: t.soundPlaying, muted: t.muted,
+                url: t.linkedBrowser.currentURI.spec, title: t.label,
+              })),
             })),
           })`,
         ),
@@ -409,15 +533,22 @@ const commands = {
     );
     console.log(`DISPLAY=${state.display}, BiDi port ${state.port}, moz-extension://${state.uuid}/`);
     console.log(`event page: ${info.background}`);
-    for (const t of info.tabs) {
-      const flags = [t.audible && "audible", t.muted && "muted"].filter(Boolean).join(",");
-      console.log(`${t.selected ? "*" : " "} ${flags ? `[${flags}] ` : ""}${t.url}  ${t.title}`);
-    }
+    if (!info.windows.some((w) => w.focused)) console.log("focus: outside Firefox");
+    info.windows.forEach((w, i) => {
+      console.log(`window ${i + 1}${w.focused ? " (focused)" : ""}`);
+      for (const t of w.tabs) {
+        const flags = [t.audible && "audible", t.muted && "muted"].filter(Boolean).join(",");
+        console.log(`${t.selected ? "*" : " "} ${flags ? `[${flags}] ` : ""}${t.url}  ${t.title}`);
+      }
+    });
   },
 
   async reload() {
     const state = requireRunning();
-    state.uuid = await withBrowser((b) => install(b, state), state);
+    state.uuid = await withBrowser(async (b) => {
+      await keepWindowsOpen(b, state.uuid);
+      return install(b);
+    }, state);
     writeState(state);
     console.log(`reinstalled from ${EXT_DIR}`);
   },
@@ -425,16 +556,24 @@ const commands = {
   async open(args) {
     const target = args.find((a) => !a.startsWith("--"));
     if (!target) throw new Error("open what?");
-    const { uuid } = requireRunning();
-    const url = resolveUrl(target, uuid);
+    const state = requireRunning();
+    const url = resolveUrl(target, state.uuid);
     await withBrowser(async (b) => {
-      const context = args.includes("--new-tab")
-        ? (await b.send("browsingContext.create", { type: "tab" })).context
-        : await activeTab(b);
+      const type = args.includes("--new-window") ? "window" : args.includes("--new-tab") ? "tab" : null;
+      const context = type ? (await b.send("browsingContext.create", { type })).context : await activeTab(b);
+      if (type === "window") await giveFocus(b, state, await evaluate(b, await chromeWindow(b), `${WINDOWS}.length`));
       const nav = await b.send("browsingContext.navigate", { context, url, wait: "complete" }, 60_000);
       const title = await evaluate(b, context, "document.title").catch(() => "");
       console.log(`${nav.url}  ${title}`);
     });
+  },
+
+  async focus(args) {
+    const state = requireRunning();
+    const target = args[0] ?? "1";
+    if (target !== "away" && !/^[1-9][0-9]*$/.test(target)) throw new Error("focus 1, 2… or away");
+    await withBrowser((b) => giveFocus(b, state, target === "away" ? null : Number(target)));
+    console.log(target === "away" ? "focus is outside Firefox" : `window ${target} has focus`);
   },
 
   async shot(args) {

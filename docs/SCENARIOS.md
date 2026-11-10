@@ -48,10 +48,10 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
 
 1. **The active tab.** Focus a page matching a focus rule → `▶ COUNTING`. Switch tabs →
    `■ stopped`. Switch back → counting again.
-2. **Leaving Firefox.** With the matching tab active, give focus to a window outside Firefox →
-   `■ stopped` (DESIGN §4).
+2. **Leaving Firefox.** With the matching tab active, give focus to a window outside Firefox
+   (`focus away`) → `■ stopped` (DESIGN §4). `focus` gives it back → counting again.
 3. **An unfocused window.** Two Firefox windows, the matching tab active in the one without
-   focus → not counting.
+   focus (`open about:blank --new-window`; `focus 1` and `focus 2` switch) → not counting.
 
 ## Persistence and the lifecycle
 
@@ -81,15 +81,17 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 1. **Blocked at the budget.** Play → at ~30 s the tab goes to the block page, with a quip and a
    countdown that ticks; the log says `⛔ youtube spent — blocked 1 tab(s); unlocks in …`.
 2. **No way back in.** Navigate back → blocked again, also within a second or two of the block
-   (DESIGN §7). Open the site in a new tab → blocked at once, `⛔ 1 re-opened youtube`.
+   (DESIGN §7). Open the site in a new tab → blocked at once,
+   `⛔ blocked re-opened youtube (tab N)`.
    Neither counts. Check it on a focus rule, since on desktop an audible one is redirected
    before it makes a sound: going back in a minute or more after the block logs
    `▷ spent, not counting` rather than `▶ COUNTING`, and the unlock time, on the block page and
    in `dumpUsage()`, stays where it was (DESIGN §7).
 3. **Close instead of block.** A rule with `onExceed: "close"` (the default Instagram rule) →
-   the tab closes at the budget, and reopening it closes it again at once. No tab opens in its
-   place unless it was the last one, in its window on desktop or in Firefox on Android: then
-   one fresh tab replaces it (DESIGN §12).
+   the tab closes at the budget, and reopening it closes it again at once,
+   `⛔ closed re-opened instagram (tab N)`. No tab opens in its place unless it was the last one,
+   in its window on desktop or in Firefox on Android: then one fresh tab replaces it
+   (DESIGN §12).
 4. **Unlocked on time, not before.** Spend the budget across two buckets (say 12 s and 18 s) →
    when the first ages out the rule stays blocked and the countdown keeps going; it unlocks at
    the promised instant with the full 30 s back, and `dumpRaw()` shows `blockedUntil: null`
@@ -98,8 +100,8 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    ages out, and re-blocks soon after.
 6. **An alarm wakes the page.** With nothing attached and the page suspended, the block still
    lands on time: `alarm for youtube fired +Nms vs scheduled`, then one `⛔ youtube spent` line,
-   not one per path that woke with it (DESIGN §7). Note N: Android gave +3 ms awake and +147 ms
-   from suspended; desktop has not been measured (DESIGN §5).
+   not one per path that woke with it (DESIGN §7). N stays within what DESIGN §5 records for the
+   platform.
 7. **The block page unlocks itself.** Leave it open → when the countdown ends it says
    `YouTube is available again` with no reload.
 8. **The return link.** Get blocked on a specific URL → the block page says `You were on …`;
@@ -134,7 +136,8 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    A budget equal to the window is refused with the reason shown, and so is a pattern another
    rule already has, naming that rule.
 6. **History.** Once buckets have folded (a short window helps) → the rule's history shows
-   today's bar and the 7- and 30-day totals; pass time is the lighter segment.
+   today's bar and the 7- and 30-day totals; pass time is a blue segment on top of the used
+   time, and the legend adds `On a pass`.
 
 ## Caps, lock in and passes
 
