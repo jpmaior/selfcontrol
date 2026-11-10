@@ -545,9 +545,9 @@ blocked/   message + live countdown + the return link
 ```
 
 **The pure modules carry the tricky logic** (`accountant`, `rules`, `calendar`, `policy`,
-`transfer`, `tabs`), with no `browser.*` and no `Date.now()` — time is always an argument. That is what
-lets `node --test` cover the arithmetic, every decision about a rule and the whole validation
-story without a browser.
+`transfer`, `tabs`), with no `browser.*` and no `Date.now()` — time is always an argument. That
+is what lets `node --test` cover the arithmetic, every decision about a rule and the whole
+validation story without a browser.
 
 **The options page never messages the background.** It writes `settings`; the background listens
 via `storage.onChanged`, filtered hard to that one key, and re-arms itself. Edits apply without a
@@ -658,9 +658,9 @@ being closed is left out by its id, so the count is right whether or not `tabs.q
 lists it.
 
 Counting every tab is not enough on Android, because the list holds a tab nobody can see.
-Tapping the address bar makes Firefox prepare a tab for the next new tab, and until a new tab
-is opened, extensions see it as a tab of its own: `about:blank`, `width` and `height` 0, no
-title, in a window of its own. Opening the site from the only tab's address bar therefore
+Tapping the address bar makes Firefox prepare the tab its next new tab will become, and until a
+new tab is opened, extensions see it as a tab of its own: `about:blank`, `width` and `height`
+0, no title, in a window of its own. Opening the site from the only tab's address bar therefore
 counted two tabs, opened nothing, and Firefox froze on the closed site with its tab counter at
 0. So on Android an `about:blank` tab at 0×0 does not count. A tab that has loaded keeps its
 size in the background, so it still counts, and so does a blank tab that has been shown. A

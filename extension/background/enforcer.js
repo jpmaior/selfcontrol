@@ -71,11 +71,12 @@ function claim(tab, nowMs) {
 async function act(rule, tab, snapshot) {
   try {
     if (rule.onExceed === "close") {
-      // Never remove the last tab without opening a fresh one first: the
-      // window's on desktop, or Firefox closes with it; the last of all on
-      // Android, or Firefox freezes on the closed site. What counts as a tab
-      // differs too (DESIGN.md §12). tabs.update to about:newtab is not an
-      // option, Firefox rejects privileged about: URLs from extensions.
+      // Never remove the last tab without opening a fresh one first. On
+      // desktop that is the window's last, and Firefox can close with it; on
+      // Android it is the last of all, and Firefox freezes on the closed site.
+      // Which tabs count differs too (DESIGN.md §12). tabs.update to
+      // about:newtab is not an option, Firefox rejects privileged about: URLs
+      // from extensions.
       const perWindow = await lastTabClosesWindow();
       if (needsFreshTab(tab, await browser.tabs.query({}), { perWindow })) {
         const where = perWindow ? { windowId: tab.windowId } : {};
