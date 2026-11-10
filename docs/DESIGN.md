@@ -380,7 +380,8 @@ moment a rule runs out, every tab it owns is swept, so a spent rule has no tab l
 - **`onExceed: "block"`** → `tabs.update(tabId, { url: runtime.getURL("blocked.html?...") })`.
   The default. The message lands, the countdown is visible, and Back does not rescue you because
   the re-navigation is re-blocked.
-- **`onExceed: "close"`** → `tabs.remove(tabId)`.
+- **`onExceed: "close"`** → `tabs.remove(tabId)`, after opening a fresh tab if it is the last
+  one: in its window on desktop, in Firefox on Android (§12).
 
 The "reopen it and it closes again immediately" requirement is the *same guard* running on
 `tabs.onCreated`, so it costs nothing extra.
@@ -636,6 +637,32 @@ anyway. The popup names what the rule does on the device in front of you.
 The platform is detected with `runtime.getPlatformInfo()` (`common/platform.js`), not by
 feature: the property exists and returns `undefined`, which only a tab that is playing could
 expose. If bug 2032751 lands, that one function is what changes.
+
+### Closing the last tab opens a fresh one
+
+`act()` opens a fresh tab before it removes the last one, and what "last" means depends on the
+platform. On desktop it is the last tab in a window: removing it closes the window, and closing
+the last window closes Firefox (`closeWindowWithLastTab`).
+
+On Android that check fired on every close and left a blank tab behind each time (issue #23):
+each tab reports a window of its own there, so `tabs.query({ windowId })` returns just that tab
+and every tab looks like the last. Android has no window to lose, so there the guard is not
+about keeping one alive. It is about the last tab Firefox has: when the extension closed that
+one, Firefox for Android did not go to its home screen but stayed on its browser screen with no
+tab, still drawing the closed site's last frame, and tapping it did nothing (emulator, Firefox
+for Android 159). So on Android the fresh tab is opened only when the tab being closed is the
+last of all, and with other tabs open nothing is left behind. `lastTabClosesWindow()` in
+`platform.js` decides which "last" applies.
+
+The platform is the signal, as it is for `audible`. Feature detection could have keyed on
+`browser.windows`, which is absent on Android, but the guard defends against what desktop does
+with a window's last tab, and no API reports that; the missing namespace would only stand in
+for it.
+
+A tab that is gone by the time the action runs is not a failure, so `act()` asks `tabs.get()`
+before it logs one. The error message is no guide: Firefox for Android answers a second
+`tabs.remove` for a tab it is already closing with `tabs.remove is not supported`. The second
+call came from two paths acting on one tab at the same moment (issue #26).
 
 ---
 

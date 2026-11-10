@@ -87,7 +87,9 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    `▷ spent, not counting` rather than `▶ COUNTING`, and the unlock time, on the block page and
    in `dumpUsage()`, stays where it was (DESIGN §7).
 3. **Close instead of block.** A rule with `onExceed: "close"` (the default Instagram rule) →
-   the tab closes at the budget, and reopening it closes it again at once.
+   the tab closes at the budget, and reopening it closes it again at once. No tab opens in its
+   place unless it was the last one, in its window on desktop or in Firefox on Android: then
+   one fresh tab replaces it (DESIGN §12).
 4. **Unlocked on time, not before.** Spend the budget across two buckets (say 12 s and 18 s) →
    when the first ages out the rule stays blocked and the countdown keeps going; it unlocks at
    the promised instant with the full 30 s back, and `dumpRaw()` shows `blockedUntil: null`
@@ -205,3 +207,7 @@ as YouTube does. On Android both rules count while focused.
    and the accounting is exact.
 6. **Phone-sized pages.** At 360 dp the block page fits with its return link, and the options
    page stacks with Save pinned to the bottom and draws the history chart.
+7. **Closing leaves no blank tab, unless it was the only tab.** With another tab open, a
+   `close` rule's tab closes at the budget and again on reopening, and no blank tab appears:
+   the tab count drops by one each time. With the site as the only tab, closing it leaves
+   exactly one blank tab, and Firefox is usable from it (DESIGN §12).

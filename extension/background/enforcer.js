@@ -13,6 +13,7 @@ import { log } from "./log.js";
 import { ruleForUrl } from "../common/rules.js";
 import { status } from "./store.js";
 import { clock } from "../common/format.js";
+import { lastTabClosesWindow } from "../common/platform.js";
 
 const RULE_PREFIX = "rule:";
 
@@ -69,23 +70,28 @@ function claim(tab, nowMs) {
 async function act(rule, tab, snapshot) {
   try {
     if (rule.onExceed === "close") {
-      // Removing a window's only tab closes the window — and closing the last
-      // window closes Firefox (closeWindowWithLastTab). Open a fresh tab first
-      // so the window survives; tabs.update to about:newtab is not an option,
-      // Firefox rejects privileged about: URLs from extensions as illegal.
-      const siblings = await browser.tabs.query({ windowId: tab.windowId });
-      if (siblings.length <= 1) {
-        await browser.tabs.create({ windowId: tab.windowId, active: false });
-      }
+      // Never remove the last tab without opening a fresh one first. On
+      // desktop "last" means the window's: removing it closes the window, and
+      // closing the last window closes Firefox (closeWindowWithLastTab).
+      // Android has no window to lose, and each tab there reports a window of
+      // its own, so "last" means the last tab Firefox has: closing that one
+      // leaves Firefox frozen on a picture of the closed site (DESIGN.md §12).
+      // tabs.update to about:newtab is not an option, Firefox rejects
+      // privileged about: URLs from extensions as illegal.
+      const scope = (await lastTabClosesWindow()) ? { windowId: tab.windowId } : {};
+      const tabs = await browser.tabs.query(scope);
+      if (tabs.length <= 1) await browser.tabs.create({ ...scope, active: false });
       await browser.tabs.remove(tab.id);
       return "closed";
     }
     await browser.tabs.update(tab.id, { url: blockedUrlFor(rule, snapshot, tab.url) });
     return "blocked";
   } catch (error) {
-    // The tab can vanish between query and action; that is not an error worth
-    // shouting about.
-    log(`could not enforce on tab ${tab.id}:`, error.message);
+    // The tab can vanish between query and action, which is not a failure.
+    // Ask rather than read the message: Firefox for Android says "tabs.remove
+    // is not supported" for a tab it is already closing (DESIGN.md §12).
+    const gone = await browser.tabs.get(tab.id).then(() => false, () => true);
+    if (!gone) log(`could not enforce on tab ${tab.id}:`, error.message);
     return null;
   }
 }
