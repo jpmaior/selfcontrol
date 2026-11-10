@@ -80,8 +80,8 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 
 1. **Blocked at the budget.** Play → at ~30 s the tab goes to the block page, with a quip and a
    countdown that ticks; the log says `⛔ youtube spent — blocked 1 tab(s); unlocks in …`.
-2. **No way back in.** Navigate back → blocked again. Open the site in a new tab → blocked at
-   once, `⛔ 1 re-opened youtube`.
+2. **No way back in.** Navigate back → blocked again, also within a second or two of the block
+   (DESIGN §7). Open the site in a new tab → blocked at once, `⛔ 1 re-opened youtube`.
    Neither counts. Check it on a focus rule, since on desktop an audible one is redirected
    before it makes a sound: going back in a minute or more after the block logs
    `▷ spent, not counting` rather than `▶ COUNTING`, and the unlock time, on the block page and
@@ -95,8 +95,9 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 5. **The drip-feed, on request.** `minUnlockCreditSec: 0` → unlocks as soon as the first bucket
    ages out, and re-blocks soon after.
 6. **An alarm wakes the page.** With nothing attached and the page suspended, the block still
-   lands on time: `alarm for youtube fired +Nms vs scheduled`, then the block. Note N: Android
-   gave +3 ms awake and +147 ms from suspended; desktop has not been measured (DESIGN §5).
+   lands on time: `alarm for youtube fired +Nms vs scheduled`, then one `⛔ youtube spent` line,
+   not one per path that woke with it (DESIGN §7). Note N: Android gave +3 ms awake and +147 ms
+   from suspended; desktop has not been measured (DESIGN §5).
 7. **The block page unlocks itself.** Leave it open → when the countdown ends it says
    `YouTube is available again` with no reload.
 8. **The return link.** Get blocked on a specific URL → the block page says `You were on …`;

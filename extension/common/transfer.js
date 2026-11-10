@@ -80,3 +80,16 @@ export function importSummary(current, incoming) {
     removed: current.map((r) => r.id).filter((id) => !incomingIds.has(id)),
   };
 }
+
+/** The import's confirm step, in words: what replacing `current` costs. */
+export function describeImport(current, incoming) {
+  const { added, kept, removed } = importSummary(current, incoming);
+  const n = (count) => `${count} rule${count === 1 ? "" : "s"}`;
+  const replace = incoming.length === 1 ? "replaces" : "replace";
+  const parts = [`${n(incoming.length)} ${replace} your ${n(current.length)}.`];
+  if (kept.length === 1) parts.push(`${kept[0]} keeps its history;`);
+  if (kept.length > 1) parts.push(`${kept.join(", ")} keep their history;`);
+  if (removed.length > 0) parts.push(`${removed.join(", ")}: history discarded.`);
+  if (added.length > 0) parts.push(`${added.join(", ")}: new.`);
+  return parts.join(" ").replace(/;$/, ".");
+}

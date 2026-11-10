@@ -423,6 +423,30 @@ on that say-so. A rule they have not reported yet is opened by the report primin
 The checkpoint alarm follows `anyCounting()`, which no longer includes a spent rule, so a tab left
 on a spent site costs no wake-ups.
 
+### Each tab is acted on once
+
+Several paths can reach one tab at the same moment. When a rule's alarm wakes the event page,
+the alarm handler sweeps; the observers re-prime, find the spent rule's tab still in front and
+report it in use, which sweeps again; and the startup `settleAndArm` sweeps a third time. On
+a re-open, the navigation guard and the observers' sweep both see the new tab. `tabs.query`
+reports a tab's old URL until Firefox has carried out the first `tabs.update` or `tabs.remove`,
+so each path acted on the same tab again. On the Android emulator one wake-up logged
+`⛔ youtube spent — blocked 1 tab(s)` three times, and a re-open called `tabs.remove` twice; the
+second failed with `tabs.remove is not supported`, which is Firefox for Android's answer for a
+tab it is already closing. Desktop carries the action out sooner, and the same runs there acted
+once.
+
+So the enforcer claims a tab before acting on it (`claim()` in `enforcer.js`), and leaves a tab
+already claimed at the same URL to whoever claimed it. A claim ends when the tab is seen on
+another URL, normally the block page, so going Back into the site is blocked again at once; or
+after five seconds, in case the action never landed. A sweep claims all its tabs straight after
+its query: it acts on them one at a time, because the last-tab check in `act()` depends on the
+earlier ones being gone, and by the time it reaches a later tab its query is out of date.
+
+The claims live in a module-level map, which the event page invariants allow because they are
+ephemeral, derived de-duplication: an unload that drops them costs nothing, since by then the
+actions have landed.
+
 ---
 
 ## 8. `minUnlockCreditSec` — taming the drip-feed

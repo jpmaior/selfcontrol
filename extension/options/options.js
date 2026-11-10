@@ -20,7 +20,7 @@ import { loadRules, saveRules } from "../common/settings.js";
 import { normalizeUsage, usedByDay } from "../background/accountant.js";
 import { addDays, dayKey, startOfDay } from "../common/calendar.js";
 import { clock } from "../common/format.js";
-import { importSummary, parseImport, serializeRules } from "../common/transfer.js";
+import { describeImport, parseImport, serializeRules } from "../common/transfer.js";
 import { reportsAudible } from "../common/platform.js";
 
 /** Days drawn in the history strip; the ledger keeps more (HISTORY_DAYS). */
@@ -591,16 +591,6 @@ const transferSummaryEl = document.getElementById("transfer-summary");
 
 /** The parsed rules waiting for the user to confirm, or null. */
 let pendingImport = null;
-
-function describeImport(current, incoming) {
-  const { added, kept, removed } = importSummary(current, incoming);
-  const n = (count) => `${count} rule${count === 1 ? "" : "s"}`;
-  const parts = [`${n(incoming.length)} replace your ${n(current.length)}.`];
-  if (kept.length > 0) parts.push(`${kept.join(", ")} keep${kept.length === 1 ? "s" : ""} its history;`);
-  if (removed.length > 0) parts.push(`${removed.join(", ")}: history discarded.`);
-  if (added.length > 0) parts.push(`${added.join(", ")}: new.`);
-  return parts.join(" ").replace(/;$/, ".");
-}
 
 async function importFromFile(file) {
   const result = parseImport(await file.text());

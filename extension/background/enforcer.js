@@ -39,6 +39,30 @@ export function blockedUrlFor(rule, snapshot, originalUrl = null) {
 }
 
 /**
+ * Tabs claimed for an action that may not have landed yet: tabId -> { url, atMs }.
+ *
+ * Several paths enforce at once (DESIGN.md §7): on one wake-up the alarm
+ * handler, the observers re-priming and the startup sweep; on a re-open the
+ * navigation guard and the observers as the tab starts counting. tabs.query
+ * keeps reporting a tab's old URL until Firefox has carried out the first
+ * tabs.update or tabs.remove, so each path used to act on the same tab again.
+ *
+ * Ephemeral and derived, so losing it to an unload costs nothing. An entry
+ * goes as soon as the tab is seen on another URL, so going Back into the site
+ * is acted on again, and after SETTLE_MS in case the action never landed.
+ */
+const claimed = new Map();
+const SETTLE_MS = 5_000;
+
+/** True if this caller is the one to act on the tab at its current URL. */
+function claim(tab, nowMs) {
+  const entry = claimed.get(tab.id);
+  if (entry?.url === tab.url && nowMs - entry.atMs < SETTLE_MS) return false;
+  claimed.set(tab.id, { url: tab.url, atMs: nowMs });
+  return true;
+}
+
+/**
  * Apply a rule's enforcement action to one tab. Returns what was done, or null
  * if the tab was left alone.
  */
@@ -77,11 +101,15 @@ export async function enforceRule(rules, rule, nowMs) {
   if (!snapshot.exhausted) return 0;
 
   const tabs = await browser.tabs.query({});
-  const matching = tabs.filter((tab) => ruleForUrl(rules, tab.url)?.id === rule.id);
+  // Every tab is claimed before the first await, while this query is still
+  // current: a later tab is acted on only after the earlier ones, and by then
+  // its URL here may be out of date.
+  const mine = tabs.filter((tab) => ruleForUrl(rules, tab.url)?.id === rule.id && claim(tab, nowMs));
 
   let acted = 0;
-  for (const tab of matching) {
+  for (const tab of mine) {
     if (await act(rule, tab, snapshot)) acted++;
+    else claimed.delete(tab.id);
   }
 
   if (acted > 0) {
@@ -100,15 +128,22 @@ export async function enforceRule(rules, rule, nowMs) {
  * is the same code path as enforceRule — no separate mechanism.
  */
 export async function guardTab(rules, tab, nowMs) {
+  // Seen somewhere else, such as the block page: whatever was done has landed.
+  if (claimed.get(tab?.id)?.url !== tab?.url) claimed.delete(tab?.id);
+
   const rule = ruleForUrl(rules, tab?.url);
   if (!rule) return false;
 
   const snapshot = status(rule, nowMs);
-  if (!snapshot.exhausted) return false;
+  if (!snapshot.exhausted || !claim(tab, nowMs)) return false;
 
   const done = await act(rule, tab, snapshot);
-  if (done) log(`⛔ ${done} re-opened ${rule.id} (tab ${tab.id})`);
-  return Boolean(done);
+  if (!done) {
+    claimed.delete(tab.id);
+    return false;
+  }
+  log(`⛔ ${done} re-opened ${rule.id} (tab ${tab.id})`);
+  return true;
 }
 
 /**
