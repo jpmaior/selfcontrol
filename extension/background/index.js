@@ -204,8 +204,8 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   const rule = rules.find((r) => r.id === ruleId);
   if (!rule) return;
 
-  // Measures the open question in DESIGN.md §5: does Firefox honour sub-minute
-  // alarm delays, or clamp them the way Chrome does?
+  // Firefox does not clamp sub-minute alarm delays the way Chrome does; this is
+  // how a run checks that, against what DESIGN.md §5 records.
   const lateness = now - alarm.scheduledTime;
   log(`alarm for ${ruleId} fired ${lateness >= 0 ? "+" : ""}${lateness}ms vs scheduled`);
 
