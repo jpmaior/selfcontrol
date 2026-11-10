@@ -216,6 +216,8 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 // (lock in, and later a pass) go through here rather than through storage.
 // The options page still never messages the background.
 const handlers = {
+  // Every rule, always: the block page reads a rule missing from this reply as
+  // deleted, and unlocks (DESIGN.md §19).
   async status() {
     const now = Date.now();
     return rules.map((rule) => status(rule, now));

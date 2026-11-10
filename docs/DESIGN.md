@@ -810,6 +810,14 @@ and a page that reloads the site by itself the moment a cap returns is the drip-
 a motor on it. And the link is **not a bypass**: navigating to it runs through `guardTab`
 like any navigation, so a rule that re-blocks re-blocks.
 
+**Deleting the rule unlocks the page too**, rather than leaving it counting down to a time that
+no longer means anything: nothing blocks the site any more. So a status reply that lacks the
+page's rule shows the ordinary unlocked state, without the deleted rule's usage line. Only a
+real reply counts: a failed message changes nothing, and since the background answers only once
+its rules have loaded and swaps the set whole, a rule that still exists is never missing from
+one. The link stays safe through the guard: delete a `youtube.com/shorts` rule while
+`youtube.com` is spent, and the Short it leads back to is blocked again, under YouTube.
+
 The parameter is attacker-shaped input, since anyone can type a block page URL, so
 `returnUrlFrom()` accepts only what `hostnameOf` accepts: `http(s)`, nothing else. A
 `javascript:` or `data:` value rendered as a link would be a script injection into an

@@ -114,8 +114,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    `state re-armed`, the popup shows the new budget, and nothing was reloaded.
 2. **A new rule works.** Add a focus rule with a 1-minute budget for some site and Save →
    sitting on that site blocks it.
-3. **Deleting discards usage.** Delete it and Save → `rule removed: <id> — usage discarded`, and
-   `dumpRaw()` has no `usage:<id>` left.
+3. **Deleting discards usage.** With item 2's block page still open in another tab, delete the
+   rule and Save → `rule removed: <id> — usage discarded`, and `dumpRaw()` has no `usage:<id>`
+   left. Back on the block page, it says `<label> is available again` at once rather than counting
+   down to the old time, with no usage line, and `Back to …` opens the site (DESIGN §19).
 4. **Renaming keeps it.** Rename a rule and Save → its used time is unchanged.
 5. **The form shows what was understood.** Paste `https://www.reddit.com/r/all` into Domains and
    leave the field → it reads `reddit.com`, with a note that only the site is kept and how to
@@ -168,6 +170,9 @@ as YouTube does. On Android both rules count while focused.
    counting toward its own rule. From that Short, moving to `/watch` in-page is blocked at once.
 5. **A subdomain.** A `music.youtube.com` focus rule saved after the `youtube.com` rule →
    focusing `music.youtube.com` counts toward it, not toward YouTube.
+6. **A deleted part hands its pages back.** Both rules spent, the part's block page open; delete
+   the part's rule and Save → that page says `<part> is available again`, and its
+   `Back to …/shorts/…` is blocked at once under the site's name: `⛔ blocked re-opened <site>`.
 
 ## Export and import
 
