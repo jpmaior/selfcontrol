@@ -533,6 +533,7 @@ common/ (shared by the background and the UI pages)
   ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
+  ├─ tabs.js        pure: whether closing a tab needs a fresh one first (§12)
   ├─ settings.js    the `settings` key: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
   ├─ format.js      duration formatting
@@ -544,7 +545,7 @@ blocked/   message + live countdown + the return link
 ```
 
 **The pure modules carry the tricky logic** (`accountant`, `rules`, `calendar`, `policy`,
-`transfer`), with no `browser.*` and no `Date.now()` — time is always an argument. That is what
+`transfer`, `tabs`), with no `browser.*` and no `Date.now()` — time is always an argument. That is what
 lets `node --test` cover the arithmetic, every decision about a rule and the whole validation
 story without a browser.
 
@@ -652,7 +653,21 @@ one, Firefox for Android did not go to its home screen but stayed on its browser
 tab, still drawing the closed site's last frame, and tapping it did nothing (emulator, Firefox
 for Android 159). So on Android the fresh tab is opened only when the tab being closed is the
 last of all, and with other tabs open nothing is left behind. `lastTabClosesWindow()` in
-`platform.js` decides which "last" applies.
+`platform.js` decides which "last" applies, and `needsFreshTab()` in `tabs.js` counts. The tab
+being closed is left out by its id, so the count is right whether or not `tabs.query` still
+lists it.
+
+Counting every tab is not enough on Android, because the list holds a tab nobody can see.
+Tapping the address bar makes Firefox prepare a tab for the next new tab, and until a new tab
+is opened, extensions see it as a tab of its own: `about:blank`, `width` and `height` 0, no
+title, in a window of its own. Opening the site from the only tab's address bar therefore
+counted two tabs, opened nothing, and Firefox froze on the closed site with its tab counter at
+0. So on Android an `about:blank` tab at 0×0 does not count. A tab that has loaded keeps its
+size in the background, so it still counts, and so does a blank tab that has been shown. A
+blank tab created in the background and never shown looks exactly like the hidden one, and is
+ignored with it. The list can be short as well: just after Firefox restarts, tabs it has not
+restored yet can be missing. Both errors lean the same way, towards a fresh tab that was not
+needed, and that is the accepted worst case: one blank tab too many, never the frozen screen.
 
 The platform is the signal, as it is for `audible`. Feature detection could have keyed on
 `browser.windows`, which is absent on Android, but the guard defends against what desktop does

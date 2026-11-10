@@ -210,4 +210,5 @@ as YouTube does. On Android both rules count while focused.
 7. **Closing leaves no blank tab, unless it was the only tab.** With another tab open, a
    `close` rule's tab closes at the budget and again on reopening, and no blank tab appears:
    the tab count drops by one each time. With the site as the only tab, closing it leaves
-   exactly one blank tab, and Firefox is usable from it (DESIGN §12).
+   exactly one blank tab, and Firefox is usable from it, also when the site was opened by
+   typing it into that tab's address bar and when it is reopened while spent (DESIGN §12).

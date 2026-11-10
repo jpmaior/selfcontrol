@@ -14,6 +14,7 @@ import { ruleForUrl } from "../common/rules.js";
 import { status } from "./store.js";
 import { clock } from "../common/format.js";
 import { lastTabClosesWindow } from "../common/platform.js";
+import { needsFreshTab } from "../common/tabs.js";
 
 const RULE_PREFIX = "rule:";
 
@@ -70,17 +71,16 @@ function claim(tab, nowMs) {
 async function act(rule, tab, snapshot) {
   try {
     if (rule.onExceed === "close") {
-      // Never remove the last tab without opening a fresh one first. On
-      // desktop "last" means the window's: removing it closes the window, and
-      // closing the last window closes Firefox (closeWindowWithLastTab).
-      // Android has no window to lose, and each tab there reports a window of
-      // its own, so "last" means the last tab Firefox has: closing that one
-      // leaves Firefox frozen on a picture of the closed site (DESIGN.md §12).
-      // tabs.update to about:newtab is not an option, Firefox rejects
-      // privileged about: URLs from extensions as illegal.
-      const scope = (await lastTabClosesWindow()) ? { windowId: tab.windowId } : {};
-      const tabs = await browser.tabs.query(scope);
-      if (tabs.length <= 1) await browser.tabs.create({ ...scope, active: false });
+      // Never remove the last tab without opening a fresh one first: the
+      // window's on desktop, or Firefox closes with it; the last of all on
+      // Android, or Firefox freezes on the closed site. What counts as a tab
+      // differs too (DESIGN.md §12). tabs.update to about:newtab is not an
+      // option, Firefox rejects privileged about: URLs from extensions.
+      const perWindow = await lastTabClosesWindow();
+      if (needsFreshTab(tab, await browser.tabs.query({}), { perWindow })) {
+        const where = perWindow ? { windowId: tab.windowId } : {};
+        await browser.tabs.create({ ...where, active: false });
+      }
       await browser.tabs.remove(tab.id);
       return "closed";
     }
