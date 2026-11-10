@@ -134,8 +134,19 @@ function strong(text) {
 async function refresh() {
   try {
     const statuses = await browser.runtime.sendMessage({ type: "status" });
-    const mine = statuses?.find((s) => s.id === ruleId);
-    if (!mine) return;
+    // Only a real answer says anything about the rule; anything else leaves
+    // the local tick in charge, as a failed message does.
+    if (!Array.isArray(statuses)) return;
+    const mine = statuses.find((s) => s.id === ruleId);
+    if (!mine) {
+      // Deleted: nothing blocks the site any more, so this is an unlock like
+      // any other, minus a usage line for a rule that no longer exists. Never
+      // a transient: the background answers only once its rules have loaded,
+      // and swaps the set whole (DESIGN.md §19).
+      el.detail.replaceChildren();
+      unlock();
+      return;
+    }
 
     unlockAtMs = mine.unlockAtMs;
     if (mine.exhausted && mine.reason !== reason) {
