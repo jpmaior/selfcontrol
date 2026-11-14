@@ -7,7 +7,8 @@ paused YouTube tab costs nothing. Sitting on Instagram in a background tab costs
 open tabs you are not looking at cost nothing.
 
 When the budget runs out, the site is blocked or the tab is closed — and it stays that way if
-you reopen it. A budget of zero blocks a site outright.
+you reopen it. A budget of zero blocks a site outright. The block page's **Go back** takes you to
+the page you were on before the blocked one.
 
 ---
 

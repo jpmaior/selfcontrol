@@ -118,8 +118,21 @@ h1 {
   border-radius: 0.3rem;
 }
 
-.return {
+.ways {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
   margin-top: 1rem;
+}
+
+/* Unlocked, the blocked page is the way back the user asked for, so it goes
+   first and Go back steps down to a secondary button under it. */
+body.unlocked .go-back {
+  order: 1;
+}
+
+.return {
   font-size: 0.82rem;
   color: var(--faint);
   overflow-wrap: anywhere;
@@ -132,17 +145,23 @@ h1 {
   text-underline-offset: 3px;
 }
 
-/* Unlocked: the way back is the one action on the page. */
+/* The page's actions: Go back, and the link to the blocked page once it
+   unlocks. */
+.go-back,
 .return .button {
-  margin-top: 0.5rem;
   padding: 0.7rem 1.4rem;
   font-size: 0.95rem;
 }
 
+.go-back svg,
 .return .button svg {
   width: 1.05rem;
   height: 1.05rem;
   transition: transform 0.15s;
+}
+
+.go-back:hover svg {
+  transform: translateX(-2px);
 }
 
 .return .button:hover svg {

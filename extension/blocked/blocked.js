@@ -7,6 +7,7 @@
 
 import { clock, countdown, wallClock } from "../common/format.js";
 import { returnUrlFrom } from "../common/rules.js";
+import { blockPageIndex, canGoBack, GO_BACK_STEPS } from "../common/tabs.js";
 
 const params = new URLSearchParams(location.search);
 const ruleId = params.get("rule");
@@ -27,6 +28,7 @@ const el = {
   passes: document.getElementById("passes"),
   passesText: document.getElementById("passes-text"),
   return: document.getElementById("return"),
+  goBack: document.getElementById("go-back"),
 };
 
 /** "youtube.com/watch?v=abc…": hostname and a short path, for the muted line. */
@@ -62,13 +64,33 @@ function renderReturn(unlocked) {
   }
 }
 
-function arrowIcon() {
+/**
+ * Go back: past the blocked page, to the one the user came from (DESIGN.md
+ * §19). A step through history rather than a link, so the page comes back as
+ * it was left, scroll position included, and it needs nothing from the
+ * background. It is no way around a block: where it lands goes through the
+ * navigation guard like any other page.
+ *
+ * Where this page sits in the tab's history is recorded in its own entry on
+ * the first load, while it is still the last entry; afterwards the length
+ * would also count anything the user went forward to.
+ */
+function setUpGoBack() {
+  const index = blockPageIndex(history.state, history.length);
+  history.replaceState({ blockIndex: index }, "");
+  if (!canGoBack(index)) return;
+  el.goBack.prepend(arrowIcon("back"));
+  el.goBack.addEventListener("click", () => history.go(-GO_BACK_STEPS));
+  el.goBack.hidden = false;
+}
+
+function arrowIcon(direction = "forward") {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
   const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", "M5 12h14M13 6l6 6-6 6");
+  path.setAttribute("d", direction === "back" ? "M19 12H5M11 6l-6 6 6 6" : "M5 12h14M13 6l6 6-6 6");
   svg.append(path);
   return svg;
 }
@@ -200,6 +222,7 @@ function unlock() {
   el.unlocked.hidden = false;
   el.meter.style.width = "100%";
   el.passes.hidden = true;
+  el.goBack.classList.replace("primary", "secondary");
   renderReturn(true);
 }
 
@@ -222,6 +245,7 @@ function tick() {
 setHeadline();
 el.quip.textContent = pickQuip();
 renderReturn(false);
+setUpGoBack();
 tick();
 setInterval(tick, 1000);
 

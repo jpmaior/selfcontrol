@@ -1,11 +1,12 @@
 // Unit tests for the last-tab decision a `close` rule makes before it removes
-// a tab (DESIGN.md §12).
+// a tab (DESIGN.md §12), and for how far back the block page's Go back reaches
+// (DESIGN.md §19).
 //   nix develop --command node --test
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { needsFreshTab } from "../extension/common/tabs.js";
+import { blockPageIndex, canGoBack, needsFreshTab } from "../extension/common/tabs.js";
 
 // What lastTabClosesWindow() answers on each platform.
 const DESKTOP = { perWindow: true };
@@ -84,4 +85,36 @@ test("needsFreshTab: two of a rule's tabs, the first closed leaves the second", 
     assert.equal(needsFreshTab(site, [site, second], platform), false);
     assert.equal(needsFreshTab(second, [second], platform), true);
   }
+});
+
+// --- Go back ---------------------------------------------------------------
+
+test("blockPageIndex: freshly opened, the block page is the tab's last entry", () => {
+  // tabs.update pushes it and drops anything forward of it.
+  assert.equal(blockPageIndex(null, 3), 2);
+  assert.equal(blockPageIndex(undefined, 1), 0);
+});
+
+test("blockPageIndex: once recorded, the entry's own index wins over the length", () => {
+  // Blocked in a new tab, a URL typed from the block page, then Back to it:
+  // three entries, but the block page is the second.
+  assert.equal(blockPageIndex({ blockIndex: 1 }, 3), 1);
+  assert.equal(blockPageIndex({ blockIndex: 4 }, 9), 4);
+  assert.equal(blockPageIndex({ blockIndex: 0 }, 2), 0);
+});
+
+test("blockPageIndex: a state it did not write is ignored", () => {
+  for (const state of [{}, { blockIndex: "2" }, { blockIndex: -1 }, { blockIndex: 1.5 }, "2", 7]) {
+    assert.equal(blockPageIndex(state, 3), 2, JSON.stringify(state));
+  }
+});
+
+test("canGoBack: only with a page before the blocked one", () => {
+  // Two steps back from the block page: at 1 that is nothing, the blocked
+  // page having been the tab's first (opened in a new tab); from 2 on it is
+  // the page the user came from.
+  assert.equal(canGoBack(0), false);
+  assert.equal(canGoBack(1), false);
+  assert.equal(canGoBack(2), true);
+  assert.equal(canGoBack(5), true);
 });
