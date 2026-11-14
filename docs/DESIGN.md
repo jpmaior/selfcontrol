@@ -537,7 +537,7 @@ common/ (shared by the background and the UI pages)
   ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
-  ├─ tabs.js        pure: whether closing a tab needs a fresh one first (§12)
+  ├─ tabs.js        pure: whether closing a tab needs a fresh one first (§12), and Go back (§19)
   ├─ settings.js    the `settings` key: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
   ├─ format.js      duration formatting
@@ -545,7 +545,7 @@ common/ (shared by the background and the UI pages)
 
 options/   edit rules, history, export and import
 popup/     per rule: used / budget, state, lock in, passes
-blocked/   message + live countdown + the return link
+blocked/   message + live countdown + the return link + Go back
 ```
 
 **The pure modules carry the tricky logic** (`accountant`, `rules`, `calendar`, `policy`,
@@ -932,6 +932,42 @@ The parameter is attacker-shaped input, since anyone can type a block page URL, 
 `returnUrlFrom()` accepts only what `hostnameOf` accepts: `http(s)`, nothing else. A
 `javascript:` or `data:` value rendered as a link would be a script injection into an
 extension page.
+
+### Go back
+
+Added 2026-11-14. The return link leads to the blocked page, which is no help while the block
+lasts, and a rule with no budget never unlocks (§22). The browser's own Back is no help either:
+it lands on the blocked page, and the guard blocks it again. So the block page also offers
+**Go back**, to the page before the blocked one: on youtube.com, a click on a Short blocked by a
+`youtube.com/shorts` rule leads back to youtube.com.
+
+It is `history.go(-2)`, two steps past the blocked page, rather than a link. `tabs.update`, which
+puts the block page in the tab, pushes a history entry, so the blocked page is always the one
+just before it, and the page before that is where the user came from. A step through history
+needs nothing from the background, and the page comes back as it was left, scroll position
+included. The price is that the page cannot say where the button leads: nothing an extension
+page can read gives the URL of another entry, so the button says `Go back`, not
+`Back to youtube.com`. Remembering each tab's previous URL in the background would buy the label,
+at a `storage.session` write on every navigation of every tab; it was not worth it.
+
+The button shows only when there is a page to go back to. Freshly opened, the block page is the
+tab's last entry, so `history.length` gives its position, but not afterwards: go forward from it
+to another site and come Back, and the length also counts the entry ahead. So the page records its
+position in its own entry's `history.state` on the first load, and reads it back from there on
+any later one (`blockPageIndex()` and `canGoBack()` in `tabs.js`). A Short opened in a new tab
+has only itself behind its block page, and no button.
+
+It is no way around a block: where it lands goes through the guard like any navigation. When the
+page behind is spent too, say every page of a site the user was reading when its rule ran out,
+each press is blocked again one page further back, and the re-block drops what was ahead, so
+pressing it again keeps going back until it reaches a page that is not blocked. It shows on every
+block page, not only one with no budget: a spent `youtube.com/shorts` traps the user the same
+way. Once a rolling block unlocks, `Back to …` is the main action and Go back steps down beside
+it.
+
+Firefox's `tabs.update` can replace the entry instead (`loadReplace`), which would fix the
+browser's own Back, but Firefox for Android's schema has no such property, and the block would
+then drop the blocked page from the tab's history.
 
 ---
 
