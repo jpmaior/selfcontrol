@@ -7,7 +7,7 @@
 
 import { clock, countdown, wallClock } from "../common/format.js";
 import { returnUrlFrom } from "../common/rules.js";
-import { blockPageIndex, canGoBack, GO_BACK_STEPS } from "../common/tabs.js";
+import { blockPageIndex, GO_BACK_STEPS, showsGoBack } from "../common/tabs.js";
 
 const params = new URLSearchParams(location.search);
 const ruleId = params.get("rule");
@@ -66,22 +66,32 @@ function renderReturn(unlocked) {
 
 /**
  * Go back: past the blocked page, to the one the user came from (DESIGN.md
- * §19). A step through history rather than a link, so the page comes back as
- * it was left, scroll position included, and it needs nothing from the
- * background. It is no way around a block: where it lands goes through the
- * navigation guard like any other page.
+ * §19). Only for a site blocked outright, which never unlocks, so its block
+ * page would otherwise be a dead end. A step through history rather than a
+ * link, so the page comes back as it was left, scroll position included, and
+ * it needs nothing from the background. It is no way around a block: where it
+ * lands goes through the navigation guard like any other page.
  *
  * Where this page sits in the tab's history is recorded in its own entry on
  * the first load, while it is still the last entry; afterwards the length
- * would also count anything the user went forward to.
+ * would also count anything the user went forward to. Recorded whatever the
+ * reason, since a refresh can turn a spent budget into an outright block.
  */
+const blockIndex = blockPageIndex(history.state, history.length);
+history.replaceState({ blockIndex }, "");
+
 function setUpGoBack() {
-  const index = blockPageIndex(history.state, history.length);
-  history.replaceState({ blockIndex: index }, "");
-  if (!canGoBack(index)) return;
   el.goBack.prepend(arrowIcon("back"));
   el.goBack.addEventListener("click", () => history.go(-GO_BACK_STEPS));
-  el.goBack.hidden = false;
+}
+
+/** Shown or not, again whenever the reason changes or the page unlocks. */
+function renderGoBack() {
+  el.goBack.hidden = !showsGoBack({
+    reason,
+    unlocked: document.body.classList.contains("unlocked"),
+    index: blockIndex,
+  });
 }
 
 function arrowIcon(direction = "forward") {
@@ -133,6 +143,7 @@ const outright = () => reason === "always";
 function setHeadline() {
   el.headline.textContent = (HEADLINE[reason] ?? HEADLINE.rolling)(label);
   document.body.classList.toggle("outright", outright());
+  renderGoBack();
 }
 
 /** "YouTube: 4:57 of 5:00 used today.", with the two figures in bold. */
@@ -222,7 +233,7 @@ function unlock() {
   el.unlocked.hidden = false;
   el.meter.style.width = "100%";
   el.passes.hidden = true;
-  el.goBack.classList.replace("primary", "secondary");
+  renderGoBack();
   renderReturn(true);
 }
 
@@ -242,10 +253,10 @@ function tick() {
   el.meter.style.width = `${Math.min(100, ((now - blockedAtMs) / span) * 100)}%`;
 }
 
+setUpGoBack();
 setHeadline();
 el.quip.textContent = pickQuip();
 renderReturn(false);
-setUpGoBack();
 tick();
 setInterval(tick, 1000);
 

@@ -126,12 +126,6 @@ h1 {
   margin-top: 1rem;
 }
 
-/* Unlocked, the blocked page is the way back the user asked for, so it goes
-   first and Go back steps down to a secondary button under it. */
-body.unlocked .go-back {
-  order: 1;
-}
-
 .return {
   font-size: 0.82rem;
   color: var(--faint);
@@ -145,8 +139,8 @@ body.unlocked .go-back {
   text-underline-offset: 3px;
 }
 
-/* The page's actions: Go back, and the link to the blocked page once it
-   unlocks. */
+/* The page's actions: Go back while blocked outright, and the link to the
+   blocked page once it unlocks. */
 .go-back,
 .return .button {
   padding: 0.7rem 1.4rem;

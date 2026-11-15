@@ -112,9 +112,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    new `⛔` in the log. The same from a full load. Press the browser's Back from the block page
    instead → blocked again, and `Go back` still reaches `/`. Open a Short in a new tab → no
    `Go back`; type another URL from that block page and come Back to it → still none. With the
-   pages behind the block on a spent rule too, each press is blocked again one page further back,
-   until it reaches one that is not. Once a rolling block unlocks, `Go back` stays, beside
-   `Back to …` (DESIGN §19).
+   pages behind the block blocked too, each press is blocked again one page further back, until
+   it reaches one that is not. A spent budget's block page, with a page behind it → no `Go back`;
+   set that rule's budget to 0 with the page open → `Go back` appears; raise it again → the page
+   unlocks and `Go back` goes, leaving `Back to …` (DESIGN §19).
 
 ## Popup
 

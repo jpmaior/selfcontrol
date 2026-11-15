@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { blockPageIndex, canGoBack, needsFreshTab } from "../extension/common/tabs.js";
+import { blockPageIndex, canGoBack, needsFreshTab, showsGoBack } from "../extension/common/tabs.js";
 
 // What lastTabClosesWindow() answers on each platform.
 const DESKTOP = { perWindow: true };
@@ -117,4 +117,23 @@ test("canGoBack: only with a page before the blocked one", () => {
   assert.equal(canGoBack(1), false);
   assert.equal(canGoBack(2), true);
   assert.equal(canGoBack(5), true);
+});
+
+test("showsGoBack: only on a site blocked outright, with a page to go back to", () => {
+  // A budget of zero never unlocks, so its block page needs a way out; a spent
+  // budget's block page counts down to one instead (DESIGN.md §19).
+  assert.equal(showsGoBack({ reason: "always", unlocked: false, index: 2 }), true);
+  assert.equal(showsGoBack({ reason: "always", unlocked: false, index: 1 }), false);
+});
+
+test("showsGoBack: never on a spent budget's block page", () => {
+  for (const reason of ["rolling", "daily", "weekly"]) {
+    assert.equal(showsGoBack({ reason, unlocked: false, index: 5 }), false, reason);
+  }
+});
+
+test("showsGoBack: gone once the page unlocks", () => {
+  // Raising the budget unlocks the page, and Back to … is the way out then.
+  // The page's reason can still say "always" at that point (issue #44).
+  assert.equal(showsGoBack({ reason: "always", unlocked: true, index: 2 }), false);
 });

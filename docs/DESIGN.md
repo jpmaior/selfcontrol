@@ -937,7 +937,7 @@ extension page.
 
 Added 2026-11-14. The return link leads to the blocked page, which is no help while the block
 lasts, and a rule with no budget never unlocks (§22). The browser's own Back is no help either:
-it lands on the blocked page, and the guard blocks it again. So the block page also offers
+it lands on the blocked page, and the guard blocks it again. So that rule's block page also offers
 **Go back**, to the page before the blocked one: on youtube.com, a click on a Short blocked by a
 `youtube.com/shorts` rule leads back to youtube.com.
 
@@ -958,12 +958,18 @@ any later one (`blockPageIndex()` and `canGoBack()` in `tabs.js`). A Short opene
 has only itself behind its block page, and no button.
 
 It is no way around a block: where it lands goes through the guard like any navigation. When the
-page behind is spent too, say every page of a site the user was reading when its rule ran out,
-each press is blocked again one page further back, and the re-block drops what was ahead, so
-pressing it again keeps going back until it reaches a page that is not blocked. It shows on every
-block page, not only one with no budget: a spent `youtube.com/shorts` traps the user the same
-way. Once a rolling block unlocks, `Back to …` is the main action and Go back steps down beside
-it.
+page behind is blocked too, each press is blocked again one page further back, and the re-block
+drops what was ahead, so pressing it again keeps going back until it reaches a page that is not
+blocked.
+
+It shows only on the block page of a site blocked outright (`showsGoBack()` in `tabs.js`), and
+only until that page unlocks. That is the block page with no way out of its own: nothing to count
+down to, and Back lands on the blocked page again. A spent budget's block page already has one,
+its countdown, and the button was not wanted there: it first shipped on every block page, which
+was not what the maintainer asked for, and was narrowed on 2026-11-15. Once a page unlocks,
+`Back to …` is the way out, so Go back goes. The page decides again whenever its reason changes,
+since a budget set to zero turns an open spent-budget page into an outright one. The page records
+its position in history whatever the reason, so that switch still finds it.
 
 Firefox's `tabs.update` can replace the entry instead (`loadReplace`), which would fix the
 browser's own Back, but Firefox for Android's schema has no such property, and the block would
