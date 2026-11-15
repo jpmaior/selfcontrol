@@ -1,5 +1,6 @@
 // Which open tabs count when a `close` rule decides whether the tab it closes
-// is the last one, and how far back the block page's Go back can reach. PURE:
+// is the last one, and when the block page offers Go back and how far back it
+// reaches. PURE:
 // no `browser.*` and no `history`; the caller passes the tabs, the platform and
 // the history it sees, so both platforms are covered by node --test.
 //
@@ -54,4 +55,14 @@ export const GO_BACK_STEPS = 2;
 
 export function canGoBack(index) {
   return index >= GO_BACK_STEPS;
+}
+
+/**
+ * Go back is for a site blocked outright, whose block page never unlocks on
+ * its own (DESIGN.md §19, §22). A spent budget's block page counts down to the
+ * way out instead, and once any block page unlocks, Back to … is the way out.
+ * `index` is blockPageIndex()'s answer.
+ */
+export function showsGoBack({ reason, unlocked, index }) {
+  return reason === "always" && !unlocked && canGoBack(index);
 }
