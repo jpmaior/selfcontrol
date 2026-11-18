@@ -1,6 +1,6 @@
 // Which open tabs count when a `close` rule decides whether the tab it closes
-// is the last one, and when the block page offers Go back and how far back it
-// reaches. PURE:
+// is the last one, when the block page offers Go back and how far back it
+// reaches, and which limit the block page describes. PURE:
 // no `browser.*` and no `history`; the caller passes the tabs, the platform and
 // the history it sees, so both platforms are covered by node --test.
 //
@@ -65,4 +65,18 @@ export function canGoBack(index) {
  */
 export function showsGoBack({ reason, unlocked, index }) {
   return reason === "always" && !unlocked && canGoBack(index);
+}
+
+/**
+ * Which limit the block page describes, given the one it describes now and a
+ * status reply for its rule. A spent rule is described by what blocks it now,
+ * so a daily cap that fills while the rolling one blocks retitles the page.
+ * Once the rule is open again the page keeps its limit, so a page that said
+ * "done for today" goes on describing the daily cap, with one exception: a
+ * raised zero budget (DESIGN.md §22). "always" describes no time allowed, which
+ * is no longer true, so the page moves to the cap with the least left.
+ */
+export function describedReason(current, { exhausted, reason, binding }) {
+  if (exhausted) return reason;
+  return current === "always" ? (binding ?? "rolling") : current;
 }

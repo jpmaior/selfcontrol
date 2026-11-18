@@ -7,7 +7,7 @@
 
 import { clock, countdown, wallClock } from "../common/format.js";
 import { returnUrlFrom } from "../common/rules.js";
-import { blockPageIndex, GO_BACK_STEPS, showsGoBack } from "../common/tabs.js";
+import { blockPageIndex, describedReason, GO_BACK_STEPS, showsGoBack } from "../common/tabs.js";
 
 const params = new URLSearchParams(location.search);
 const ruleId = params.get("rule");
@@ -194,12 +194,14 @@ async function refresh() {
     }
 
     unlockAtMs = mine.unlockAtMs;
-    if (mine.exhausted && mine.reason !== reason) {
+    const next = describedReason(reason, mine);
+    if (next !== reason) {
+      reason = next;
       // A different constraint took over (say the daily cap filled while the
       // rolling one was blocking): retitle rather than count down to the
-      // wrong instant.
-      reason = mine.reason;
-      setHeadline();
+      // wrong instant. A rule that is open again keeps the unlocked headline,
+      // which unlock() below sets; only the usage line follows the new limit.
+      if (mine.exhausted) setHeadline();
     }
     el.detail.replaceChildren(...describeCap(mine));
 

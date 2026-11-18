@@ -537,7 +537,8 @@ common/ (shared by the background and the UI pages)
   ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
-  ├─ tabs.js        pure: whether closing a tab needs a fresh one first (§12), and Go back (§19)
+  ├─ tabs.js        pure: whether closing a tab needs a fresh one first (§12), Go back (§19),
+  │                 and which limit the block page describes (§22)
   ├─ settings.js    the `settings` key: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
   ├─ format.js      duration formatting
@@ -1138,6 +1139,12 @@ already re-runs everything (§10).
 out of the block page's URL, since `"null"` read back as now. The block page drops its meter and
 countdown and says what lifts the block, the popup says `always blocked` and `no time allowed`,
 and the logs say `no budget, stays blocked`.
+
+Raising the budget with the block page open unlocks it on the next refresh, like any other
+unlock, and its usage line moves to the cap with the least left (`describedReason()` in
+`tabs.js`). It used to keep saying the site had no time allowed for as long as the page stayed
+open, because the page changed what it describes only when a reply said the rule was spent. A
+spent budget's page that unlocks keeps describing the cap that blocked it.
 
 ### Everything else is the same path
 

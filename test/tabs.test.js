@@ -6,7 +6,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { blockPageIndex, canGoBack, needsFreshTab, showsGoBack } from "../extension/common/tabs.js";
+import {
+  blockPageIndex,
+  canGoBack,
+  describedReason,
+  needsFreshTab,
+  showsGoBack,
+} from "../extension/common/tabs.js";
 
 // What lastTabClosesWindow() answers on each platform.
 const DESKTOP = { perWindow: true };
@@ -136,4 +142,30 @@ test("showsGoBack: gone once the page unlocks", () => {
   // Raising the budget unlocks the page, and Back to … is the way out then.
   // The page's reason can still say "always" at that point (issue #44).
   assert.equal(showsGoBack({ reason: "always", unlocked: true, index: 2 }), false);
+});
+
+// What the block page's status reply carries, for describedReason().
+const spent = (reason) => ({ exhausted: true, reason, binding: null });
+const open = (binding) => ({ exhausted: false, reason: null, binding });
+
+test("describedReason: a spent rule is described by what blocks it now", () => {
+  assert.equal(describedReason("rolling", spent("rolling")), "rolling");
+  // The daily cap filled while the rolling one was blocking.
+  assert.equal(describedReason("rolling", spent("daily")), "daily");
+  // The budget was set to zero with the page open.
+  assert.equal(describedReason("rolling", spent("always")), "always");
+});
+
+test("describedReason: raising a zero budget leaves the outright block behind", () => {
+  // The page unlocks, and its usage line must stop saying the site has no
+  // time allowed (issue #44): it describes the cap with the least left.
+  assert.equal(describedReason("always", open("rolling")), "rolling");
+  assert.equal(describedReason("always", open("daily")), "daily");
+});
+
+test("describedReason: a spent budget's page keeps its cap once it unlocks", () => {
+  // Unlocked by its own countdown, a page that said "done for today" goes on
+  // describing the daily cap rather than whichever has the least left.
+  assert.equal(describedReason("daily", open("rolling")), "daily");
+  assert.equal(describedReason("rolling", open("weekly")), "rolling");
 });
