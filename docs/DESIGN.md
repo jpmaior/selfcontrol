@@ -929,6 +929,13 @@ its rules have loaded and swaps the set whole, a rule that still exists is never
 one. The link stays safe through the guard: delete a `youtube.com/shorts` rule while
 `youtube.com` is spent, and the Short it leads back to is blocked again, under YouTube.
 
+**An unlocked page blocks again** when its rule is spent again while it is open: a pass ends, Lock
+in is pressed, an outright block's budget goes back to zero. The next refresh that finds the rule
+spent puts the page back as it was, the link back to text and a countdown, from that moment, to
+the new unlock instant. Until 2026-11-18 nothing undid the unlock, so the page went on saying the
+site was available, with a live `Back to …` and the old usage line under it, while the guard
+blocked the link (issue #36). Never a way around the block, but the page said what was not so.
+
 The parameter is attacker-shaped input, since anyone can type a block page URL, so
 `returnUrlFrom()` accepts only what `hostnameOf` accepts: `http(s)`, nothing else. A
 `javascript:` or `data:` value rendered as a link would be a script injection into an

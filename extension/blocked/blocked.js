@@ -214,7 +214,8 @@ async function refresh() {
         ? "You have 1 pass left this week, in the toolbar popup."
         : `You have ${left} passes left this week, in the toolbar popup.`;
 
-    if (!mine.exhausted) unlock();
+    if (mine.exhausted) block();
+    else unlock();
   } catch {
     // Background asleep or mid-restart; the local tick carries us until the
     // next refresh succeeds.
@@ -237,6 +238,26 @@ function unlock() {
   el.passes.hidden = true;
   renderGoBack();
   renderReturn(true);
+}
+
+/**
+ * unlock() undone: the rule is spent again while the page is open, because a
+ * pass ended, Lock in was pressed or the budget was lowered. Without it the
+ * page went on saying the site was available when it was not (DESIGN.md §19).
+ * The countdown starts over from now, to the instant refresh() just set.
+ */
+function block() {
+  if (!document.body.classList.contains("unlocked")) return;
+  document.body.classList.remove("unlocked");
+  blockedAtMs = Date.now();
+  el.icon.src = "../icons/blocked.svg";
+  el.quip.textContent = pickQuip();
+  el.countdownText.hidden = false;
+  el.countdown.hidden = false;
+  el.unlocked.hidden = true;
+  setHeadline();
+  renderReturn(false);
+  tick();
 }
 
 function tick() {
