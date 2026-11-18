@@ -217,7 +217,8 @@ Serve a page on `127.0.0.1` and give the rule under test that domain with `setLi
    even when a greyed field holds a value Save would otherwise refuse. Type 5 back → everything
    is editable again with the values it had. A blank Budget is refused, not read as 0.
 5. **Raising the budget lifts it.** With the block page open, raise the budget → the page says
-   `<label> is available again` on its next refresh, `Back to …` opens the site, and it counts.
+   `<label> is available again` on its next refresh, and its usage line gives the time used of
+   the new budget instead of `no time allowed`; `Back to …` opens the site, and it counts.
 
 ## Export and import
 
