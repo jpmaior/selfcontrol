@@ -88,6 +88,10 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
    only the options page in a second window. With another tab beside the block page, nothing
    opens: `updating to v…` alone. From a version without it, the window closes, and Firefox
    with it (DESIGN §12).
+10. **A load finishing does not wake it** *(desktop)*. Navigate a tab to a page that takes a
+    while to finish loading (a local server holding the response open for 10 s), and
+    `terminate` while it loads → once it has loaded, `status` still says the event page is
+    stopped. Only a change of `audible` or `url` wakes it (DESIGN §3).
 
 ## Enforcement
 

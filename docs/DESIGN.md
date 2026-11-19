@@ -154,6 +154,11 @@ Every tab carries an `audible` boolean, and we subscribe once with a property fi
 browser.tabs.onUpdated.addListener(handler, { properties: ["audible", "url"] });
 ```
 
+Those two and nothing else, because each property in the filter is a reason to wake the event
+page. `status` and `mutedInfo` were in it at first, from the validation run below; neither is
+read, and `status` changes on every page load in every tab. Muting needs no event of its own:
+a muted tab stops being `audible`.
+
 Why this over a content script:
 
 - No injection, **no host permissions** (see above).

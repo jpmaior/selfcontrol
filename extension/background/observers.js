@@ -75,9 +75,10 @@ export async function start({ rules: ruleset, onChange }) {
   rules = ruleset;
   onCountingChange = onChange;
 
-  // Filtering at the source keeps us from waking for every title/favicon change
-  // (on desktop; Android wakes regardless, see onTabUpdated).
-  onTabUpdated(handleTabUpdated, ["audible", "mutedInfo", "url", "status"]);
+  // Only what handleTabUpdated() acts on. Anything more wakes the event page
+  // for nothing: `status` alone on every page load in every tab (on desktop;
+  // Android wakes regardless, see onTabUpdated).
+  onTabUpdated(handleTabUpdated, ["audible", "url"]);
   browser.tabs.onRemoved.addListener(handleTabRemoved);
   browser.tabs.onActivated.addListener(() => resolveFocus("tab activated"));
 
