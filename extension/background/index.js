@@ -9,7 +9,7 @@ import { isCountingNow, modeOf, onTabUpdated, platform, setRules, start } from "
 import { clock, countdown, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { blocksOutright, validateRule } from "../common/rules.js";
-import { enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
+import { clearRemovedAlarms, enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
 import { lastTabClosesWindow } from "../common/platform.js";
 import { needsTabAfterUpdate, windowsAnUpdateCloses } from "../common/tabs.js";
 import {
@@ -42,8 +42,11 @@ log(`event page started — v${browser.runtime.getManifest().version}`);
 const loaded = (async () => {
   rules = await loadRules();
   await load(rules);
-  // Before any handler can write a ledger, so nothing it removes is live.
+  // Before any handler can write a ledger or sync an alarm, so nothing either
+  // removes is live.
   await sweep(rules);
+  const alarms = await clearRemovedAlarms(rules);
+  if (alarms.length > 0) log(`cleared the alarm of deleted rule(s): ${alarms.join(", ")}`);
 })();
 
 // Not awaited, and deliberately started with an empty rule set: an MV3 event
@@ -147,6 +150,7 @@ onRulesChanged(async (next, previous) => {
   flush(now);
 
   for (const id of forgetRemoved(before, next)) log(`rule removed: ${id} — usage discarded`);
+  for (const id of await clearRemovedAlarms(next)) log(`rule removed: ${id} — alarm cleared`);
 
   rules = next;
   await load(rules);
@@ -264,10 +268,15 @@ const handlers = {
   async lockIn({ ruleId }) {
     const rule = rules.find((r) => r.id === ruleId);
     if (!rule) return { ok: false, error: `no such rule: ${ruleId}` };
-    // The popup offers no lock-in here, but one armed before the budget went
-    // to zero can still be confirmed (DESIGN.md §22).
-    if (blocksOutright(rule)) return { ok: false, error: `${rule.label} has no budget to lock in.` };
+    // The popup offers no lock-in on a spent rule, but one armed before it ran
+    // out, or before its budget went to zero (DESIGN.md §22), can still be
+    // confirmed. Refused by the decision that withholds the offer
+    // (policy.canLockIn), rather than spending nothing and saying it worked.
     const now = Date.now();
+    if (!status(rule, now).lockIn) {
+      const error = blocksOutright(rule) ? `${rule.label} has no budget to lock in.` : `${rule.label} is already blocked.`;
+      return { ok: false, error };
+    }
     const ms = lockInRule(rule, now);
     flush(now);
     const snapshot = status(rule, now);

@@ -155,6 +155,24 @@ export async function guardTab(rules, tab, nowMs) {
   return true;
 }
 
+/**
+ * Clear the alarm of every rule not in `rules`, and return their ids. Run with
+ * the rules just loaded at every start, and after a save, with the store's
+ * forgetting of their usage (DESIGN.md §6). The handler ignores an alarm for
+ * an unknown rule, so a leftover only costs a wake-up, but deleting a rule
+ * should leave nothing of it behind. Read from the alarms rather than from the
+ * removed rules, so one an earlier build left, or a deletion whose event never
+ * ran, goes too.
+ */
+export async function clearRemovedAlarms(rules) {
+  const ids = new Set(rules.map((rule) => rule.id));
+  const removed = (await browser.alarms.getAll())
+    .map((alarm) => ruleIdFromAlarm(alarm.name))
+    .filter((id) => id !== null && !ids.has(id));
+  await Promise.all(removed.map((id) => browser.alarms.clear(ruleAlarmFor(id))));
+  return removed;
+}
+
 /** Each rule's sync in progress, so the next one waits for it: ruleId -> promise. */
 const syncing = new Map();
 

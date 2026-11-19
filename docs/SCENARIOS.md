@@ -45,6 +45,11 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
    both have stopped, and `dumpUsage()` grows one second per second.
 5. **Muting stops the clock.** Mute the playing tab → `■ stopped`. This is the accepted loophole
    (DESIGN §3); if it ever counts, that section and the README are wrong.
+6. **A failed focus query still reports.** On a local tone page in the active tab, make the focus
+   query fail from the event page, `eval --bg 'browser.windows.getLastFocused = () =>
+   Promise.reject(new Error("x"))'`, then start the tone → `could not resolve focus`, and
+   `▶ COUNTING … — active tab updated` at the same second, not at the next tab event (DESIGN §4).
+   `terminate` afterwards, so the page starts again without the stub.
 
 ## Counting while focused *(desktop)*
 
@@ -172,6 +177,11 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    **Import keeps the rest:** import a file sharing some ids with the saved rules, with the event
    page terminated → those rules' `usage:<id>` is unchanged, and only the rules the file leaves out
    log `rule removed`.
+   **The alarm goes too:** in each of these, `browser.alarms.getAll()` keeps no `rule:<id>` for
+   a deleted rule. Awake, the save logs `rule removed: <id> — alarm cleared`; asleep, the start the
+   save causes logs `cleared the alarm of deleted rule(s): <id>`. So does a start that finds one
+   left behind: `browser.alarms.create("rule:ghost", { when: Date.now() + 3600e3 })`, `terminate`,
+   wake it → `cleared the alarm of deleted rule(s): ghost` (DESIGN §6).
 4. **Renaming keeps it.** Rename a rule and Save → its used time is unchanged.
 5. **The form shows what was understood.** Paste `https://www.reddit.com/r/all` into Domains and
    leave the field → it reads `reddit.com`, with a note that only the site is kept and how to
@@ -218,6 +228,12 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 8. **Pass time and the caps.** `countsTowardCaps: true` with a 3-minute daily cap → the block
    lands mid-pass at 3 minutes, `done for today`. With `false` the daily total does not move
    during the pass, but the rolling window still counts it (DESIGN §17).
+9. **A confirm that comes too late.** In the popup (`open popup` gives it a tab), arm Lock in,
+   then spend the rule with a `lockIn` message from the page before confirming → the confirm
+   reads `<label> is already blocked.` for ten seconds, through the refreshes, and the log has one
+   `🔒 locked in`, no `spent 0:00`. The same with Use a pass, using the pass by message first →
+   `That pass is not available right now.` With `browser.runtime.sendMessage` made to reject for
+   the action → `Could not lock in.`, and no unhandled rejection (DESIGN §16).
 
 ## Part of a site
 

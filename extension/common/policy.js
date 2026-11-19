@@ -217,6 +217,9 @@ export function holdAfter(decision) {
 
 // --- crediting use (DESIGN.md §7) -------------------------------------------
 
+/** creditInUse()'s bound on its steps. A real interval takes a handful. */
+const MAX_STEPS = 10_000;
+
 /**
  * Credit `[fromMs, toMs)` of use to `usage`, but only up to the instant the
  * rule runs out: a spent rule never counts. Mutates `usage`, and returns the
@@ -242,8 +245,12 @@ export function holdAfter(decision) {
  * a rule that is not spent and is closed when it runs out, so a rule spent at
  * its start had its limits changed under it, by a settings change whose own
  * instant is the close: the time was allowed when it was used.
+ *
+ * Stopping at `maxSteps` before `toMs` adds `stoppedAtLimit: true`: what was
+ * credited stands, but whether the rule ran out after it was never asked, so
+ * there is no hold and the caller should say so.
  */
-export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity } = {}) {
+export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity, maxSteps = MAX_STEPS } = {}) {
   if (!(toMs > fromMs)) return { creditedMs: 0, ranOutAtMs: null };
   const startMs = Math.max(fromMs, toMs - maxChunkMs);
 
@@ -256,7 +263,7 @@ export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity }
   // strictly later while the rule is open, so this always ends; the bound only
   // keeps a bug there from hanging the event page.
   let at = startMs;
-  for (let step = 0; at < toMs && step < 10_000; step++) {
+  for (let step = 0; at < toMs && step < maxSteps; step++) {
     const decision = evaluate(rule, usage, at, { counting: true });
     if (decision.exhausted) {
       const hold = holdAfter(decision);
@@ -267,6 +274,7 @@ export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity }
     commit(usage, at, until, { pass: usage.pass });
     at = until;
   }
+  if (at < toMs) return { creditedMs: at - startMs, ranOutAtMs: null, stoppedAtLimit: true };
   return { creditedMs: at - startMs, ranOutAtMs: null };
 }
 

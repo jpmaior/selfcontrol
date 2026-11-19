@@ -248,6 +248,12 @@ export function usePassOnRule(rule, nowMs) {
 function settle(rule, fromMs, toMs) {
   const usage = ledgerFor(rule.id);
   const result = creditInUse(rule, usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS });
+  // Only a bug in policy.evaluate() gets here, and the rule is then charged as
+  // if it never ran out, with no hold. Here and not in projection(), which the
+  // popup reads every second: the settle that follows says it once.
+  if (result.stoppedAtLimit) {
+    warn(`${rule.id}: gave up crediting at the step limit, +${clock(result.creditedMs)} of ${clock(toMs - fromMs)}`);
+  }
   fold(usage, toMs, rule.windowSec * 1000);
   dirty.add(rule.id);
   return result;
