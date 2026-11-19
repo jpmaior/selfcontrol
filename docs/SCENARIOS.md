@@ -275,3 +275,9 @@ Serve a page on `127.0.0.1` and give the rule under test that domain with `setLi
    the tab count drops by one each time. With the site as the only tab, closing it leaves
    exactly one blank tab, and Firefox is usable from it, also when the site was opened by
    typing it into that tab's address bar and when it is reopened while spent (DESIGN §12).
+8. **An update leaves Firefox usable.** With a block page as the only tab, `reload`, which
+   unloads the add-on as an update does → the new version logs `opened a tab: the update closed
+   the last one`, and Firefox shows a blank tab, the tab counter at 1, from which a site opens.
+   The same after tapping the address bar first, so that its hidden tab is listed. With another
+   tab open, nothing opens and Firefox shows that tab. On Firefox's home screen with no tab, the
+   home screen stays and one blank tab joins the tray (DESIGN §12).

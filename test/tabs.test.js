@@ -1,5 +1,6 @@
 // Unit tests for the last-tab decision a `close` rule makes before it removes
-// a tab (DESIGN.md §12), and for how far back the block page's Go back reaches
+// a tab and the one an update makes once it has closed the add-on's pages
+// (DESIGN.md §12), and for how far back the block page's Go back reaches
 // (DESIGN.md §19).
 //   nix develop --command node --test
 
@@ -11,6 +12,7 @@ import {
   canGoBack,
   describedReason,
   needsFreshTab,
+  needsTabAfterUpdate,
   showsGoBack,
 } from "../extension/common/tabs.js";
 
@@ -94,6 +96,38 @@ test("needsFreshTab: two of a rule's tabs, the first closed leaves the second", 
 });
 
 // --- Go back ---------------------------------------------------------------
+
+// runtime.onInstalled's details, as Firefox passes them.
+const updated = { reason: "update", previousVersion: "0.3.3" };
+
+test("needsTabAfterUpdate android: an update that left no tab opens one", () => {
+  // The add-on's pages close with the old version; when one was the only tab,
+  // Firefox for Android is left on its last frame with 0 tabs (issue #37).
+  assert.equal(needsTabAfterUpdate(updated, [], ANDROID), true);
+});
+
+test("needsTabAfterUpdate android: the tab prepared for the address bar does not count", () => {
+  assert.equal(needsTabAfterUpdate(updated, [prepared], ANDROID), true);
+});
+
+test("needsTabAfterUpdate android: any tab the user has is enough", () => {
+  assert.equal(needsTabAfterUpdate(updated, [tab(2, 2)], ANDROID), false);
+  assert.equal(needsTabAfterUpdate(updated, [prepared, tab(2, 2)], ANDROID), false);
+  const shown = { ...tab(3, 3, "about:blank"), title: "" };
+  assert.equal(needsTabAfterUpdate(updated, [shown], ANDROID), false);
+});
+
+test("needsTabAfterUpdate android: only an update closed pages of ours", () => {
+  // A first install had no pages open, and a Firefox update does not close them.
+  for (const reason of ["install", "browser_update"]) {
+    assert.equal(needsTabAfterUpdate({ reason }, [], ANDROID), false);
+  }
+});
+
+test("needsTabAfterUpdate desktop: never, the window went with its last tab", () => {
+  assert.equal(needsTabAfterUpdate(updated, [], DESKTOP), false);
+  assert.equal(needsTabAfterUpdate(updated, [tab(2, 1)], DESKTOP), false);
+});
 
 test("blockPageIndex: freshly opened, the block page is the tab's last entry", () => {
   // tabs.update pushes it and drops anything forward of it.

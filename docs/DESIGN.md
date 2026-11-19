@@ -582,8 +582,8 @@ common/ (shared by the background and the UI pages)
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14),
   │                 and how much of an interval counts (§7)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
-  ├─ tabs.js        pure: whether closing a tab needs a fresh one first (§12), Go back (§19),
-  │                 and which limit the block page describes (§22)
+  ├─ tabs.js        pure: whether closing a tab, or an update, needs a fresh one (§12), Go
+  │                 back (§19), and which limit the block page describes (§22)
   ├─ settings.js    the `settings` key: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
   ├─ format.js      duration formatting
@@ -747,6 +747,33 @@ A tab that is gone by the time the action runs is not a failure, so `act()` asks
 before it logs one. The error message is no guide: Firefox for Android answers a second
 `tabs.remove` for a tab it is already closing with `tabs.remove is not supported`. The second
 call came from two paths acting on one tab at the same moment (issue #26).
+
+### An update that closes the last tab opens one
+
+Firefox closes an add-on's own pages when it unloads it, for an update as for a reload. With a
+block page as the only tab, Firefox for Android is left as in the last-tab case above: the
+closed page's last frame, a tab counter of 0, taps ignored until the tab tray is opened (issue
+#37). Seen on the emulator with a reload and with a real update, a signed 0.3.2 updating to
+0.3.3 from `updates.json`.
+
+The old version cannot see it coming. During a reload neither `runtime.onSuspend` nor
+`runtime.onUpdateAvailable` fired. `onUpdateAvailable` would fire before a real update, but
+only in a version that already has it, it postpones the update until that version calls
+`runtime.reload()`, and it cannot be tried without two signed versions. So the new version
+repairs it instead: its `runtime.onInstalled` comes with `reason: "update"` (for a reload too)
+after the old pages are gone, and when `needsTabAfterUpdate()` in `tabs.js` finds no tab but
+the hidden one prepared for the address bar, it opens a tab. Inactive is enough: with no tab
+selected, Firefox shows it at once, and is usable from it. The frozen frame lasts as long as the
+new version takes to start, which on the emulator was too quick to see. The blocked site is
+never involved; what replaces the block page is a blank tab.
+
+Firefox for Android on its home screen with no tab open looks the same to `tabs.query`, so an
+update installed then adds one blank tab to the tab tray. The home screen stays in front
+(checked on the emulator). That is the accepted worst case of the section above: one blank tab
+too many, never the frozen screen.
+
+On desktop the new version does nothing. The window went with its last tab, and with the last
+window Firefox quits, so nothing is left frozen for it to repair (issue #50).
 
 ---
 

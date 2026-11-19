@@ -1,8 +1,9 @@
 // Which open tabs count when a `close` rule decides whether the tab it closes
-// is the last one, when the block page offers Go back and how far back it
-// reaches, and which limit the block page describes. PURE:
-// no `browser.*` and no `history`; the caller passes the tabs, the platform and
-// the history it sees, so both platforms are covered by node --test.
+// is the last one, and when an update decides whether it left Firefox with
+// none; when the block page offers Go back and how far back it reaches, and
+// which limit the block page describes. PURE: no `browser.*` and no `history`;
+// the caller passes the tabs, the platform and the history it sees, so both
+// platforms are covered by node --test.
 //
 // The tab list cannot be taken at its word on Android: it carries a hidden
 // tab Firefox prepares when the address bar is tapped, and counting it left
@@ -19,10 +20,24 @@
  */
 export function needsFreshTab(closing, tabs, { perWindow }) {
   const others = tabs.filter((tab) => tab.id !== closing.id);
-  const left = perWindow
-    ? others.filter((tab) => tab.windowId === closing.windowId)
-    : others.filter((tab) => !preparedForAddressBar(tab));
-  return left.length === 0;
+  return perWindow ? !others.some((tab) => tab.windowId === closing.windowId) : noTabLeft(others);
+}
+
+/**
+ * Whether the extension must open a tab as it starts, given its
+ * runtime.onInstalled `details`. An update closes the add-on's own pages, and
+ * when one was the last tab, Firefox for Android stays frozen on it with no
+ * tab (DESIGN.md §12). By the time the new version runs they are gone, so
+ * `tabs` is what Firefox has left. `perWindow` as for needsFreshTab(): on
+ * desktop the window went with its last tab, and nothing is left frozen.
+ */
+export function needsTabAfterUpdate({ reason }, tabs, { perWindow }) {
+  return reason === "update" && !perWindow && noTabLeft(tabs);
+}
+
+/** Firefox for Android has no tab the user can see. */
+function noTabLeft(tabs) {
+  return tabs.every(preparedForAddressBar);
 }
 
 /**
