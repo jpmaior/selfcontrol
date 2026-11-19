@@ -670,7 +670,7 @@ common/ (shared by the background and the UI pages)
   ├─ blockpage.js   pure: the block page's Go back (§19) and which limit it describes (§22)
   ├─ settings.js    the `settings` key: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
-  ├─ format.js      duration formatting
+  ├─ format.js      durations and times, how a block is worded, bold runs of text
   └─ theme.css      colours, pills, captions, buttons: shared by every page
 
 options/   edit rules, history, export and import
