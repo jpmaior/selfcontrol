@@ -100,6 +100,17 @@ export async function load(rules) {
 }
 
 /**
+ * Load the ledgers of the rules in `rules` that have none yet, for a settings
+ * change. The others are left as they are: their ledger in memory is the
+ * truth, with credits and an open interval that storage may not have yet, and
+ * rereading it from storage could lose them.
+ */
+export async function loadNew(rules) {
+  const added = rules.filter((rule) => !ledgers.has(rule.id));
+  if (added.length > 0) await load(added);
+}
+
+/**
  * Make the open interval agree with what is true now: open while the observers
  * say the rule is in use (`inUse`) and it is not spent, closed otherwise. The
  * one place that decides whether a rule counts (DESIGN.md §7), called whenever
@@ -123,19 +134,24 @@ export async function load(rules) {
  * Returns the milliseconds credited, or 0 if nothing was closed.
  */
 export function reconcile(rule, nowMs, inUse) {
-  // status() projects the open interval, so this asks whether the rule is spent
+  // decide() projects the open interval, so this asks whether the rule is spent
   // with everything up to now counted.
-  if (inUse && !status(rule, nowMs).exhausted) {
+  if (inUse && !decide(rule, nowMs).exhausted) {
     // Open again, but the open interval ran out on the way and came back while
     // nobody was looking, a late alarm's drip-feed or midnight: settle it up to
     // where it ran out, and count again from now.
     if (openSince.has(rule.id) && projection(rule, nowMs).ranOutAtMs !== null) {
       return checkpointRule(rule, nowMs);
     }
+    // Before it opens, while the ledger is still the whole story: a rule
+    // loosened mid-block lets go of its hold here.
+    recordHold(rule, nowMs);
     startCounting(rule, nowMs);
     return 0;
   }
-  return stopCounting(rule, nowMs);
+  const credited = stopCounting(rule, nowMs);
+  recordHold(rule, nowMs);
+  return credited;
 }
 
 // --- counting ------------------------------------------------------------
@@ -199,8 +215,10 @@ export function checkpointRule(rule, nowMs) {
   if (since === undefined) return 0;
 
   const { creditedMs, ranOutAtMs } = settle(rule, since, nowMs);
-  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs).exhausted) clearOpen(rule.id);
-  else setOpen(rule.id, nowMs);
+  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs).exhausted) {
+    clearOpen(rule.id);
+    recordHold(rule, nowMs);
+  } else setOpen(rule.id, nowMs);
   return creditedMs;
 }
 
@@ -214,12 +232,12 @@ export function lockInRule(rule, nowMs) {
   stopCounting(rule, nowMs);
   const usage = ledgerFor(rule.id);
   const amount = lockInAmount(rule, usage, nowMs);
-  const active = passActive(usage, nowMs);
-  if (amount <= 0 && !active) return 0;
-
-  lockIn(usage, nowMs, amount); // ends the pass too, if one is active
-  fold(usage, nowMs, rule.windowSec * 1000);
-  dirty.add(rule.id);
+  if (amount > 0 || passActive(usage, nowMs)) {
+    lockIn(usage, nowMs, amount); // ends the pass too, if one is active
+    fold(usage, nowMs, rule.windowSec * 1000);
+    dirty.add(rule.id);
+  }
+  recordHold(rule, nowMs);
   return amount;
 }
 
@@ -242,14 +260,49 @@ function settle(rule, fromMs, toMs) {
   const usage = ledgerFor(rule.id);
   const result = creditInUse(rule, usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS });
   // Only a bug in policy.evaluate() gets here, and the rule is then charged as
-  // if it never ran out, with no hold. Here and not in projection(), which the
-  // popup reads every second: the settle that follows says it once.
+  // if it never ran out, with no hold. Here and not in projection(), which
+  // every reading takes: the settle that follows says it once.
   if (result.stoppedAtLimit) {
     warn(`${rule.id}: gave up crediting at the step limit, +${clock(result.creditedMs)} of ${clock(toMs - fromMs)}`);
   }
   fold(usage, toMs, rule.windowSec * 1000);
   dirty.add(rule.id);
   return result;
+}
+
+/**
+ * Keep the ledger's `blockedUntil` in step with the rolling cap (DESIGN.md §8):
+ * set when a block lands, moved when its unlock instant moves (a settings
+ * change), cleared once the rule reopens. Called by whatever changes the
+ * ledger or meets a new rule, never by a reading: reconcile() at every
+ * alarm, report, pass and settings change, lockInRule(), and a checkpoint
+ * that closes the interval. A block cannot come about any other way, since
+ * time alone only hands budget back, and the alarm at the unlock is what
+ * clears it. Flushed at once: it changes once per block and once per unlock,
+ * and losing it to a killed event page would bring the drip-feed back.
+ *
+ * Only from the ledger itself, never from a projection, so nothing while an
+ * interval is open: the settle that closes it records the hold, at the
+ * instant the rule ran out (policy.creditInUse). A projected hold written
+ * first made that settle find the rule held at the interval's start and
+ * credit all of it, late time included, whenever less than the unlock credit
+ * was left (#53).
+ *
+ * Left alone during a pass, which suspends the rolling cap: its unlock instant
+ * moves every minute the pass is used, and the alarm at the pass end records
+ * the hold that follows it.
+ */
+function recordHold(rule, nowMs) {
+  if (openSince.has(rule.id)) return;
+  // A rule that blocks outright has no rolling cap to hold, and a hold already
+  // recorded is kept, so setting the budget to zero and back mid-block does not
+  // lift it (DESIGN.md §22).
+  const usage = ledgerFor(rule.id);
+  const next = holdAfter(evaluate(rule, usage, nowMs));
+  if (next === undefined || usage.blockedUntil === next) return;
+  usage.blockedUntil = next;
+  dirty.add(rule.id);
+  flush();
 }
 
 // --- flushing ------------------------------------------------------------
@@ -349,39 +402,6 @@ function projection(rule, nowMs) {
   return { usage: copy, ranOutAtMs };
 }
 
-/**
- * Keep the ledger's `blockedUntil` in step with the rolling cap (DESIGN.md §8):
- * set when a block is seen, moved when its unlock instant moves (a settings
- * change), cleared once the rule reopens. It lives here because every decision
- * passes through status() — the alarm at the instant the budget runs out, the
- * re-open guard, the popup — so a block cannot be acted on without being
- * recorded. Flushed at once: it
- * changes once per block and once per unlock, and losing it to a killed event
- * page would bring the drip-feed back.
- *
- * Only from the ledger itself, never from a projection: while an interval is
- * open, the settle that closes it records the hold, at the instant the rule
- * ran out (policy.creditInUse). A projected hold written first made that
- * settle find the rule held at the interval's start and credit all of it,
- * late time included, whenever less than the unlock credit was left (#53).
- *
- * Left alone during a pass, which suspends the rolling cap: its unlock instant
- * moves every minute the pass is used, and the alarm at the pass end
- * records the hold that follows it.
- */
-function syncHold(rule, decision, nowMs) {
-  // A rule that blocks outright has no rolling cap to hold, and a hold already
-  // recorded is kept, so setting the budget to zero and back mid-block does not
-  // lift it (DESIGN.md §22).
-  const next = holdAfter(decision);
-  if (next === undefined) return;
-  const usage = ledgerFor(rule.id);
-  if (usage.blockedUntil === next) return;
-  usage.blockedUntil = next;
-  dirty.add(rule.id);
-  flush();
-}
-
 /** Used and pass time since a local period start, for the popup. */
 function period(usage, startMs) {
   const all = usedInPeriod(usage, startMs);
@@ -390,15 +410,27 @@ function period(usage, startMs) {
 }
 
 /**
- * Everything a popup, block page or enforcer needs to know about one rule.
- * The decision itself is policy.evaluate(); this adds identity, the rolling
- * meter's numbers and the calendar totals.
+ * Whether the rule is spent, until when and when that answer next changes:
+ * policy.evaluate() over the ledger with the open interval projected in, plus
+ * `counting`. What the background itself acts on (the alarms, the guard, the
+ * sweep, reconcile()), for the price of one projection.
+ */
+export function decide(rule, nowMs) {
+  const { usage } = projection(rule, nowMs);
+  const counting = openSince.has(rule.id);
+  return { counting, ...evaluate(rule, usage, nowMs, { counting }) };
+}
+
+/**
+ * Everything the popup and the block page show about one rule: the decision,
+ * with identity, the rolling meter's numbers, the offers and the calendar
+ * totals. Only reads, so it can be asked as often as a page likes; the
+ * background's own callers want one field, and take decide().
  */
 export function status(rule, nowMs) {
   const { usage } = projection(rule, nowMs);
   const counting = openSince.has(rule.id);
   const decision = evaluate(rule, usage, nowMs, { counting });
-  if (!counting) syncHold(rule, decision, nowMs);
 
   return {
     id: rule.id,
@@ -420,6 +452,7 @@ export function status(rule, nowMs) {
 }
 
 export function describe(rule, nowMs) {
-  const s = status(rule, nowMs);
-  return `${s.id}: ${clock(s.usedMs)} / ${clock(s.budgetMs)} used (${s.counting ? "counting" : "idle"})`;
+  const d = decide(rule, nowMs);
+  const rolling = d.caps.rolling;
+  return `${rule.id}: ${clock(rolling?.usedMs ?? 0)} / ${clock(rolling?.budgetMs ?? 0)} used (${d.counting ? "counting" : "idle"})`;
 }

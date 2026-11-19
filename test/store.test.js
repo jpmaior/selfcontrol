@@ -47,10 +47,12 @@ const {
   CHECKPOINT_MS,
   MAX_CHUNK_MS,
   checkpointRule,
+  decide,
   flush,
   forgetRemoved,
   hasOpenInterval,
   load,
+  loadNew,
   lockInRule,
   reconcile,
   settled,
@@ -80,6 +82,25 @@ test("load() waits for queued writes instead of reading around them", async () =
   // rebuild the ledger from pre-flush storage and drop the 5 minutes.
   await load([r]);
   assert.equal(status(r, T0 + 5 * MIN).usedMs, 5 * MIN);
+});
+
+test("loadNew() leaves loaded ledgers alone and loads only the rules it has not seen", async () => {
+  // A settings save: the rule kept has a credit and an open interval that
+  // storage does not have yet, and the rule added has history of its own.
+  const kept = rule("kept-loaded");
+  await load([kept]);
+  startCounting(kept, T0);
+  stopCounting(kept, T0 + 5 * MIN);
+  startCounting(kept, T0 + 6 * MIN);
+  const added = rule("added-new");
+  local.data.set("usage:added-new", { b: { [T0 / MIN]: 2 * MIN }, p: {}, d: {} });
+  session.data.set("open:added-new", T0 + 7 * MIN);
+
+  await loadNew([kept, added]);
+  const at = T0 + 8 * MIN;
+  assert.equal(status(kept, at).usedMs, 7 * MIN, "the credit and the open interval are kept");
+  assert.equal(status(added, at).usedMs, 3 * MIN, "the new rule's history and open interval are read");
+  assert.ok(hasOpenInterval(added.id));
 });
 
 test("reconcile: a still-counting rule keeps its open interval untouched", async () => {
@@ -274,16 +295,26 @@ test("flush persists ledgers through the queue", async () => {
 //
 // A block must outlast the first bucket that ages out, and the event page
 // that saw the block land is not the one that will be asked an hour later.
+// The hold is recorded where the ledger or the rule changes, by the paths
+// that change it: never by status(), which only reads.
 
-/** 20 of 20 minutes spent from T0, flushed; unlock credit five minutes. */
-async function spentRule(id, extra = {}) {
+/** 20 minutes counted from T0, checkpointed as a real session is. */
+async function countedTo20(id, extra = {}) {
   const r = { ...rule(id), minUnlockCreditSec: 5 * 60, ...extra };
   await load([r]);
   startCounting(r, T0);
-  // Checkpointed as a real session is: one 20-minute commit would hit the
-  // sleep clamp and credit only MAX_CHUNK_MS.
+  // One 20-minute commit would hit the sleep clamp and credit only MAX_CHUNK_MS.
   for (let at = T0 + CHECKPOINT_MS; at < T0 + 20 * MIN; at += CHECKPOINT_MS) checkpointRule(r, at);
-  stopCounting(r, T0 + 20 * MIN);
+  return r;
+}
+
+/**
+ * 20 of 20 minutes spent from T0, closed by the rule's alarm at the instant
+ * the budget ran out, with the tab still on the site; unlock credit five minutes.
+ */
+async function spentRule(id, extra = {}) {
+  const r = await countedTo20(id, extra);
+  reconcile(r, T0 + 20 * MIN, true);
   flush();
   return r;
 }
@@ -291,11 +322,57 @@ async function spentRule(id, extra = {}) {
 /** The first bucket ages out at T0+61; five minutes are back at T0+65. */
 const RELEASE = T0 + 65 * MIN;
 
-test("hold: status records it when the block lands, and flushes it", async () => {
-  const r = await spentRule("held-set");
-  const s = status(r, T0 + 20 * MIN);
-  assert.equal(s.exhausted, true);
-  assert.equal(s.unlockAtMs, RELEASE);
+/** Count storage writes while `body` runs. */
+async function writesDuring(body) {
+  await settled();
+  let writes = 0;
+  const wrapped = [local, session].map((area) => {
+    const { set, remove } = area;
+    area.set = async (items) => (writes++, set(items));
+    area.remove = async (keys) => (writes++, remove(keys));
+    return () => Object.assign(area, { set, remove });
+  });
+  try {
+    await body();
+    await settled();
+  } finally {
+    for (const restore of wrapped) restore();
+  }
+  return writes;
+}
+
+test("status() only reads: a block it sees is not recorded, in storage or in the ledger", async () => {
+  // Closed by a bare stop at the instant it ran out: nothing has recorded the hold.
+  const r = await countedTo20("read-only");
+  stopCounting(r, T0 + 20 * MIN);
+  flush();
+
+  const writes = await writesDuring(() => {
+    assert.equal(status(r, T0 + 20 * MIN).exhausted, true);
+    assert.equal(status(r, T0 + 30 * MIN).unlockAtMs, RELEASE);
+  });
+  assert.equal(writes, 0, "nothing written");
+  assert.equal(local.data.get("usage:read-only").blockedUntil, null);
+  assert.equal(status(r, T0 + 61 * MIN + 30_000).exhausted, false, "and no hold in memory either");
+});
+
+test("decide(): the decision status() carries, for the background's own callers", async () => {
+  const r = await spentRule("decided");
+  for (const at of [T0 + 20 * MIN, T0 + 62 * MIN, RELEASE]) {
+    const d = decide(r, at);
+    const s = status(r, at);
+    for (const key of ["exhausted", "reason", "unlockAtMs", "nextChangeAtMs", "nextChange", "remainingMs"]) {
+      assert.deepEqual(d[key], s[key], `${key} at ${(at - T0) / MIN}`);
+    }
+    assert.equal(d.counting, s.counting);
+  }
+});
+
+test("hold: the rule's alarm records it when the block lands, and flushes it", async () => {
+  const r = await countedTo20("held-set");
+  // At the very instant: the settle credits up to it and finds nothing past it.
+  reconcile(r, T0 + 20 * MIN, true);
+  assert.ok(!hasOpenInterval(r.id));
 
   await settled();
   assert.equal(local.data.get("usage:held-set").blockedUntil, RELEASE);
@@ -303,7 +380,6 @@ test("hold: status records it when the block lands, and flushes it", async () =>
 
 test("hold: survives a reload and keeps the rule blocked past the first bucket", async () => {
   const r = await spentRule("held-reload");
-  status(r, T0 + 20 * MIN);
   await settled();
 
   await load([r]); // a later event page, from storage alone
@@ -312,13 +388,67 @@ test("hold: survives a reload and keeps the rule blocked past the first bucket",
   assert.equal(s.unlockAtMs, RELEASE);
 });
 
-test("hold: cleared once the rule reopens", async () => {
+test("hold: cleared by the alarm at the unlock", async () => {
   const r = await spentRule("held-clear");
-  status(r, T0 + 20 * MIN);
+  assert.equal(reconcile(r, RELEASE, false), 0);
   assert.equal(status(r, RELEASE).exhausted, false);
 
   await settled();
   assert.equal(local.data.get("usage:held-clear").blockedUntil, null);
+});
+
+test("hold: lock in records it", async () => {
+  const r = { ...rule("held-lock"), minUnlockCreditSec: 5 * 60 };
+  await load([r]);
+  startCounting(r, T0);
+  lockInRule(r, T0 + 3 * MIN);
+
+  // Three minutes in their own buckets, seventeen in T0+3's: five are back at T0+64.
+  await settled();
+  assert.equal(local.data.get("usage:held-lock").blockedUntil, T0 + 64 * MIN);
+  assert.equal(status(r, T0 + 63 * MIN).exhausted, true, "three back is not five");
+});
+
+test("hold: the alarm at a pass end records the block that follows it", async () => {
+  const passes = { perWeek: 1, durationSec: 10 * 60, countsTowardCaps: true };
+  // Spent with nothing recorded yet, so whatever is there at the end is the pass end's.
+  const r = await countedTo20("held-pass", { passes });
+  stopCounting(r, T0 + 20 * MIN);
+  const click = T0 + 30 * MIN;
+  assert.equal(usePassOnRule(r, click), true);
+  reconcile(r, click, false);
+  flush();
+  await settled();
+  assert.equal(local.data.get("usage:held-pass").blockedUntil, null, "left alone during the pass");
+
+  reconcile(r, click + 10 * MIN, false);
+  await settled();
+  assert.equal(local.data.get("usage:held-pass").blockedUntil, RELEASE);
+});
+
+test("hold: a settings change that moves the unlock moves it", async () => {
+  const r = await spentRule("held-moved");
+  // Ten minutes of credit: the tenth bucket, T0+9, ages out at T0+70.
+  const stricter = { ...r, minUnlockCreditSec: 10 * 60 };
+  reconcile(stricter, T0 + 30 * MIN, false);
+  await settled();
+  assert.equal(local.data.get("usage:held-moved").blockedUntil, T0 + 70 * MIN);
+});
+
+test("hold: a settings change that lifts the block clears it, also with the tab in use", async () => {
+  const r = await spentRule("held-lifted");
+  const looser = { ...r, budgetSec: 40 * 60 };
+  reconcile(looser, T0 + 30 * MIN, true);
+  assert.ok(hasOpenInterval(r.id), "counting");
+  await settled();
+  assert.equal(local.data.get("usage:held-lifted").blockedUntil, null);
+});
+
+test("hold: an interval that stays open writes no hold", async () => {
+  const r = await countedTo20("held-open");
+  const writes = await writesDuring(() => reconcile(r, T0 + 19 * MIN, true));
+  assert.equal(writes, 0);
+  assert.ok(hasOpenInterval(r.id));
 });
 
 // --- a spent rule never counts (DESIGN.md §7) -----------------------------
@@ -365,8 +495,6 @@ test("spent: an interval open when the rule runs out closes at that instant", as
 
 test("spent: a tab still in use when the rule unlocks counts from that instant", async () => {
   const r = await spentRule("unlocked-in-use");
-  status(r, T0 + 20 * MIN); // the block lands, and records its hold
-
   // The sweep never reached this tab, so the observers report it in use throughout.
   assert.equal(reconcile(r, RELEASE - 1, true), 0);
   assert.ok(!hasOpenInterval(r.id), "still spent a moment before the unlock");
@@ -450,11 +578,10 @@ test("outright: no pass, whatever the rule's passes say", async () => {
 
 test("outright: the hold is left alone, so a detour through zero does not lift it", async () => {
   const r = await spentRule("outright-hold");
-  status(r, T0 + 20 * MIN); // the block lands, and records its hold
   await settled();
 
   // Set to zero, then back, before the cool-down is over.
-  status({ ...r, budgetSec: 0 }, T0 + 30 * MIN);
+  reconcile({ ...r, budgetSec: 0 }, T0 + 30 * MIN, false);
   await settled();
   assert.equal(local.data.get("usage:outright-hold").blockedUntil, RELEASE, "untouched while blocking outright");
 
