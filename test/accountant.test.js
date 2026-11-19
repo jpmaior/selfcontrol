@@ -30,7 +30,7 @@ import {
   usedByDay,
   usedInPeriod,
   usedMs,
-} from "../extension/background/accountant.js";
+} from "../extension/common/accountant.js";
 import { addDays, dayKey, startOfDay } from "../extension/common/calendar.js";
 
 /** Bucket 1000 starts here; using a round bucket keeps the arithmetic readable. */

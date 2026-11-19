@@ -16,7 +16,7 @@ import {
   createUsage,
   creditAvailableAt,
   startPass,
-} from "../extension/background/accountant.js";
+} from "../extension/common/accountant.js";
 import { startOfNextDay, startOfNextWeek } from "../extension/common/calendar.js";
 
 const MIN = 60_000;

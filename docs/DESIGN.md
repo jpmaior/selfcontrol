@@ -650,12 +650,12 @@ when `now < blockedUntil` and the credit back is still short of `minUnlockCredit
 background/ (event page — the only stateful component)
   ├─ index.js       wiring, lifecycle, alarms, messaging
   ├─ observers.js   tabs/windows events  →  "is rule R counting right now?"
-  ├─ accountant.js  pure: bucket commit / fold / rolling sum / time-until-credit
   ├─ enforcer.js    over-budget → block or close; guards new navigations
   ├─ store.js       ledgers, debounced flush, storage.session for open intervals
   └─ log.js         the prefixed console logger
 
 common/ (shared by the background and the UI pages)
+  ├─ accountant.js  pure: bucket commit / fold / rolling sum / time-until-credit
   ├─ rules.js       pure: rule shape, URL matching, pattern parsing, validation, form edits
   ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14),

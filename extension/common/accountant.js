@@ -18,7 +18,7 @@
 // Milliseconds rather than seconds so that many short intervals cannot
 // accumulate rounding drift; the JSON size difference is a few hundred bytes.
 
-import { addDays, dayKey, startOfWeek } from "../common/calendar.js";
+import { addDays, dayKey, startOfWeek } from "./calendar.js";
 
 export const BUCKET_MS = 60_000;
 

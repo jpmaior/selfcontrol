@@ -28,7 +28,7 @@ import {
   usedInPeriod,
   usedMs,
   windowOf,
-} from "../background/accountant.js";
+} from "./accountant.js";
 import { startOfDay, startOfNextDay, startOfNextWeek, startOfWeek } from "./calendar.js";
 import { blocksOutright } from "./rules.js";
 

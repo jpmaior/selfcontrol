@@ -21,7 +21,7 @@ import {
   startPass,
   usedInPeriod,
   windowOf,
-} from "./accountant.js";
+} from "../common/accountant.js";
 import { startOfDay, startOfWeek } from "../common/calendar.js";
 import { canUsePass, creditInUse, evaluate, holdAfter, lockInAmount, lockInPreview } from "../common/policy.js";
 import { log, warn } from "./log.js";

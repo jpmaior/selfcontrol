@@ -18,7 +18,7 @@ import {
   validateRule,
 } from "../common/rules.js";
 import { loadRules, saveRules } from "../common/settings.js";
-import { normalizeUsage, usedByDay } from "../background/accountant.js";
+import { normalizeUsage, usedByDay } from "../common/accountant.js";
 import { addDays, dayKey, startOfDay } from "../common/calendar.js";
 import { clock } from "../common/format.js";
 import { describeImport, parseImport, serializeRules } from "../common/transfer.js";
