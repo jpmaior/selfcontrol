@@ -11,7 +11,7 @@
 
 import { log } from "./log.js";
 import { ruleForUrl } from "../common/rules.js";
-import { status } from "./store.js";
+import { decide } from "./store.js";
 import { countdown } from "../common/format.js";
 import { lastTabClosesWindow } from "../common/platform.js";
 import { needsFreshTab } from "../common/tabs.js";
@@ -106,7 +106,7 @@ async function act(rule, tab, snapshot) {
  * Returns the number of tabs acted on.
  */
 export async function enforceRule(rules, rule, nowMs) {
-  const snapshot = status(rule, nowMs);
+  const snapshot = decide(rule, nowMs);
   if (!snapshot.exhausted) return 0;
 
   const tabs = await browser.tabs.query({});
@@ -143,7 +143,7 @@ export async function guardTab(rules, tab, nowMs) {
   const rule = ruleForUrl(rules, tab?.url);
   if (!rule) return false;
 
-  const snapshot = status(rule, nowMs);
+  const snapshot = decide(rule, nowMs);
   if (!snapshot.exhausted || !claim(tab, nowMs)) return false;
 
   const done = await act(rule, tab, snapshot);
@@ -172,35 +172,6 @@ export async function clearRemovedAlarms(rules) {
   return removed;
 }
 
-/** Each rule's sync in progress, so the next one waits for it: ruleId -> promise. */
-const syncing = new Map();
-
-/**
- * Keep the rule's one alarm in step with reality. Called whenever a rule
- * starts or stops counting, after every checkpoint, and after the alarm
- * itself fires. A rule whose answer cannot flip on its own gets no alarm.
- *
- * One at a time per rule. On an alarm wake-up the alarm handler, the startup
- * settleAndArm and the observers' first report each sync the rule at once,
- * and the alarm that just fired is gone: run side by side, each found no
- * alarm and created it, so it was written and logged twice. In turn, the
- * later ones find it in place and leave it alone. The queue is ephemeral, like
- * the claims above: an unload only drops syncs that have already finished.
- */
-export function syncRuleAlarm(rule, nowMs) {
-  const previous = syncing.get(rule.id) ?? Promise.resolve();
-  const mine = previous.then(
-    () => syncNow(rule, nowMs),
-    () => syncNow(rule, nowMs),
-  );
-  syncing.set(rule.id, mine);
-  const done = () => {
-    if (syncing.get(rule.id) === mine) syncing.delete(rule.id);
-  };
-  mine.then(done, done);
-  return mine;
-}
-
 /** What the alarm is for, as the log says it. */
 function alarmPurpose(snapshot) {
   if (snapshot.nextChange === "unlock") return `unlocks (${snapshot.reason})`;
@@ -208,9 +179,17 @@ function alarmPurpose(snapshot) {
   return `${snapshot.nextChange} cap runs out`;
 }
 
-async function syncNow(rule, nowMs) {
+/**
+ * Keep the rule's one alarm in step with reality. Called whenever a rule
+ * starts or stops counting, after every checkpoint, and after the alarm
+ * itself fires. A rule whose answer cannot flip on its own gets no alarm.
+ *
+ * Checking before creating is sound only one call at a time, which index.js's
+ * queue sees to (DESIGN.md §14).
+ */
+export async function syncRuleAlarm(rule, nowMs) {
   const name = ruleAlarmFor(rule.id);
-  const snapshot = status(rule, nowMs);
+  const snapshot = decide(rule, nowMs);
   const when = snapshot.nextChangeAtMs;
 
   if (when === null) {

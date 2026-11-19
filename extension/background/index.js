@@ -16,11 +16,13 @@ import {
   CHECKPOINT_MS,
   anyCounting,
   checkpointRule,
+  decide,
   describe,
   flush,
   forgetRemoved,
   hasOpenInterval,
   load,
+  loadNew,
   lockInRule,
   reconcile,
   settled,
@@ -38,8 +40,50 @@ let rules = [];
 
 log(`event page started — v${browser.runtime.getManifest().version}`);
 
-// Kicked off synchronously so the promise exists before any listener can fire.
-const loaded = (async () => {
+// --- one queue -----------------------------------------------------------
+
+/**
+ * Every handler that changes state runs through here, one at a time and in
+ * the order its event arrived, and only once the event page is ready
+ * (DESIGN.md §7, "One queue"). The alarms, the observers' reports, the
+ * messages, the settings change and the navigation guard all reach the same
+ * ledgers, alarms and tabs, often on the same wake-up; side by side, each
+ * could act on what another was halfway through changing.
+ *
+ * Returns the task's own promise. The queue itself carries on past a task
+ * that fails, and the event page holds nothing that an unload would lose: a
+ * task cut short leaves its writes queued in the store, as before.
+ */
+let tail = Promise.resolve();
+function inOrder(task) {
+  const run = tail.then(async () => {
+    await ready;
+    return task();
+  });
+  tail = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+// Not awaited, and deliberately started with an empty rule set: an MV3 event
+// page is restarted *by* an event, so its listeners must exist by the end of
+// synchronous module evaluation, which is sooner than storage can answer. The
+// real rules arrive via setRules() in `ready`, which re-primes.
+const primed = start({
+  rules,
+  onChange(rule, inUse, why) {
+    return inOrder(() => onCountingChange(rule, inUse, why));
+  },
+});
+
+/**
+ * The rules loaded, their ledgers too, the observers primed with them and
+ * every rule settled: what every handler waits for. Kicked off synchronously
+ * so the promise exists before any listener can fire.
+ */
+const ready = (async () => {
   rules = await loadRules();
   await load(rules);
   // Before any handler can write a ledger or sync an alarm, so nothing either
@@ -47,41 +91,13 @@ const loaded = (async () => {
   await sweep(rules);
   const alarms = await clearRemovedAlarms(rules);
   if (alarms.length > 0) log(`cleared the alarm of deleted rule(s): ${alarms.join(", ")}`);
+  await primed;
+  await setRules(rules);
+  await settleAndArm("startup");
 })();
 
-// Not awaited, and deliberately started with an empty rule set: an MV3 event
-// page is restarted *by* an event, so its listeners must exist by the end of
-// synchronous module evaluation, which is sooner than storage can answer. The
-// real rules arrive via setRules() below, which re-primes.
-const primed = start({
-  rules,
-  async onChange(rule, inUse, why) {
-    await loaded;
-    const now = Date.now();
-
-    // In use counts only while the rule is not spent (DESIGN.md §7): going back
-    // into a blocked site opens nothing, so the moment before the guard
-    // redirects the tab cannot move the unlock time.
-    const credited = reconcile(rule, now, inUse);
-    flush();
-    const name = `${rule.id} (${modeOf(rule)})`;
-    if (hasOpenInterval(rule.id)) log("▶ COUNTING", name, `— ${why}`);
-    else if (inUse) log("▷ spent, not counting", name, `— ${why}`, `+${clock(credited)}`);
-    else log("■ stopped  ", name, `— ${why}`, `+${clock(credited)}`);
-
-    // In use while spent: the tab was opened before the block landed, or came
-    // back to the site. Sweep it.
-    if (inUse) await enforceRule(rules, rule, now);
-
-    log("   ", describe(rule, now));
-    await Promise.all([syncCheckpointAlarm(), syncRuleAlarm(rule, now)]);
-  },
-});
-
-Promise.all([loaded, primed])
+ready
   .then(async () => {
-    await setRules(rules);
-    await settleAndArm("startup");
     const info = await browser.runtime.getPlatformInfo();
     log(
       `ready on ${info.os} — ${rules.length} rule(s),`,
@@ -90,6 +106,33 @@ Promise.all([loaded, primed])
     );
   })
   .catch((error) => log("startup failed:", error));
+
+/** The current rule with this id: a report or a message may name one a save has replaced. */
+const ruleById = (id) => rules.find((r) => r.id === id);
+
+/** The observers say whether a rule is in use; reconcile it, and sweep if it is spent. */
+async function onCountingChange(reported, inUse, why) {
+  const rule = ruleById(reported.id);
+  if (!rule) return;
+  const now = Date.now();
+
+  // In use counts only while the rule is not spent (DESIGN.md §7): going back
+  // into a blocked site opens nothing, so the moment before the guard
+  // redirects the tab cannot move the unlock time.
+  const credited = reconcile(rule, now, inUse);
+  flush();
+  const name = `${rule.id} (${modeOf(rule)})`;
+  if (hasOpenInterval(rule.id)) log("▶ COUNTING", name, `— ${why}`);
+  else if (inUse) log("▷ spent, not counting", name, `— ${why}`, `+${clock(credited)}`);
+  else log("■ stopped  ", name, `— ${why}`, `+${clock(credited)}`);
+
+  // In use while spent: the tab was opened before the block landed, or came
+  // back to the site. Sweep it.
+  if (inUse) await enforceRule(rules, rule, now);
+
+  log("   ", describe(rule, now));
+  await Promise.all([syncCheckpointAlarm(), syncRuleAlarm(rule, now)]);
+}
 
 /**
  * Settle any interval left open by a previous run, then bring alarms and
@@ -117,28 +160,17 @@ async function settleAndArm(why) {
   log(`state re-armed (${why})`);
 }
 
-/**
- * Whether a rule is in use, for the paths that can change whether it is spent
- * (its alarm, a pass) but not whether it is in use. The observers read every
- * rule as idle until they are primed, and an alarm often wakes the event page
- * before they are, so an open interval is taken at its word rather than closed
- * on that say-so: only the observers end a rule's use, through onChange. A rule
- * they have not reported yet is opened by that same report once they are primed.
- */
-function inUse(rule) {
-  return isCountingNow(rule.id) || hasOpenInterval(rule.id);
-}
-
 // --- settings ------------------------------------------------------------
 
 // The options page writes storage; we react. No message protocol needed, and
 // it works the same whether the edit came from the options page or the console.
-onRulesChanged(async (next, previous) => {
-  await loaded;
+onRulesChanged((next, previous) => inOrder(() => onSettingsChanged(next, previous)));
+
+async function onSettingsChanged(next, previous) {
   const now = Date.now();
 
   // The old set is the one the save replaced, not `rules`: when the save is
-  // what woke the event page, `loaded` has already read the new set, and
+  // what woke the event page, `ready` has already read the new set, and
   // nothing would look removed (DESIGN.md §6). `rules` still counts, for a
   // rule it holds that the stored old set does not.
   const before = [...previous, ...rules];
@@ -152,30 +184,24 @@ onRulesChanged(async (next, previous) => {
   for (const id of forgetRemoved(before, next)) log(`rule removed: ${id} — usage discarded`);
   for (const id of await clearRemovedAlarms(next)) log(`rule removed: ${id} — alarm cleared`);
 
+  // Only the rules this save adds are read from storage. A kept rule's ledger
+  // in memory is the truth, and the queue keeps every other handler out until
+  // this one is done, so nothing can change it between here and the settle.
   rules = next;
-  await load(rules);
+  await loadNew(rules);
   await setRules(rules);
   await settleAndArm("settings changed");
   log(`rules updated — now ${rules.length}: ${rules.map((r) => r.id).join(", ")}`);
-});
+}
 
 // --- enforcement hooks ---------------------------------------------------
 
 // Same guard on both events: onCreated covers "open it in a new tab", onUpdated
 // covers navigating an existing one. Together they are what makes a spent rule
 // stay spent (DESIGN.md §7).
-browser.tabs.onCreated.addListener(async (tab) => {
-  await loaded;
-  await guardTab(rules, tab, Date.now());
-});
+browser.tabs.onCreated.addListener((tab) => inOrder(() => guardTab(rules, tab, Date.now())));
 
-onTabUpdated(
-  async (tabId, changeInfo, tab) => {
-    await loaded;
-    await guardTab(rules, tab, Date.now());
-  },
-  ["url"],
-);
+onTabUpdated((tabId, changeInfo, tab) => inOrder(() => guardTab(rules, tab, Date.now())), ["url"]);
 
 // --- alarms --------------------------------------------------------------
 
@@ -194,8 +220,9 @@ async function syncCheckpointAlarm() {
   }
 }
 
-browser.alarms.onAlarm.addListener(async (alarm) => {
-  await loaded;
+browser.alarms.onAlarm.addListener((alarm) => inOrder(() => onAlarm(alarm)));
+
+async function onAlarm(alarm) {
   const now = Date.now();
 
   if (alarm.name === CHECKPOINT_ALARM) {
@@ -221,7 +248,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 
   const ruleId = ruleIdFromAlarm(alarm.name);
   if (!ruleId) return;
-  const rule = rules.find((r) => r.id === ruleId);
+  const rule = ruleById(ruleId);
   if (!rule) return;
 
   // Firefox does not clamp sub-minute alarm delays the way Chrome does; this is
@@ -233,7 +260,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   // landing is not counted; one that has just unlocked under a tab still on
   // the site starts again (DESIGN.md §7).
   const wasCounting = hasOpenInterval(ruleId);
-  const credited = reconcile(rule, now, inUse(rule));
+  const credited = reconcile(rule, now, isCountingNow(ruleId));
   const counting = hasOpenInterval(ruleId);
   if (wasCounting && !counting) log(`■ ${ruleId} spent — stopped counting +${clock(credited)}`);
   if (!wasCounting && counting) log(`▶ COUNTING ${ruleId} — in use as it unlocked`);
@@ -246,7 +273,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   const acted = await enforceRule(rules, rule, now);
   if (acted === 0) log(describe(rule, now));
   await syncRuleAlarm(rule, now);
-});
+}
 
 // --- messaging -----------------------------------------------------------
 
@@ -266,20 +293,20 @@ const handlers = {
   },
 
   async lockIn({ ruleId }) {
-    const rule = rules.find((r) => r.id === ruleId);
+    const rule = ruleById(ruleId);
     if (!rule) return { ok: false, error: `no such rule: ${ruleId}` };
     // The popup offers no lock-in on a spent rule, but one armed before it ran
     // out, or before its budget went to zero (DESIGN.md §22), can still be
-    // confirmed. Refused by the decision that withholds the offer
-    // (policy.canLockIn), rather than spending nothing and saying it worked.
+    // confirmed. Refused when the rule is spent, which is what withholds the
+    // offer (policy.canLockIn), rather than spending nothing and saying it worked.
     const now = Date.now();
-    if (!status(rule, now).lockIn) {
+    if (decide(rule, now).exhausted) {
       const error = blocksOutright(rule) ? `${rule.label} has no budget to lock in.` : `${rule.label} is already blocked.`;
       return { ok: false, error };
     }
     const ms = lockInRule(rule, now);
     flush();
-    const snapshot = status(rule, now);
+    const snapshot = decide(rule, now);
     log(
       `🔒 locked in ${rule.id}: spent ${clock(ms)} on purpose,`,
       `blocked until ${wallClock(snapshot.unlockAtMs, now)} (${snapshot.reason})`,
@@ -291,7 +318,7 @@ const handlers = {
   },
 
   async usePass({ ruleId }) {
-    const rule = rules.find((r) => r.id === ruleId);
+    const rule = ruleById(ruleId);
     if (!rule) return { ok: false, error: `no such rule: ${ruleId}` };
     const now = Date.now();
     if (!usePassOnRule(rule, now)) {
@@ -300,10 +327,10 @@ const handlers = {
     }
     // A tab still on the site, one the sweep never reached, counts from now (§7).
     const wasCounting = hasOpenInterval(ruleId);
-    reconcile(rule, now, inUse(rule));
+    reconcile(rule, now, isCountingNow(ruleId));
     if (!wasCounting && hasOpenInterval(ruleId)) log(`▶ COUNTING ${ruleId} — in use as the pass began`);
     flush();
-    const snapshot = status(rule, now);
+    const snapshot = decide(rule, now);
     log(
       `🎟 pass used on ${rule.id}: open until ${wallClock(snapshot.pass.endsAtMs, now)},`,
       `${snapshot.pass.leftThisWeek} left this week`,
@@ -318,10 +345,7 @@ const handlers = {
 browser.runtime.onMessage.addListener((message) => {
   const handler = handlers[message?.type];
   if (!handler) return undefined;
-  return (async () => {
-    await loaded;
-    return handler(message);
-  })();
+  return inOrder(() => handler(message));
 });
 
 // An update closes the add-on's own pages as it unloads this version, and a
@@ -372,7 +396,7 @@ browser.runtime.onSuspend.addListener(() => {
  * persist a rule the options page refuses to save.
  */
 globalThis.setLimits = async (ruleId, patch) => {
-  await loaded;
+  await ready;
   if (!rules.some((r) => r.id === ruleId)) return `no such rule: ${ruleId}`;
   const next = rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r));
   const errors = validateRule(next.find((r) => r.id === ruleId), next);
@@ -387,7 +411,7 @@ globalThis.resetRules = async () => {
 };
 
 globalThis.resetUsage = async () => {
-  await loaded; // the rule ids, or nothing would be removed
+  await ready; // the rule ids, or nothing would be removed
   await browser.storage.local.remove(rules.map((r) => usageKey(r.id)));
   await browser.storage.session.clear();
   return "usage cleared — reload the extension";
@@ -396,7 +420,7 @@ globalThis.resetUsage = async () => {
 // Async because it may be the call that wakes the event page: read before the
 // ledger has loaded, every rule would show 0:00.
 globalThis.dumpUsage = async (ruleId) => {
-  await loaded;
+  await ready;
   const now = Date.now();
   const chosen = ruleId ? rules.filter((r) => r.id === ruleId) : rules;
   const table = chosen.map((rule) => {
