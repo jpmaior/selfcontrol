@@ -5,9 +5,9 @@
 // re-reads its status periodically rather than trusting the timestamp it was
 // opened with.
 
-import { clock, countdown, wallClock } from "../common/format.js";
+import { BLOCKED, clock, countdown, strong } from "../common/format.js";
 import { returnUrlFrom } from "../common/rules.js";
-import { blockPageIndex, describedReason, GO_BACK_STEPS, showsGoBack } from "../common/tabs.js";
+import { blockPageIndex, describedReason, GO_BACK_STEPS, showsGoBack } from "../common/blockpage.js";
 
 const params = new URLSearchParams(location.search);
 const ruleId = params.get("rule");
@@ -115,10 +115,8 @@ const QUIPS = [
   "You set this limit while thinking clearly. Trust that person.",
 ];
 
-/** Deterministic per rule and hour, so it does not flicker on every tick. */
 function pickQuip() {
-  const seed = [...`${ruleId}${new Date().getHours()}`].reduce((a, c) => a + c.charCodeAt(0), 0);
-  return QUIPS[seed % QUIPS.length];
+  return QUIPS[Math.floor(Math.random() * QUIPS.length)];
 }
 
 let unlockAtMs = Number(params.get("until")) || Date.now();
@@ -126,12 +124,7 @@ let blockedAtMs = Date.now();
 let reason = params.get("reason") || "rolling";
 
 /** The headline names the period that ran out, so "until midnight" makes sense. */
-const HEADLINE = {
-  rolling: (name) => `${name} is done for now`,
-  daily: (name) => `${name} is done for today`,
-  weekly: (name) => `${name} is done for the week`,
-  always: (name) => `${name} is blocked`,
-};
+const headline = () => `${label} is ${BLOCKED[reason] ?? BLOCKED.rolling}`;
 
 /**
  * A rule with a budget of zero blocks outright (DESIGN.md §22): there is no
@@ -141,7 +134,7 @@ const HEADLINE = {
 const outright = () => reason === "always";
 
 function setHeadline() {
-  el.headline.textContent = (HEADLINE[reason] ?? HEADLINE.rolling)(label);
+  el.headline.textContent = headline();
   document.body.classList.toggle("outright", outright());
   renderGoBack();
 }
@@ -168,12 +161,6 @@ function describeCap(mine) {
     default:
       return line(mine.usedMs, mine.budgetMs, `in the last ${windowMin} minutes`);
   }
-}
-
-function strong(text) {
-  const el = document.createElement("strong");
-  el.textContent = text;
-  return el;
 }
 
 async function refresh() {

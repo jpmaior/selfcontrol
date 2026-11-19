@@ -1,8 +1,8 @@
 // Tab and window observation.
 //
 // Sole job: answer "is rule R being consumed right now?" and report every
-// change in that answer. No timing, no storage, no enforcement — those arrive
-// in Steps 3, 4 and 5.
+// change in that answer. No timing, no storage, no enforcement: index.js hands
+// each report to the store and the enforcer.
 //
 // IMPORTANT: every piece of state in this module is derived, never authoritative.
 // MV3 kills the event page constantly (DESIGN.md §2), so all of it must be
@@ -10,7 +10,7 @@
 // on every single event page start, not just on install.
 
 import { log, warn } from "./log.js";
-import { effectiveMode, hostnameOf, ruleForUrl } from "../common/rules.js";
+import { effectiveMode, ruleForUrl } from "../common/rules.js";
 import { reportsAudible } from "../common/platform.js";
 
 // Firefox for Android has only ever one window, and its `windows` API is
@@ -33,13 +33,12 @@ export const modeOf = (rule) => effectiveMode(rule, platform);
 /**
  * `tabs.onUpdated.addListener` with a filter where the platform accepts one.
  *
- * Firefox for Android has the event but not its filter argument, and rejects
- * the call outright ("Incorrect argument types for tabs.onUpdated") instead of
- * ignoring it. At module scope in index.js that throw aborted evaluation before
- * the message listener existed, so the popup only ever said "Background script
- * not responding" (DESIGN.md §12). The fallback registers unfiltered and
- * drops what the filter would have, so both platforms see the same events.
- * Synchronous on purpose: listeners must exist by the end of module evaluation.
+ * Firefox for Android has the event but not its filter argument, and throws
+ * ("Incorrect argument types for tabs.onUpdated") rather than ignoring it,
+ * which at module scope would stop the event page before its other listeners
+ * exist (DESIGN.md §12). The fallback registers unfiltered and drops what the
+ * filter would have, so both platforms see the same events. Synchronous on
+ * purpose: listeners must exist by the end of module evaluation.
  */
 export function onTabUpdated(handler, properties) {
   try {
@@ -64,7 +63,6 @@ const reported = new Map();
 
 let rules = [];
 let onCountingChange = () => {};
-let traceEnabled = false;
 
 /**
  * Guards against out-of-order async focus resolution: two focus events in quick
@@ -73,14 +71,14 @@ let traceEnabled = false;
  */
 let focusGeneration = 0;
 
-export async function start({ rules: ruleset, onChange, trace = false }) {
+export async function start({ rules: ruleset, onChange }) {
   rules = ruleset;
   onCountingChange = onChange;
-  traceEnabled = trace;
 
-  // Filtering at the source keeps us from waking for every title/favicon change
-  // (on desktop; Android wakes regardless, see onTabUpdated).
-  onTabUpdated(handleTabUpdated, ["audible", "mutedInfo", "url", "status"]);
+  // Only what handleTabUpdated() acts on. Anything more wakes the event page
+  // for nothing: `status` alone on every page load in every tab (on desktop;
+  // Android wakes regardless, see onTabUpdated).
+  onTabUpdated(handleTabUpdated, ["audible", "url"]);
   browser.tabs.onRemoved.addListener(handleTabRemoved);
   browser.tabs.onActivated.addListener(() => resolveFocus("tab activated"));
 
@@ -134,20 +132,6 @@ async function prime() {
 
 function handleTabUpdated(tabId, changeInfo, tab) {
   const rule = ruleForUrl(rules, tab.url);
-
-  // Raw trace of what Firefox actually reports: how `audible` was validated
-  // against real playback, muting and YouTube's muted hover-previews before
-  // any logic depended on it (DESIGN.md §3).
-  if (rule || audibleTabs.has(tabId)) {
-    trace(
-      `tab ${tabId} ${hostnameOf(tab.url) ?? "?"}`,
-      `[${Object.keys(changeInfo).join(",") || "-"}]`,
-      `audible=${tab.audible === true}`,
-      `muted=${tab.mutedInfo?.muted === true}`,
-      `active=${tab.active === true}`,
-    );
-  }
-
   if (rule && modeOf(rule) === "audible" && tab.audible) {
     audibleTabs.set(tabId, rule.id);
   } else {
@@ -160,8 +144,7 @@ function handleTabUpdated(tabId, changeInfo, tab) {
 }
 
 function handleTabRemoved(tabId) {
-  const wasTracked = audibleTabs.delete(tabId);
-  if (wasTracked) trace(`tab ${tabId} closed while counting`);
+  audibleTabs.delete(tabId);
   // Closing a tab promotes a different one to active.
   resolveFocus("tab removed");
 }
@@ -170,7 +153,6 @@ function handleWindowFocusChanged(windowId) {
   if (windowId === NO_WINDOW) {
     // Firefox itself lost focus — the user alt-tabbed to another application.
     // This is what stops `focus` rules from counting while you are in an editor.
-    trace("all Firefox windows lost focus");
     setFocusedRule(null, "browser lost focus", ++focusGeneration);
     return;
   }
@@ -216,11 +198,9 @@ function setFocusedRule(ruleId, why, generation) {
 // --- derivation ----------------------------------------------------------
 
 /**
- * The observers' current view of a rule, as last reported.
- *
- * Step 4 reconciles against this on startup: the ledger may hold an interval
- * left open when the event page was killed, and only the observers can say
- * whether that interval is still live or is a leftover to be settled.
+ * The observers' current view of a rule, as last reported. Startup reconciles
+ * against it: the ledger may hold an interval left open when the event page
+ * was unloaded, and only the observers can say whether it is still live.
  */
 export function isCountingNow(ruleId) {
   return reported.get(ruleId) ?? false;
@@ -251,10 +231,4 @@ function recompute(why) {
     reported.set(rule.id, now);
     onCountingChange(rule, now, why);
   }
-}
-
-// --- tracing -------------------------------------------------------------
-
-function trace(...args) {
-  if (traceEnabled) log(...args);
 }

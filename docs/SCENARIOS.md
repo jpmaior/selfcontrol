@@ -88,6 +88,10 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
    only the options page in a second window. With another tab beside the block page, nothing
    opens: `updating to v…` alone. From a version without it, the window closes, and Firefox
    with it (DESIGN §12).
+10. **A load finishing does not wake it** *(desktop)*. Navigate a tab to a page that takes a
+    while to finish loading (a local server holding the response open for 10 s), and
+    `terminate` while it loads → once it has loaded, `status` still says the event page is
+    stopped. Only a change of `audible` or `url` wakes it (DESIGN §3).
 
 ## Enforcement
 
@@ -153,8 +157,9 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 1. **Live while counting.** Open it while a video plays, even after the page has suspended →
    both rules with used / budget and a meter; the counting rule's numbers move every second.
 2. **Paused.** Pause → the row reads `counts while playing` and the numbers hold.
-3. **Blocked.** Spend a budget → the row turns orange, reads `blocked` (or `done for today`,
-   `done for the week`) and counts down `unlocks in …` in step with the block page.
+3. **Blocked.** Spend a budget → the row turns orange, reads `done for now` (or `done for today`,
+   `done for the week`), as the block page's headline does, and counts down `unlocks in …` in
+   step with it.
 4. **Width.** On desktop nothing overflows or scrolls sideways, including while a `… Confirm`
    step is armed and with a long rule label. On Android it opens as a full-screen sheet.
 
@@ -279,7 +284,7 @@ Serve a page on `127.0.0.1` and give the rule under test that domain with `setLi
    `⛔ blocked re-opened <id>`, and nothing ever logs `▶ COUNTING` for it.
 2. **Close instead.** The same with `onExceed: "close"` → the tab closes at once, and again when
    reopened.
-3. **The popup.** The row reads `always blocked` and `no time allowed`, with a full meter, and
+3. **The popup.** The row reads `blocked` and `no time allowed`, with a full meter, and
    offers neither Lock in nor a pass, even with passes configured on the rule.
 4. **The options page.** Type 0 into Budget → a notice says the site is blocked (or its tabs
    closed, following *When it runs out*) the moment it is opened, and stays that way until the

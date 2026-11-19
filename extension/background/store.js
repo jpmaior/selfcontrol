@@ -21,11 +21,12 @@ import {
   startPass,
   usedInPeriod,
   windowOf,
-} from "./accountant.js";
+} from "../common/accountant.js";
 import { startOfDay, startOfWeek } from "../common/calendar.js";
 import { canUsePass, creditInUse, evaluate, holdAfter, lockInAmount, lockInPreview } from "../common/policy.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
+import { usageKey } from "../common/settings.js";
 
 /**
  * How often an open interval is folded into the ledger and flushed
@@ -35,7 +36,6 @@ import { clock } from "../common/format.js";
 export const CHECKPOINT_MS = 5 * 60_000;
 export const MAX_CHUNK_MS = 1.5 * CHECKPOINT_MS;
 
-const usageKey = (ruleId) => `usage:${ruleId}`;
 const openKey = (ruleId) => `open:${ruleId}`;
 
 /** ruleId -> usage ledger */
@@ -47,7 +47,7 @@ const openSince = new Map();
 /** Rules whose ledger has changed since the last flush. */
 const dirty = new Set();
 
-/** Observable counters, so a test can verify writes are actually rare (DESIGN.md §6). */
+/** Writes since the event page started, for dumpStats(): they should be rare (DESIGN.md §6). */
 export const stats = { localWrites: 0, sessionWrites: 0, keysWritten: 0 };
 
 // --- write serialisation -------------------------------------------------
@@ -112,18 +112,13 @@ export async function load(rules) {
  * block page had promised.
  *
  * Closing credits right up to `now`, which is also how an interval left open
- * when the event page died is settled at startup. The stop that left it is what
- * woke us, so `now` is within startup latency of the truth. An earlier version
- * credited only up to the last flush, reasoning that the stop time was unknown.
- * It is not: a browser exit clears storage.session (so there is no interval
- * left to settle), and every other stop — pause, ending, tab closed, a quiet
- * stretch dropping `audible` — is itself the waking event. The cautious version
- * discarded up to a whole checkpoint per stop, and a video with silent gaps
- * stops many times; a 7-minute video showed as exactly 5:00 (2026-09-05).
- * settle() applies the sleep clamp, so a suspended machine still cannot credit
- * more than MAX_CHUNK_MS here, and credits only up to the instant the rule ran
- * out, for a close that comes late (a frozen Firefox on Android, a sleeping
- * laptop): what came after it is time a spent rule does not count (#35).
+ * when the event page was unloaded is settled at startup (DESIGN.md §5): a
+ * browser exit clears storage.session, so there is no interval left to settle,
+ * and every other stop (pause, ending, tab closed, a quiet stretch dropping
+ * `audible`) is itself the event that woke the page, within startup latency of
+ * `now`. settle() applies the sleep clamp, so a suspended machine still cannot
+ * credit more than MAX_CHUNK_MS here, and credits only up to the instant the
+ * rule ran out when the close comes late (DESIGN.md §7, "Running out late").
  *
  * Returns the milliseconds credited, or 0 if nothing was closed.
  */
@@ -162,23 +157,29 @@ export function anyCounting() {
   return openSince.size > 0;
 }
 
+/** The open interval, from `sinceMs`, in memory and in storage.session. */
+function setOpen(ruleId, sinceMs) {
+  openSince.set(ruleId, sinceMs);
+  stats.sessionWrites++;
+  enqueue(() => browser.storage.session.set({ [openKey(ruleId)]: sinceMs }));
+}
+
+function clearOpen(ruleId) {
+  openSince.delete(ruleId);
+  stats.sessionWrites++;
+  enqueue(() => browser.storage.session.remove(openKey(ruleId)));
+}
+
 /** Open an interval. Idempotent — a rule already counting keeps its start time. */
 export function startCounting(rule, nowMs) {
-  if (openSince.has(rule.id)) return;
-  openSince.set(rule.id, nowMs);
-  stats.sessionWrites++;
-  enqueue(() => browser.storage.session.set({ [openKey(rule.id)]: nowMs }));
+  if (!openSince.has(rule.id)) setOpen(rule.id, nowMs);
 }
 
 /** Close the open interval and fold it in. Returns the milliseconds credited. */
 export function stopCounting(rule, nowMs) {
   const since = openSince.get(rule.id);
   if (since === undefined) return 0;
-
-  openSince.delete(rule.id);
-  stats.sessionWrites++;
-  enqueue(() => browser.storage.session.remove(openKey(rule.id)));
-
+  clearOpen(rule.id);
   return settle(rule, since, nowMs).creditedMs;
 }
 
@@ -198,16 +199,8 @@ export function checkpointRule(rule, nowMs) {
   if (since === undefined) return 0;
 
   const { creditedMs, ranOutAtMs } = settle(rule, since, nowMs);
-  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs).exhausted) {
-    openSince.delete(rule.id);
-    stats.sessionWrites++;
-    enqueue(() => browser.storage.session.remove(openKey(rule.id)));
-    return creditedMs;
-  }
-
-  openSince.set(rule.id, nowMs);
-  stats.sessionWrites++;
-  enqueue(() => browser.storage.session.set({ [openKey(rule.id)]: nowMs }));
+  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs).exhausted) clearOpen(rule.id);
+  else setOpen(rule.id, nowMs);
   return creditedMs;
 }
 
@@ -238,7 +231,7 @@ export function lockInRule(rule, nowMs) {
 export function usePassOnRule(rule, nowMs) {
   checkpointRule(rule, nowMs);
   const usage = ledgerFor(rule.id);
-  if (canUsePass(rule, usage, nowMs) !== null) return false;
+  if (!canUsePass(rule, usage, nowMs)) return false;
   startPass(usage, rule, nowMs);
   dirty.add(rule.id);
   return true;
@@ -266,7 +259,7 @@ function settle(rule, fromMs, toMs) {
  * transitions, and on suspend — never on a timer, and never during playback.
  * Returns the number of rule keys written.
  */
-export function flush(nowMs) {
+export function flush() {
   if (dirty.size === 0) return 0;
 
   const payload = {};
@@ -299,7 +292,8 @@ function forget(ruleId) {
  * `before` is the set the save replaced, as storage reported it, and may also
  * name the set the event page last held: when the save is what woke the page,
  * that is already the new one, and comparing with it alone finds nothing
- * removed (#54). A rule in `next` is never forgotten, whichever set names it.
+ * removed (DESIGN.md §6). A rule in `next` is never forgotten, whichever set
+ * names it.
  */
 export function forgetRemoved(before, next) {
   const keep = new Set(next.map((rule) => rule.id));
@@ -311,9 +305,9 @@ export function forgetRemoved(before, next) {
 /**
  * Forget any usage or open interval that belongs to no rule in `rules`, and
  * return those ids. Run once per start, before anything can write a ledger,
- * with the rules just loaded: a deletion whose settings event was missed, or
- * one from a build that missed it (#54), would otherwise hand its history to
- * the next rule minted with the same id (DESIGN.md §6).
+ * with the rules just loaded: a deletion whose settings event was missed would
+ * otherwise hand its history to the next rule minted with the same id
+ * (DESIGN.md §6).
  */
 export async function sweep(rules) {
   await settled();
@@ -385,7 +379,7 @@ function syncHold(rule, decision, nowMs) {
   if (usage.blockedUntil === next) return;
   usage.blockedUntil = next;
   dirty.add(rule.id);
-  flush(nowMs);
+  flush();
 }
 
 /** Used and pass time since a local period start, for the popup. */
@@ -416,10 +410,9 @@ export function status(rule, nowMs) {
     budgetMs: decision.caps.rolling?.budgetMs ?? 0,
     windowMs: windowOf(rule).windowMs,
     lockIn: lockInPreview(rule, usage, nowMs),
-    passOffer:
-      canUsePass(rule, usage, nowMs) === null
-        ? { left: passesLeft(rule, usage, nowMs), durationMs: rule.passes.durationSec * 1000 }
-        : null,
+    passOffer: canUsePass(rule, usage, nowMs)
+      ? { left: passesLeft(rule, usage, nowMs), durationMs: rule.passes.durationSec * 1000 }
+      : null,
     ...decision,
     today: period(usage, startOfDay(nowMs)),
     week: period(usage, startOfWeek(nowMs)),
@@ -429,9 +422,4 @@ export function status(rule, nowMs) {
 export function describe(rule, nowMs) {
   const s = status(rule, nowMs);
   return `${s.id}: ${clock(s.usedMs)} / ${clock(s.budgetMs)} used (${s.counting ? "counting" : "idle"})`;
-}
-
-/** Raw ledger access, for the console. */
-export function rawLedger(ruleId) {
-  return ledgers.get(ruleId) ?? null;
 }

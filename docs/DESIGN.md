@@ -154,6 +154,11 @@ Every tab carries an `audible` boolean, and we subscribe once with a property fi
 browser.tabs.onUpdated.addListener(handler, { properties: ["audible", "url"] });
 ```
 
+Those two and nothing else, because each property in the filter is a reason to wake the event
+page. `status` and `mutedInfo` were in it at first, from the validation run below; neither is
+read, and `status` changes on every page load in every tab. Muting needs no event of its own:
+a muted tab stops being `audible`.
+
 Why this over a content script:
 
 - No injection, **no host permissions** (see above).
@@ -650,22 +655,22 @@ when `now < blockedUntil` and the credit back is still short of `minUnlockCredit
 background/ (event page — the only stateful component)
   ├─ index.js       wiring, lifecycle, alarms, messaging
   ├─ observers.js   tabs/windows events  →  "is rule R counting right now?"
-  ├─ accountant.js  pure: bucket commit / fold / rolling sum / time-until-credit
   ├─ enforcer.js    over-budget → block or close; guards new navigations
   ├─ store.js       ledgers, debounced flush, storage.session for open intervals
   └─ log.js         the prefixed console logger
 
 common/ (shared by the background and the UI pages)
+  ├─ accountant.js  pure: bucket commit / fold / rolling sum / time-until-credit
   ├─ rules.js       pure: rule shape, URL matching, pattern parsing, validation, form edits
   ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14),
   │                 and how much of an interval counts (§7)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
-  ├─ tabs.js        pure: whether closing a tab, or an update, needs a fresh one (§12), Go
-  │                 back (§19), and which limit the block page describes (§22)
+  ├─ tabs.js        pure: whether closing a tab, or an update, needs a fresh one (§12)
+  ├─ blockpage.js   pure: the block page's Go back (§19) and which limit it describes (§22)
   ├─ settings.js    the `settings` key: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
-  ├─ format.js      duration formatting
+  ├─ format.js      durations and times, how a block is worded, bold runs of text
   └─ theme.css      colours, pills, captions, buttons: shared by every page
 
 options/   edit rules, history, export and import
@@ -674,9 +679,9 @@ blocked/   message + live countdown + the return link + Go back
 ```
 
 **The pure modules carry the tricky logic** (`accountant`, `rules`, `calendar`, `policy`,
-`transfer`, `tabs`), with no `browser.*` and no `Date.now()` — time is always an argument. That
-is what lets `node --test` cover the arithmetic, every decision about a rule and the whole
-validation story without a browser.
+`transfer`, `tabs`, `blockpage`), with no `browser.*` and no `Date.now()` — time is always an
+argument. That is what lets `node --test` cover the arithmetic, every decision about a rule and
+the whole validation story without a browser.
 
 **The options page never messages the background.** It writes `settings`; the background listens
 via `storage.onChanged`, filtered hard to that one key, and re-arms itself. Edits apply without a
@@ -981,7 +986,8 @@ pure and combines every constraint the rule carries:
 - **Exhausted = any constraint says so.** `unlockAtMs` is the *max* over the exhausted
   constraints' release instants, because the site is usable only once all of them allow it.
   `reason` names the one that releases last, so the block page can say "done for today"
-  and count down to midnight rather than to the rolling window's earlier return.
+  and count down to midnight rather than to the rolling window's earlier return. The popup's
+  row words it the same way, from the one map both read (`BLOCKED` in `format.js`).
 - **`remainingMs` is the *min* over the caps**, and `binding` names that cap, so the popup
   can say "12:00 left (today)" when the daily cap is what will bite first.
 - **`nextChangeAtMs` is the earliest instant the answer could flip:** `now + remainingMs`
@@ -1205,7 +1211,7 @@ The button shows only when there is a page to go back to. Freshly opened, the bl
 tab's last entry, so `history.length` gives its position, but not afterwards: go forward from it
 to another site and come Back, and the length also counts the entry ahead. So the page records its
 position in its own entry's `history.state` on the first load, and reads it back from there on
-any later one (`blockPageIndex()` and `canGoBack()` in `tabs.js`). A Short opened in a new tab
+any later one (`blockPageIndex()` and `canGoBack()` in `blockpage.js`). A Short opened in a new tab
 has only itself behind its block page, and no button.
 
 It is no way around a block: where it lands goes through the guard like any navigation. When the
@@ -1213,7 +1219,7 @@ page behind is blocked too, each press is blocked again one page further back, a
 drops what was ahead, so pressing it again keeps going back until it reaches a page that is not
 blocked.
 
-It shows only on the block page of a site blocked outright (`showsGoBack()` in `tabs.js`), and
+It shows only on the block page of a site blocked outright (`showsGoBack()` in `blockpage.js`), and
 only until that page unlocks. That is the block page with no way out of its own: nothing to count
 down to, and Back lands on the blocked page again. A spent budget's block page already has one,
 its countdown, and the button was not wanted there: it first shipped on every block page, which
@@ -1390,12 +1396,12 @@ already re-runs everything (§10).
 
 `null` is the one new thing every reader of `unlockAtMs` has to know. The enforcer leaves `until`
 out of the block page's URL, since `"null"` read back as now. The block page drops its meter and
-countdown and says what lifts the block, the popup says `always blocked` and `no time allowed`,
+countdown and says what lifts the block, the popup says `blocked` and `no time allowed`,
 and the logs say `no budget, stays blocked`.
 
 Raising the budget with the block page open unlocks it on the next refresh, like any other
 unlock, and its usage line moves to the cap with the least left (`describedReason()` in
-`tabs.js`). It used to keep saying the site had no time allowed for as long as the page stayed
+`blockpage.js`). It used to keep saying the site had no time allowed for as long as the page stayed
 open, because the page changed what it describes only when a reply said the rule was spent. A
 spent budget's page that unlocks keeps describing the cap that blocked it.
 

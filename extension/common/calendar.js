@@ -8,8 +8,6 @@
 //
 // The week starts on Monday (weekday 0). Not configurable in this round.
 
-export const DAY_MS = 86_400_000;
-
 const pad = (n) => String(n).padStart(2, "0");
 
 export function startOfDay(ms) {

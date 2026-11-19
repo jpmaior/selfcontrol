@@ -7,15 +7,15 @@
 import { DEFAULT_RULES, withDefaults } from "./rules.js";
 
 export const SETTINGS_KEY = "settings";
+
+/** A rule's hot key: its ledger, written on every flush (store.js). */
+export const usageKey = (ruleId) => `usage:${ruleId}`;
 /**
  * 1: the rolling cap only. 2: dailyBudgetSec and weeklyBudgetSec (and every
  * later additive field). `withDefaults` is the migration in both directions,
  * so the number is informational; nothing branches on it.
  */
 export const SETTINGS_VERSION = 2;
-
-/** Superseded by the options page; removed on sight so it cannot confuse things. */
-const LEGACY_LIMITS_KEY = "debug:limits";
 
 /**
  * The current rule set, seeding storage with the defaults on first run so that
@@ -27,14 +27,10 @@ export async function loadRules() {
   // An empty array is a legitimate configuration — the user deleted every rule.
   // Only a MISSING settings key means first run; checking length here would
   // resurrect the defaults on the next event page start.
-  if (Array.isArray(stored?.rules)) {
-    await browser.storage.local.remove(LEGACY_LIMITS_KEY);
-    return stored.rules.map(withDefaults);
-  }
+  if (Array.isArray(stored?.rules)) return stored.rules.map(withDefaults);
 
   const seeded = DEFAULT_RULES.map(withDefaults);
   await saveRules(seeded);
-  await browser.storage.local.remove(LEGACY_LIMITS_KEY);
   return seeded;
 }
 

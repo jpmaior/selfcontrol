@@ -1,5 +1,5 @@
-// Shared by the background, the block page and the popup, so the three of them
-// cannot drift into formatting durations differently.
+// Shared by the background and the pages, so they cannot drift into formatting
+// durations, or wording a block, differently.
 
 /** mm:ss, or h:mm:ss past an hour. */
 export function clock(ms) {
@@ -41,4 +41,22 @@ export function wallClock(ms, nowMs) {
   const time = `${two(at.getHours())}:${two(at.getMinutes())}`;
   const sameDay = at.toDateString() === new Date(nowMs).toDateString();
   return sameDay ? time : `${DAY_NAMES[at.getDay()]} ${time}`;
+}
+
+/**
+ * What a spent rule is, by the limit that releases last (`reason` in
+ * policy.evaluate): the block page's headline and the popup's row.
+ */
+export const BLOCKED = {
+  rolling: "done for now",
+  daily: "done for today",
+  weekly: "done for the week",
+  always: "blocked",
+};
+
+/** A bold run of text, for a figure or a name inside a sentence. */
+export function strong(text) {
+  const el = document.createElement("strong");
+  el.textContent = text;
+  return el;
 }

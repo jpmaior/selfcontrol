@@ -161,8 +161,7 @@ export async function guardTab(rules, tab, nowMs) {
  * forgetting of their usage (DESIGN.md §6). The handler ignores an alarm for
  * an unknown rule, so a leftover only costs a wake-up, but deleting a rule
  * should leave nothing of it behind. Read from the alarms rather than from the
- * removed rules, so one an earlier build left, or a deletion whose event never
- * ran, goes too.
+ * removed rules, so the alarm of a deletion whose event never ran goes too.
  */
 export async function clearRemovedAlarms(rules) {
   const ids = new Set(rules.map((rule) => rule.id));
