@@ -60,6 +60,7 @@ function outright() {
     remainingMs: 0,
     unlockAtMs: null,
     nextChangeAtMs: null,
+    nextChange: null,
     caps: { rolling: null, daily: null, weekly: null },
     pass: { active: false, endsAtMs: null, leftThisWeek: 0 },
   };
@@ -175,18 +176,27 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
   }
   const remainingMs = exhausted ? 0 : left[binding];
 
-  // --- the earliest instant the answer could flip; null means never on its own
+  // --- the earliest instant the answer could flip; null means never on its own.
+  // `nextChange` says what happens then: "unlock", "pass" (the pass ends), or
+  // the cap that runs out. Not `binding`: while nothing counts, a pass's end is
+  // the alarm even when a cap has less left, and that cap is the binding one.
   let nextChangeAtMs = null;
+  let nextChange = null;
   if (exhausted) {
     nextChangeAtMs = unlockAtMs;
+    nextChange = "unlock";
   } else {
-    const candidates = [];
-    if (counting) candidates.push(nowMs + remainingMs);
-    if (active) candidates.push(pass.endsAtMs);
-    if (candidates.length > 0) nextChangeAtMs = Math.min(...candidates);
+    if (counting) {
+      nextChangeAtMs = nowMs + remainingMs;
+      nextChange = binding;
+    }
+    if (active && (nextChangeAtMs === null || pass.endsAtMs <= nextChangeAtMs)) {
+      nextChangeAtMs = pass.endsAtMs;
+      nextChange = "pass";
+    }
   }
 
-  return { exhausted, reason, binding, remainingMs, unlockAtMs, nextChangeAtMs, caps, pass };
+  return { exhausted, reason, binding, remainingMs, unlockAtMs, nextChangeAtMs, nextChange, caps, pass };
 }
 
 // --- passes (DESIGN.md §17) -------------------------------------------------

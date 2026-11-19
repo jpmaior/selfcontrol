@@ -467,10 +467,18 @@ regenerated.
 | Value | Behaviour |
 |---|---|
 | `0` | pure rolling window — the drip-feed, available on purpose |
-| `300` | **default** — unlock in usable 5-minute chunks |
+| `300` | **default** — unlock in usable 5-minute chunks (a new rule's budget allowing) |
 | `= budgetSec` | strict — stay blocked until the full budget is back |
 
 One knob spans every variant, so it is built in from the start rather than discovered later.
+
+**A new rule's default follows its budget:** five minutes, or the whole budget when that is less
+(`defaultUnlockCreditSec()` in `rules.js`). The credit cannot exceed the budget, so a fixed
+five-minute default made a new rule with a 1-minute budget fail Save on a field nobody had
+touched (issue #39). Strict is the right reading of a small budget: a minute an hour is already
+the smallest usable chunk, and a smaller credit would bring the drip-feed back. The options form
+keeps a new rule's credit on that default as the budget is typed, until the credit is edited
+itself. A saved rule's credit is left alone, since it was chosen, or at least saved as shown.
 
 > ⚠️ **Subtlety, caught by a unit test.** "When will 0 ms of credit be available?" is
 > trivially satisfied *right now*, so passing `minUnlockCreditSec: 0` straight into
@@ -756,6 +764,10 @@ rejected. It would need a week of minute buckets (up to ~200KB rewritten on ever
 and it would hand the block page an unlock time nobody can predict. The week starts on
 Monday; not configurable in this round.
 
+A week's countdown runs for days, so from a day on it is shown with the days first,
+`3d 18:35:52`, rather than `90:35:52` (`countdown()` in `format.js`). Amounts of time, such as a
+weekly budget, stay in hours.
+
 Because a calendar cap returns whole at the boundary, the drip-feed of §8 cannot happen to
 it, so `minUnlockCreditSec` applies to the rolling cap only and its clamp stays in
 `accountant.unlockAt()`.
@@ -784,6 +796,19 @@ but real change in when alarms exist: a blocked rule now holds an alarm at its u
 instant. It was added so a toolbar badge could flip without a user event; the badge was
 built as PR #6 and dropped (2026-09-26), and the alarm stays as it is, because one wake-up
 per unlock costs nothing and dropping it would mean a special case in `nextChangeAtMs`.
+
+`evaluate()` also says what that instant is, in `nextChange`: `"unlock"`, `"pass"` (the pass
+ends), or the cap that runs out. The log used to name `binding` instead, the cap with the least
+left, and the two differ: while nothing counts, a pass's end is the alarm even when a daily cap
+has less left, so using a pass logged `alarm in 5:00 — daily cap runs out` (issue #39).
+
+**One sync per rule at a time.** The alarm that wakes the event page is gone by the time it
+runs, and on that wake-up the alarm handler, the startup `settleAndArm` and the observers' first
+report each sync the rule. Side by side, two of them could each find no alarm and create it: the
+same alarm written twice and logged twice. Seen on desktop whenever two tabs were on the rule's
+site. The "check before creating" guard is only sound one call at a time, since `alarms.create()`
+replaces by name, so `syncRuleAlarm()` queues each rule's syncs behind each other; the later ones
+find the alarm in place. The queue is ephemeral, like the enforcer's claims (§7).
 
 ### The ledger already had what the caps need
 
@@ -935,6 +960,12 @@ spent puts the page back as it was, the link back to text and a countdown, from 
 the new unlock instant. Until 2026-11-18 nothing undid the unlock, so the page went on saying the
 site was available, with a live `Back to …` and the old usage line under it, while the guard
 blocked the link (issue #36). Never a way around the block, but the page said what was not so.
+
+**The usage line is read again at the unlock.** The page unlocks on its own countdown, but its
+usage line comes from the background, through the same refresh that runs every 5 seconds. So
+for up to 5 seconds an unlocked page went on showing the figure from before, `0:32 of 0:30`, when
+the time had come back. The tick that unlocks the page now asks for a fresh status at once,
+while the page is visible, as the periodic refresh does.
 
 The parameter is attacker-shaped input, since anyone can type a block page URL, so
 `returnUrlFrom()` accepts only what `hostnameOf` accepts: `http(s)`, nothing else. A
@@ -1111,9 +1142,11 @@ explanation of how matching works. It is not stored: it is on for a rule that ha
 form keeps what was last typed or pasted in the field, so turning paths on gives back a path
 that was cut away when the field was normalised.
 
-While paths are off, a path in the field gets a note under it (`droppedPath`): "youtube.com/shorts"
+While paths are off, a path in the field gets a note (`droppedPath`): "youtube.com/shorts"
 quietly becoming "youtube.com" would limit the whole site, and the error it then hits ("already
-claimed by YouTube") does not point at the checkbox.
+claimed by YouTube") does not point at the checkbox. The note sits under the checkbox, where the
+explanation of matching takes its place once it is ticked. Above it, the checkbox moved up
+about 24 px under the pointer as the note went.
 
 ### Honest limits
 

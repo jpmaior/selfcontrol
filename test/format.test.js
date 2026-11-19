@@ -21,6 +21,18 @@ test("countdown: rounds up so it never shows 0:00 while waiting", () => {
   assert.equal(countdown(0), "0:00");
 });
 
+test("countdown: a day or more is counted in days, not in hundreds of hours", () => {
+  const H = 3_600_000;
+  assert.equal(countdown(24 * H - 1000), "23:59:59", "under a day is unchanged");
+  assert.equal(countdown(24 * H), "1d 0:00:00");
+  assert.equal(countdown(123 * H + 52 * 60_000 + 32_000), "5d 3:52:32", "a week's countdown");
+  assert.equal(countdown(24 * H + 5 * 60_000 + 1), "1d 0:05:01", "still rounds up");
+});
+
+test("clock: an amount of time keeps its hours", () => {
+  assert.equal(clock(30 * 3_600_000), "30:00:00", "a weekly budget reads as hours");
+});
+
 test("wallClock: today is a time, another day carries the weekday", () => {
   const now = new Date(2026, 8, 14, 10, 0).getTime(); // Monday
   assert.equal(wallClock(new Date(2026, 8, 14, 14, 32).getTime(), now), "14:32");

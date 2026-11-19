@@ -6,7 +6,7 @@
 
 import { log } from "./log.js";
 import { isCountingNow, modeOf, onTabUpdated, platform, setRules, start } from "./observers.js";
-import { clock, wallClock } from "../common/format.js";
+import { clock, countdown, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { blocksOutright, validateRule } from "../common/rules.js";
 import { enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
@@ -350,7 +350,7 @@ globalThis.dumpUsage = async (ruleId) => {
       used: clock(s.usedMs),
       budget: clock(s.budgetMs),
       remaining: clock(s.remainingMs),
-      unlocksIn: !s.exhausted ? "-" : s.unlockAtMs === null ? "never (no budget)" : clock(s.unlockAtMs - now),
+      unlocksIn: !s.exhausted ? "-" : s.unlockAtMs === null ? "never (no budget)" : countdown(s.unlockAtMs - now),
     };
   });
   console.table(table);
