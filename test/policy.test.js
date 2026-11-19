@@ -192,9 +192,9 @@ test("lockInAmount: zero when already blocked", () => {
   assert.equal(lockInAmount(rule({ dailyBudgetSec: 60 }), spent(MIN), T0 + MIN), 0);
 });
 
-test("canLockIn: a reason while blocked, null while open", () => {
-  assert.equal(canLockIn(rule(), spent(3 * MIN), T0 + 3 * MIN), null);
-  assert.equal(typeof canLockIn(rule(), spent(20 * MIN), T0 + 20 * MIN), "string");
+test("canLockIn: while open, not while blocked", () => {
+  assert.equal(canLockIn(rule(), spent(3 * MIN), T0 + 3 * MIN), true);
+  assert.equal(canLockIn(rule(), spent(20 * MIN), T0 + 20 * MIN), false);
 });
 
 test("lockInPreview: what the popup's confirm step shows", () => {
@@ -228,24 +228,24 @@ function midPass(r, minutesIn = 5) {
 
 test("canUsePass: refusals, and the rolling cap is not one of them", () => {
   const now = T0 + 20 * MIN;
-  assert.equal(canUsePass(withPasses(), spent(20 * MIN), now), null, "rolling spent is the whole point");
-  assert.equal(canUsePass(withPasses(), spent(3 * MIN), now), null, "usable before it is spent, too");
+  assert.equal(canUsePass(withPasses(), spent(20 * MIN), now), true, "rolling spent is the whole point");
+  assert.equal(canUsePass(withPasses(), spent(3 * MIN), now), true, "usable before it is spent, too");
 
-  assert.equal(typeof canUsePass(rule(), spent(20 * MIN), now), "string", "no passes configured");
-  assert.equal(typeof canUsePass(withPasses({}, { perWeek: 0 }), spent(20 * MIN), now), "string");
+  assert.equal(canUsePass(rule(), spent(20 * MIN), now), false, "no passes configured");
+  assert.equal(canUsePass(withPasses({}, { perWeek: 0 }), spent(20 * MIN), now), false);
 
   const used = spent(20 * MIN);
   used.passUses = [T0, T0 + MIN];
-  assert.equal(typeof canUsePass(withPasses(), used, now), "string", "allowance spent this week");
+  assert.equal(canUsePass(withPasses(), used, now), false, "allowance spent this week");
 
   const { u, now: later } = midPass(withPasses());
-  assert.equal(typeof canUsePass(withPasses(), u, later), "string", "one already active");
+  assert.equal(canUsePass(withPasses(), u, later), false, "one already active");
 
   for (const countsTowardCaps of [true, false]) {
     const daily = withPasses({ dailyBudgetSec: 5 * 60 }, { countsTowardCaps });
-    assert.equal(typeof canUsePass(daily, spent(5 * MIN), T0 + 5 * MIN), "string", `daily spent, counts=${countsTowardCaps}`);
+    assert.equal(canUsePass(daily, spent(5 * MIN), T0 + 5 * MIN), false, `daily spent, counts=${countsTowardCaps}`);
     const weekly = withPasses({ weeklyBudgetSec: 5 * 60 }, { countsTowardCaps });
-    assert.equal(typeof canUsePass(weekly, spent(5 * MIN), T0 + 5 * MIN), "string", `weekly spent, counts=${countsTowardCaps}`);
+    assert.equal(canUsePass(weekly, spent(5 * MIN), T0 + 5 * MIN), false, `weekly spent, counts=${countsTowardCaps}`);
   }
 });
 
@@ -348,7 +348,7 @@ test("evaluate just after the pass: the rolling cap is spent by the pass buckets
 test("lockInPreview during a pass: ends it and spends what the rolling cap has left", () => {
   const r = withPasses({ minUnlockCreditSec: 20 * 60 });
   const { u, now } = midPass(r);
-  assert.equal(canLockIn(r, u, now), null, "lock-in stays available during a pass");
+  assert.equal(canLockIn(r, u, now), true, "lock-in stays available during a pass");
   const preview = lockInPreview(r, u, now);
   assert.equal(preview.ms, 0, "the rolling cap is already full");
   assert.equal(preview.reason, "rolling");
@@ -433,7 +433,7 @@ test("hold: a pass suspends it like the rest of the rolling cap", () => {
 test("hold: lock-in is refused while held, like any block", () => {
   const now = T0 + 61 * MIN;
   assert.equal(lockInAmount(rule(), heldUsage(), now), 0);
-  assert.equal(typeof canLockIn(rule(), heldUsage(), now), "string");
+  assert.equal(canLockIn(rule(), heldUsage(), now), false);
 });
 
 // --- a zero budget blocks outright -----------------------------------------
@@ -478,8 +478,8 @@ test("evaluate: a zero budget ignores a pass that is still running", () => {
 
 test("a zero budget offers no pass and no lock-in", () => {
   const u = createUsage();
-  assert.equal(typeof canUsePass(outright(), u, T0), "string", "passes are configured, but ignored");
-  assert.equal(typeof canLockIn(outright(), u, T0), "string");
+  assert.equal(canUsePass(outright(), u, T0), false, "passes are configured, but ignored");
+  assert.equal(canLockIn(outright(), u, T0), false);
   assert.equal(lockInAmount(outright(), u, T0), 0);
   assert.equal(lockInPreview(outright(), u, T0), null);
 });

@@ -14,9 +14,6 @@ export const SETTINGS_KEY = "settings";
  */
 export const SETTINGS_VERSION = 2;
 
-/** Superseded by the options page; removed on sight so it cannot confuse things. */
-const LEGACY_LIMITS_KEY = "debug:limits";
-
 /**
  * The current rule set, seeding storage with the defaults on first run so that
  * what the user sees in the options page is always what is actually stored.
@@ -27,14 +24,10 @@ export async function loadRules() {
   // An empty array is a legitimate configuration — the user deleted every rule.
   // Only a MISSING settings key means first run; checking length here would
   // resurrect the defaults on the next event page start.
-  if (Array.isArray(stored?.rules)) {
-    await browser.storage.local.remove(LEGACY_LIMITS_KEY);
-    return stored.rules.map(withDefaults);
-  }
+  if (Array.isArray(stored?.rules)) return stored.rules.map(withDefaults);
 
   const seeded = DEFAULT_RULES.map(withDefaults);
   await saveRules(seeded);
-  await browser.storage.local.remove(LEGACY_LIMITS_KEY);
   return seeded;
 }
 

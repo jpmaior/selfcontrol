@@ -74,7 +74,7 @@ test("load() waits for queued writes instead of reading around them", async () =
   // Settle an interval; the flush is only ENQUEUED, not yet in storage.
   startCounting(r, T0);
   stopCounting(r, T0 + 5 * MIN);
-  flush(T0 + 5 * MIN);
+  flush();
 
   // A settings save reloads immediately. Reading around the queue here would
   // rebuild the ledger from pre-flush storage and drop the 5 minutes.
@@ -144,7 +144,7 @@ test("a settle that folds writes the day history with the ledger", async () => {
   stopCounting(r, T0 + 3 * MIN);
   startCounting(r, T0 + 2 * 60 * MIN);
   stopCounting(r, T0 + 2 * 60 * MIN + MIN);
-  flush(T0 + 2 * 60 * MIN + MIN);
+  flush();
   await settled();
 
   const stored = local.data.get("usage:folder");
@@ -163,7 +163,7 @@ test("load() normalises a ledger stored by an older build", async () => {
   await load([r]);
   startCounting(r, T0);
   stopCounting(r, T0 + MIN);
-  flush(T0 + MIN);
+  flush();
   await settled();
   const stored = local.data.get("usage:legacy");
   assert.deepEqual(Object.keys(stored).sort(), ["b", "blockedUntil", "d", "p", "pass", "passUses"]);
@@ -197,7 +197,7 @@ test("lockInRule: checkpoints the open interval first, then spends the rest", as
   assert.equal(reconcile(r, now + 700, false), 0, "the sweep landing costs nothing");
   assert.equal(status(r, now + 700).usedMs, 20 * MIN);
 
-  flush(now);
+  flush();
   await settled();
   const stored = local.data.get("usage:locker");
   const total = Object.values(stored.b).reduce((a, ms) => a + ms, 0);
@@ -242,7 +242,7 @@ test("usePassOnRule: checkpoints first, so the interval before the click stays i
   assert.equal(s.usedMs, 5 * MIN, "3 before the pass + 2 under it, in the rolling window");
 
   stopCounting(r, clicked + 2 * MIN);
-  flush(clicked + 2 * MIN);
+  flush();
   await settled();
   const stored = local.data.get("usage:passer");
   const sum = (map) => Object.values(map).reduce((a, ms) => a + ms, 0);
@@ -263,7 +263,7 @@ test("flush persists ledgers through the queue", async () => {
 
   startCounting(r, T0);
   stopCounting(r, T0 + 3 * MIN);
-  flush(T0 + 3 * MIN);
+  flush();
   await settled();
 
   const stored = local.data.get("usage:flushed");
@@ -285,7 +285,7 @@ async function spentRule(id, extra = {}) {
   // sleep clamp and credit only MAX_CHUNK_MS.
   for (let at = T0 + CHECKPOINT_MS; at < T0 + 20 * MIN; at += CHECKPOINT_MS) checkpointRule(r, at);
   stopCounting(r, T0 + 20 * MIN);
-  flush(T0 + 20 * MIN);
+  flush();
   return r;
 }
 
@@ -395,7 +395,7 @@ test("spent: a pass under a tab still in use counts from the click to the pass e
   assert.equal(reconcile(r, end, true), 5 * MIN, "credited up to the pass end");
   assert.ok(!hasOpenInterval(r.id), "and closed there");
 
-  flush(end);
+  flush();
   await settled();
   const stored = local.data.get("usage:pass-in-use");
   assert.equal(Object.values(stored.p).reduce((a, ms) => a + ms, 0), 10 * MIN, "all of it pass time");
@@ -492,7 +492,7 @@ test("late: an alarm that fires late credits only up to the instant the budget r
   const s = status(r, late);
   assert.equal(s.usedMs, 20 * MIN, "charged the budget, not the late time");
   assert.equal(s.unlockAtMs, RELEASE, "the unlock an alarm on time would have set");
-  flush(late);
+  flush();
   await settled();
   assert.equal(local.data.get("usage:late-alarm").blockedUntil, RELEASE);
 });
@@ -568,7 +568,7 @@ test("late, below the credit: an alarm that fires late charges the budget, not t
   const s = status(r, late);
   assert.equal(s.usedMs, 5 * MIN, "charged the budget, not the late time");
   assert.equal(s.unlockAtMs, RELEASE_BELOW, "the unlock an alarm on time would have set");
-  flush(late);
+  flush();
   await settled();
   assert.equal(local.data.get("usage:below-alarm").blockedUntil, RELEASE_BELOW);
 });
@@ -603,7 +603,7 @@ test("on time, below the credit: the block is charged exactly the budget and rec
   const onTime = RAN_OUT + 3;
   assert.equal(reconcile(r, onTime, true), 3 * MIN, "nothing for the alarm's own lateness");
   assert.ok(!hasOpenInterval(r.id));
-  flush(onTime);
+  flush();
   await settled();
   assert.equal(local.data.get("usage:below-on-time").blockedUntil, RELEASE_BELOW, "the hold is recorded");
 

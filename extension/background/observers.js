@@ -10,7 +10,7 @@
 // on every single event page start, not just on install.
 
 import { log, warn } from "./log.js";
-import { effectiveMode, hostnameOf, ruleForUrl } from "../common/rules.js";
+import { effectiveMode, ruleForUrl } from "../common/rules.js";
 import { reportsAudible } from "../common/platform.js";
 
 // Firefox for Android has only ever one window, and its `windows` API is
@@ -64,7 +64,6 @@ const reported = new Map();
 
 let rules = [];
 let onCountingChange = () => {};
-let traceEnabled = false;
 
 /**
  * Guards against out-of-order async focus resolution: two focus events in quick
@@ -73,10 +72,9 @@ let traceEnabled = false;
  */
 let focusGeneration = 0;
 
-export async function start({ rules: ruleset, onChange, trace = false }) {
+export async function start({ rules: ruleset, onChange }) {
   rules = ruleset;
   onCountingChange = onChange;
-  traceEnabled = trace;
 
   // Filtering at the source keeps us from waking for every title/favicon change
   // (on desktop; Android wakes regardless, see onTabUpdated).
@@ -134,20 +132,6 @@ async function prime() {
 
 function handleTabUpdated(tabId, changeInfo, tab) {
   const rule = ruleForUrl(rules, tab.url);
-
-  // Raw trace of what Firefox actually reports: how `audible` was validated
-  // against real playback, muting and YouTube's muted hover-previews before
-  // any logic depended on it (DESIGN.md §3).
-  if (rule || audibleTabs.has(tabId)) {
-    trace(
-      `tab ${tabId} ${hostnameOf(tab.url) ?? "?"}`,
-      `[${Object.keys(changeInfo).join(",") || "-"}]`,
-      `audible=${tab.audible === true}`,
-      `muted=${tab.mutedInfo?.muted === true}`,
-      `active=${tab.active === true}`,
-    );
-  }
-
   if (rule && modeOf(rule) === "audible" && tab.audible) {
     audibleTabs.set(tabId, rule.id);
   } else {
@@ -160,8 +144,7 @@ function handleTabUpdated(tabId, changeInfo, tab) {
 }
 
 function handleTabRemoved(tabId) {
-  const wasTracked = audibleTabs.delete(tabId);
-  if (wasTracked) trace(`tab ${tabId} closed while counting`);
+  audibleTabs.delete(tabId);
   // Closing a tab promotes a different one to active.
   resolveFocus("tab removed");
 }
@@ -170,7 +153,6 @@ function handleWindowFocusChanged(windowId) {
   if (windowId === NO_WINDOW) {
     // Firefox itself lost focus — the user alt-tabbed to another application.
     // This is what stops `focus` rules from counting while you are in an editor.
-    trace("all Firefox windows lost focus");
     setFocusedRule(null, "browser lost focus", ++focusGeneration);
     return;
   }
@@ -251,10 +233,4 @@ function recompute(why) {
     reported.set(rule.id, now);
     onCountingChange(rule, now, why);
   }
-}
-
-// --- tracing -------------------------------------------------------------
-
-function trace(...args) {
-  if (traceEnabled) log(...args);
 }

@@ -39,13 +39,6 @@ const RELEASE_ORDER = ["weekly", "daily", "rolling"];
 /** Tie-break order for "which cap has the least left". */
 const CAP_ORDER = ["rolling", "daily", "weekly"];
 
-const NAME = {
-  rolling: "already blocked",
-  daily: "done for today",
-  weekly: "done for the week",
-  always: "always blocked",
-};
-
 /**
  * A rule with a budget of zero (DESIGN.md §22): spent from the start, and with
  * no time to give back there is no instant to count down to (`unlockAtMs`) and
@@ -281,29 +274,25 @@ export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity, 
 // --- passes (DESIGN.md §17) -------------------------------------------------
 
 /**
- * Why a pass cannot be used right now, or null when it can. The rolling cap
- * being spent is deliberately NOT a refusal: that is what a pass is for. A
- * spent calendar cap is, whether or not pass time counts toward the caps,
- * because the cap is already spent.
+ * Whether a pass can be used right now. The rolling cap being spent is
+ * deliberately NOT a refusal: that is what a pass is for. A spent calendar cap
+ * is, whether or not pass time counts toward the caps, because the cap is
+ * already spent.
  */
 export function canUsePass(rule, usage, nowMs) {
   // Its passes are kept for when the budget is raised, but ignored until then.
-  if (blocksOutright(rule)) return NAME.always;
-  if (!(rule.passes?.perWeek > 0)) return "no passes on this rule";
-  if (passActive(usage, nowMs)) return "a pass is already active";
-  if (passesLeft(rule, usage, nowMs) <= 0) return "no passes left this week";
-  const e = evaluate(rule, usage, nowMs);
-  if (e.caps.weekly?.exhausted) return NAME.weekly;
-  if (e.caps.daily?.exhausted) return NAME.daily;
-  return null;
+  if (blocksOutright(rule)) return false;
+  if (!(rule.passes?.perWeek > 0)) return false;
+  if (passActive(usage, nowMs) || passesLeft(rule, usage, nowMs) <= 0) return false;
+  const { caps } = evaluate(rule, usage, nowMs);
+  return !caps.weekly?.exhausted && !caps.daily?.exhausted;
 }
 
 // --- lock in (DESIGN.md §16) ---------------------------------------------
 
-/** Why lock-in is not offered right now, or null when it is. */
+/** Whether lock-in is offered right now: not on a rule already blocked. */
 export function canLockIn(rule, usage, nowMs) {
-  const e = evaluate(rule, usage, nowMs);
-  return e.exhausted ? NAME[e.reason] ?? "blocked" : null;
+  return !evaluate(rule, usage, nowMs).exhausted;
 }
 
 /**
@@ -326,7 +315,7 @@ export function lockInAmount(rule, usage, nowMs) {
  * when the rule would then be blocked. Null when lock-in is not available.
  */
 export function lockInPreview(rule, usage, nowMs) {
-  if (canLockIn(rule, usage, nowMs) !== null) return null;
+  if (!canLockIn(rule, usage, nowMs)) return null;
   const ms = lockInAmount(rule, usage, nowMs);
   const after = evaluate(rule, lockIn(structuredClone(usage), nowMs, ms), nowMs);
   return { ms, unlockAtMs: after.unlockAtMs, reason: after.reason };

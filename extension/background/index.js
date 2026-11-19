@@ -63,7 +63,7 @@ const primed = start({
     // into a blocked site opens nothing, so the moment before the guard
     // redirects the tab cannot move the unlock time.
     const credited = reconcile(rule, now, inUse);
-    flush(now);
+    flush();
     const name = `${rule.id} (${modeOf(rule)})`;
     if (hasOpenInterval(rule.id)) log("▶ COUNTING", name, `— ${why}`);
     else if (inUse) log("▷ spent, not counting", name, `— ${why}`, `+${clock(credited)}`);
@@ -105,7 +105,7 @@ async function settleAndArm(why) {
       log(`reconciled ${rule.id}: credited ${clock(credited)} left open by a previous run`);
     }
   }
-  flush(now);
+  flush();
 
   await syncCheckpointAlarm();
   for (const rule of rules) {
@@ -147,7 +147,7 @@ onRulesChanged(async (next, previous) => {
   // interval would be credited against a rule that no longer exists. The
   // first close of a rule wins; the rest find nothing open.
   for (const rule of before) stopCounting(rule, now);
-  flush(now);
+  flush();
 
   for (const id of forgetRemoved(before, next)) log(`rule removed: ${id} — usage discarded`);
   for (const id of await clearRemovedAlarms(next)) log(`rule removed: ${id} — alarm cleared`);
@@ -211,7 +211,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
         ranOut.push(rule);
       } else if (credited > 0) log(`checkpoint: ${rule.id} +${clock(credited)}`);
     }
-    const written = flush(now);
+    const written = flush();
     if (written > 0) log(`flushed ${written} ledger(s) — ${stats.localWrites} local writes total`);
     await syncCheckpointAlarm();
     for (const rule of ranOut) await enforceRule(rules, rule, now);
@@ -237,7 +237,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   const counting = hasOpenInterval(ruleId);
   if (wasCounting && !counting) log(`■ ${ruleId} spent — stopped counting +${clock(credited)}`);
   if (!wasCounting && counting) log(`▶ COUNTING ${ruleId} — in use as it unlocked`);
-  flush(now);
+  flush();
   await syncCheckpointAlarm();
 
   // The alarm fires at every instant the answer could flip: a cap running out
@@ -278,7 +278,7 @@ const handlers = {
       return { ok: false, error };
     }
     const ms = lockInRule(rule, now);
-    flush(now);
+    flush();
     const snapshot = status(rule, now);
     log(
       `🔒 locked in ${rule.id}: spent ${clock(ms)} on purpose,`,
@@ -295,14 +295,14 @@ const handlers = {
     if (!rule) return { ok: false, error: `no such rule: ${ruleId}` };
     const now = Date.now();
     if (!usePassOnRule(rule, now)) {
-      flush(now);
+      flush();
       return { ok: false, error: "That pass is not available right now." };
     }
     // A tab still on the site, one the sweep never reached, counts from now (§7).
     const wasCounting = hasOpenInterval(ruleId);
     reconcile(rule, now, inUse(rule));
     if (!wasCounting && hasOpenInterval(ruleId)) log(`▶ COUNTING ${ruleId} — in use as the pass began`);
-    flush(now);
+    flush();
     const snapshot = status(rule, now);
     log(
       `🎟 pass used on ${rule.id}: open until ${wallClock(snapshot.pass.endsAtMs, now)},`,
@@ -359,7 +359,7 @@ browser.runtime.onInstalled.addListener(async (details) => {
 
 browser.runtime.onSuspend.addListener(() => {
   log("event page suspending — flushing");
-  flush(Date.now());
+  flush();
   return settled();
 });
 

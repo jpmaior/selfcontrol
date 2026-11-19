@@ -238,7 +238,7 @@ export function lockInRule(rule, nowMs) {
 export function usePassOnRule(rule, nowMs) {
   checkpointRule(rule, nowMs);
   const usage = ledgerFor(rule.id);
-  if (canUsePass(rule, usage, nowMs) !== null) return false;
+  if (!canUsePass(rule, usage, nowMs)) return false;
   startPass(usage, rule, nowMs);
   dirty.add(rule.id);
   return true;
@@ -266,7 +266,7 @@ function settle(rule, fromMs, toMs) {
  * transitions, and on suspend — never on a timer, and never during playback.
  * Returns the number of rule keys written.
  */
-export function flush(nowMs) {
+export function flush() {
   if (dirty.size === 0) return 0;
 
   const payload = {};
@@ -385,7 +385,7 @@ function syncHold(rule, decision, nowMs) {
   if (usage.blockedUntil === next) return;
   usage.blockedUntil = next;
   dirty.add(rule.id);
-  flush(nowMs);
+  flush();
 }
 
 /** Used and pass time since a local period start, for the popup. */
@@ -416,10 +416,9 @@ export function status(rule, nowMs) {
     budgetMs: decision.caps.rolling?.budgetMs ?? 0,
     windowMs: windowOf(rule).windowMs,
     lockIn: lockInPreview(rule, usage, nowMs),
-    passOffer:
-      canUsePass(rule, usage, nowMs) === null
-        ? { left: passesLeft(rule, usage, nowMs), durationMs: rule.passes.durationSec * 1000 }
-        : null,
+    passOffer: canUsePass(rule, usage, nowMs)
+      ? { left: passesLeft(rule, usage, nowMs), durationMs: rule.passes.durationSec * 1000 }
+      : null,
     ...decision,
     today: period(usage, startOfDay(nowMs)),
     week: period(usage, startOfWeek(nowMs)),
@@ -429,9 +428,4 @@ export function status(rule, nowMs) {
 export function describe(rule, nowMs) {
   const s = status(rule, nowMs);
   return `${s.id}: ${clock(s.usedMs)} / ${clock(s.budgetMs)} used (${s.counting ? "counting" : "idle"})`;
-}
-
-/** Raw ledger access, for the console. */
-export function rawLedger(ruleId) {
-  return ledgers.get(ruleId) ?? null;
 }
