@@ -445,6 +445,8 @@ export function status(rule, nowMs) {
     passOffer: canUsePass(rule, usage, nowMs)
       ? { left: passesLeft(rule, usage, nowMs), durationMs: rule.passes.durationSec * 1000 }
       : null,
+    // Whether pass time goes toward the calendar caps, so the popup can count them between readings.
+    passCountsTowardCaps: rule.passes?.countsTowardCaps ?? true,
     ...decision,
     today: period(usage, startOfDay(nowMs)),
     week: period(usage, startOfWeek(nowMs)),
