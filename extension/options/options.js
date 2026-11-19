@@ -9,12 +9,11 @@ import {
   MODES,
   ON_EXCEED,
   blankRule,
-  defaultUnlockCreditSec,
   blocksOutright,
   droppedPath,
+  formEdit,
   hasPath,
   makeRuleId,
-  parsePatterns,
   strip,
   validateRule,
 } from "../common/rules.js";
@@ -84,12 +83,13 @@ let reservedIds = [];
 
 // --- draft <-> form ------------------------------------------------------
 
+// Display only. A rule from setLimits() or an import can hold seconds a
+// minutes field cannot show; the field shows them rounded, and they are only
+// rewritten when that field is edited (formEdit()).
 const toMin = (sec) => Math.round(sec / 60);
-const toSec = (min) => Math.max(0, Math.round(Number(min) || 0) * 60);
 
 /** For the optional caps: blank is "none" (null), anything else is minutes. */
 const toMinOrBlank = (sec) => (sec === null || sec === undefined ? "" : toMin(sec));
-const toSecOrNull = (min) => (String(min).trim() === "" ? null : Math.round(Number(min)) * 60);
 
 const cloneRule = (rule) => structuredClone(rule);
 const nameOf = (rule) => String(rule.label ?? "").trim();
@@ -156,45 +156,27 @@ function buildForm(draft) {
   fillOptions(field("mode"), MODES, draft.mode);
   // Firefox for Android cannot tell when a tab plays sound, so every rule
   // counts while focused there and the choice would be a lie (DESIGN.md §12).
-  // Hidden rather than removed: the select still reads the stored mode back
-  // into the draft, so a rule from desktop keeps counting while playing there.
+  // Hidden, so never edited: the stored mode stays in the draft, and a rule
+  // from desktop keeps counting while playing there.
   field("mode").closest(".field").hidden = !AUDIBLE;
   if (!AUDIBLE) field("match").closest("section").querySelector(".section-title").textContent = "1. Domains";
   fillOptions(field("onExceed"), ON_EXCEED, draft.onExceed);
   showOutright(root, draft);
 
-  // Read every field back into the draft on any change, so validation and Save
-  // always see exactly what is on screen.
+  // Write back only the field that was edited (formEdit()): reading every
+  // field back would round each value to the whole minutes it is shown in.
   root.addEventListener("input", (event) => {
-    draft.label = field("label").value;
-    // Only from the field itself: once it has been normalised on leaving, its
-    // text no longer has the paths that were dropped.
-    if (event.target === field("match")) draft.matchText = field("match").value;
-    draft.matchPaths = field("matchPaths").checked;
-    draft.match = parsePatterns(draft.matchText, { path: draft.matchPaths });
-    if (event.target === field("matchPaths")) field("match").value = draft.match.join(", ");
-    if (event.target === field("match") || event.target === field("matchPaths")) showPaths();
-    draft.mode = field("mode").value;
-    draft.onExceed = field("onExceed").value;
-    // Blank is no budget at all, refused on Save, not 0: an emptied field is
-    // not a choice to block the site outright.
-    draft.budgetSec = toSecOrNull(field("budgetMin").value);
-    // A new rule's cool-down follows its budget until it is edited itself, so
-    // a budget under five minutes is not refused for a default nobody chose
-    // (DESIGN.md §8). A saved rule's cool-down was chosen, or saved as it was.
-    if (event.target === field("unlockMin")) draft.creditEdited = true;
-    if (!draft.id && !draft.creditEdited && draft.budgetSec !== null) {
-      field("unlockMin").value = toMin(defaultUnlockCreditSec(draft.budgetSec));
+    const name = event.target.dataset.field;
+    if (!name) return;
+    const value = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+    const change = formEdit(draft, name, value);
+    Object.assign(draft, change);
+    if (name === "matchPaths") field("match").value = draft.match.join(", ");
+    if (name === "match" || name === "matchPaths") showPaths();
+    // A new rule's cool-down following its budget.
+    if (name === "budgetMin" && "minUnlockCreditSec" in change) {
+      field("unlockMin").value = toMin(draft.minUnlockCreditSec);
     }
-    draft.windowSec = toSec(field("windowMin").value);
-    draft.minUnlockCreditSec = toSec(field("unlockMin").value);
-    draft.dailyBudgetSec = toSecOrNull(field("dailyMin").value);
-    draft.weeklyBudgetSec = toSecOrNull(field("weeklyMin").value);
-    draft.passes = {
-      perWeek: Math.max(0, Math.round(Number(field("passesPerWeek").value) || 0)),
-      durationSec: toSec(field("passMin").value),
-      countsTowardCaps: field("passCounts").checked,
-    };
     showOutright(root, draft);
     if (validating) validateAll();
     message = null;
@@ -563,16 +545,40 @@ function setStatus(text, kind = "") {
   updateSaveBar();
 }
 
-async function save() {
+/**
+ * Validate every draft and, if any needs fixing, show it: from here on every
+ * edit re-validates. Returns how many need fixing.
+ */
+function flagInvalid() {
   validateAll();
   const bad = drafts.filter((draft) => errors.get(draft).length > 0);
-  if (bad.length > 0) {
-    validating = true;
-    // Show a rule that needs fixing, unless the one on screen already does.
-    if (!bad.includes(selected)) selected = bad[0];
+  if (bad.length === 0) return 0;
+  validating = true;
+  // Show a rule that needs fixing, unless the one on screen already does.
+  if (!bad.includes(selected)) selected = bad[0];
+  return bad.length;
+}
+
+const needFixing = (n) => `${n} rule${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} fixing`;
+
+/**
+ * Rules saved before validation was tightened, say with a window longer than
+ * a day, still apply as they are: nothing rewrites stored rules. But Save
+ * would refuse them with the next edit, so they are pointed out up front
+ * rather than when an unrelated change is being saved.
+ */
+function flagSavedInvalid() {
+  const n = flagInvalid();
+  render();
+  if (n > 0) setStatus(`${needFixing(n)} before the next save. Saved rules still apply as they are.`, "bad");
+  return n;
+}
+
+async function save() {
+  const n = flagInvalid();
+  if (n > 0) {
     render();
-    const n = bad.length;
-    setStatus(`${n} rule${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} fixing.`, "bad");
+    setStatus(`${needFixing(n)}.`, "bad");
     return;
   }
 
@@ -609,8 +615,7 @@ function revert() {
   selected = drafts.find((d) => d.id && d.id === keep) ?? drafts[0] ?? null;
   validating = false;
   errors = new Map();
-  render();
-  setStatus("Reverted to what is saved.");
+  if (flagSavedInvalid() === 0) setStatus("Reverted to what is saved.");
 }
 
 // --- export and import ---------------------------------------------------
@@ -704,4 +709,4 @@ drafts = loaded.map(cloneRule);
 selected = drafts[0] ?? null;
 reservedIds = drafts.map((rule) => rule.id);
 await loadHistory(drafts);
-render();
+flagSavedInvalid();

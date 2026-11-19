@@ -76,6 +76,14 @@ export function blocksOutright(rule) {
 export const MAX_DAILY_SEC = 24 * 60 * 60;
 export const MAX_WEEKLY_SEC = 7 * MAX_DAILY_SEC;
 
+/**
+ * The rolling window's range (DESIGN.md §5). Usage is counted in one-minute
+ * buckets and a budget is at least a minute, so a shorter window means
+ * nothing; a longer one is what the daily and weekly caps are for (§14).
+ */
+export const MIN_WINDOW_SEC = 2 * 60;
+export const MAX_WINDOW_SEC = MAX_DAILY_SEC;
+
 // --- matching ------------------------------------------------------------
 
 /**
@@ -298,15 +306,78 @@ export function blankRule() {
   };
 }
 
+// The form shows whole minutes; a rule holds seconds.
+const minutesToSec = (text) => Math.max(0, Math.round(Number(text) || 0) * 60);
+/** Blank is null: no cap, or for the budget no budget at all, which Save refuses. */
+const minutesToSecOrNull = (text) => (String(text).trim() === "" ? null : Math.round(Number(text)) * 60);
+
+/**
+ * What one edit in the rule form changes in its draft: the fields that edit
+ * writes, and nothing else. `field` is the input's `data-field`, `value` its
+ * text, or a checkbox's state.
+ *
+ * Only the edited field, on purpose. The form shows whole minutes, and a rule
+ * from setLimits() or an import can hold seconds it cannot show; reading every
+ * field back on any edit turned a 90 s budget into 120 s, and a 20 s one into
+ * 0, which blocks the site outright, when only the name was being fixed.
+ */
+export function formEdit(draft, field, value) {
+  const passes = (change) => ({ passes: { ...draft.passes, ...change } });
+  switch (field) {
+    case "label":
+    case "mode":
+    case "onExceed":
+      return { [field]: value };
+    case "match":
+      return { matchText: value, match: parsePatterns(value, { path: Boolean(draft.matchPaths) }) };
+    case "matchPaths": {
+      // From what was typed, not the field: once normalised on leaving, its
+      // text no longer has the paths that were dropped.
+      const text = draft.matchText ?? draft.match.join(", ");
+      return { matchPaths: value, match: parsePatterns(text, { path: value }) };
+    }
+    case "budgetMin": {
+      // A blank budget is no budget, refused on Save, not 0: an emptied field
+      // is not a choice to block the site outright.
+      const budgetSec = minutesToSecOrNull(value);
+      // A new rule's cool-down follows its budget until it is edited itself,
+      // so a budget under five minutes is not refused for a default nobody
+      // chose (DESIGN.md §8). A saved rule's cool-down was chosen, or saved as
+      // it was.
+      const follows = !draft.id && !draft.creditEdited && budgetSec !== null;
+      return follows ? { budgetSec, minUnlockCreditSec: defaultUnlockCreditSec(budgetSec) } : { budgetSec };
+    }
+    case "windowMin":
+      return { windowSec: minutesToSec(value) };
+    case "unlockMin":
+      return { minUnlockCreditSec: minutesToSec(value), creditEdited: true };
+    case "dailyMin":
+      return { dailyBudgetSec: minutesToSecOrNull(value) };
+    case "weeklyMin":
+      return { weeklyBudgetSec: minutesToSecOrNull(value) };
+    case "passesPerWeek":
+      return passes({ perWeek: Math.max(0, Math.round(Number(value) || 0)) });
+    case "passMin":
+      return passes({ durationSec: minutesToSec(value) });
+    case "passCounts":
+      return passes({ countsTowardCaps: value });
+    default:
+      return {};
+  }
+}
+
 /**
  * Fill in anything a stored rule is missing, so old data stays loadable. This
  * is the whole settings migration: a rule from a version-1 file gains the
  * calendar caps as "none" and its id, and therefore its usage, is untouched.
+ *
+ * A missing unlock credit is the one a new rule gets, not 0: 0 is the
+ * drip-feed (DESIGN.md §8), a choice nobody made by leaving the field out.
+ * Only a missing one; a null is a value, and validateRule refuses it.
  */
 export function withDefaults(rule) {
-  return {
+  const filled = {
     onExceed: "block",
-    minUnlockCreditSec: 0,
     windowSec: 60 * 60,
     mode: "focus",
     match: [],
@@ -315,6 +386,12 @@ export function withDefaults(rule) {
     ...rule,
     passes: { ...DEFAULT_PASSES, ...(isObject(rule.passes) ? rule.passes : {}) },
   };
+  if (filled.minUnlockCreditSec === undefined) {
+    // A rule with no usable budget is refused for that, and a credit worked
+    // out from it would only add a second error about the same problem.
+    filled.minUnlockCreditSec = Number.isInteger(filled.budgetSec) ? defaultUnlockCreditSec(filled.budgetSec) : 0;
+  }
+  return filled;
 }
 
 const isObject = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
@@ -344,10 +421,43 @@ export function strip(draft) {
   };
 }
 
-/** null means "no cap"; anything else must be a positive whole number of seconds. */
+/**
+ * The types every rule must have, whatever its budget. The form only ever
+ * writes whole seconds, so a value of the wrong type comes from a file or the
+ * console, and the background would read it as soon as the budget is above
+ * zero: a credit that is not a number gives a spent rule no unlock instant, a
+ * numeric id never matches its alarm. Appends to `errors`.
+ */
+function validateTypes(rule, errors) {
+  if (typeof rule.id !== "string") errors.push("The id must be text.");
+  if (!Number.isInteger(rule.windowSec)) errors.push("Window must be a whole number of seconds.");
+  if (!Number.isInteger(rule.minUnlockCreditSec)) errors.push("Unlock credit must be a whole number of seconds.");
+  for (const [value, what] of [
+    [rule.dailyBudgetSec, "Daily cap"],
+    [rule.weeklyBudgetSec, "Weekly cap"],
+  ]) {
+    if (value !== null && value !== undefined && !Number.isInteger(value)) {
+      errors.push(`${what} must be a whole number of seconds, or empty for none.`);
+    }
+  }
+
+  if (rule.passes === undefined) return;
+  const passes = rule.passes;
+  if (!isObject(passes)) {
+    errors.push("Passes must be an object.");
+    return;
+  }
+  if (!Number.isInteger(passes.perWeek)) errors.push("Passes per week must be a whole number, zero or more.");
+  if (!Number.isInteger(passes.durationSec)) errors.push("Pass length must be a whole number of seconds.");
+  if (typeof passes.countsTowardCaps !== "boolean") {
+    errors.push("Whether pass time counts toward the caps must be yes or no.");
+  }
+}
+
+/** null means "no cap"; anything else must be more than zero and fit the period. */
 function validateCap(value, maxSec, what, errors) {
-  if (value === null || value === undefined) return;
-  if (!Number.isInteger(value) || value <= 0) {
+  if (!Number.isInteger(value)) return; // none, or already refused by its type
+  if (value <= 0) {
     errors.push(`${what} must be more than zero, or empty for none.`);
   } else if (value > maxSec) {
     errors.push(`${what} cannot be longer than the period itself.`);
@@ -355,42 +465,37 @@ function validateCap(value, maxSec, what, errors) {
 }
 
 /**
- * The window, the cool-down, the calendar caps and the passes: everything a
- * budget of zero ignores. Appends to `errors`.
+ * The ranges of the window, the cool-down, the calendar caps and the passes:
+ * everything a budget of zero ignores. Their types are validateTypes'.
+ * Appends to `errors`.
  */
 function validateLimits(rule, errors) {
-  if (!(rule.windowSec > 0)) {
-    errors.push("Window must be more than zero.");
-  } else if (rule.budgetSec >= rule.windowSec) {
-    // Not a typo-check but a logic one: you can never spend more time than the
-    // window contains, so such a rule can never block.
-    errors.push("Budget must be smaller than the window, or the rule can never trigger.");
+  if (Number.isInteger(rule.windowSec)) {
+    if (rule.windowSec < MIN_WINDOW_SEC || rule.windowSec > MAX_WINDOW_SEC) {
+      errors.push("Window must be between 2 minutes and 24 hours.");
+    } else if (rule.budgetSec >= rule.windowSec) {
+      // Not a typo-check but a logic one: you can never spend more time than
+      // the window contains, so such a rule can never block.
+      errors.push("Budget must be smaller than the window, or the rule can never trigger.");
+    }
   }
 
-  if (rule.minUnlockCreditSec < 0) {
-    errors.push("Unlock credit cannot be negative.");
-  } else if (rule.minUnlockCreditSec > rule.budgetSec) {
-    errors.push("Unlock credit cannot exceed the budget.");
+  if (Number.isInteger(rule.minUnlockCreditSec)) {
+    if (rule.minUnlockCreditSec < 0) {
+      errors.push("Unlock credit cannot be negative.");
+    } else if (rule.minUnlockCreditSec > rule.budgetSec) {
+      errors.push("Unlock credit cannot exceed the budget.");
+    }
   }
 
   validateCap(rule.dailyBudgetSec, MAX_DAILY_SEC, "Daily cap", errors);
   validateCap(rule.weeklyBudgetSec, MAX_WEEKLY_SEC, "Weekly cap", errors);
 
-  if (rule.passes !== undefined) {
-    const passes = rule.passes;
-    if (!isObject(passes)) {
-      errors.push("Passes must be an object.");
-    } else {
-      if (!Number.isInteger(passes.perWeek) || passes.perWeek < 0) {
-        errors.push("Passes per week must be a whole number, zero or more.");
-      }
-      if (passes.perWeek > 0 && !(Number.isInteger(passes.durationSec) && passes.durationSec > 0)) {
-        errors.push("Pass length must be more than zero.");
-      }
-      if (typeof passes.countsTowardCaps !== "boolean") {
-        errors.push("Whether pass time counts toward the caps must be yes or no.");
-      }
-    }
+  const passes = rule.passes;
+  if (!isObject(passes) || !Number.isInteger(passes.perWeek)) return;
+  if (passes.perWeek < 0) errors.push("Passes per week must be a whole number, zero or more.");
+  if (passes.perWeek > 0 && Number.isInteger(passes.durationSec) && passes.durationSec <= 0) {
+    errors.push("Pass length must be more than zero.");
   }
 }
 
@@ -401,21 +506,30 @@ function validateLimits(rule, errors) {
 export function validateRule(rule, allRules = []) {
   const errors = [];
 
-  if (!String(rule.label ?? "").trim()) errors.push("Needs a name.");
+  if (rule.label !== undefined && rule.label !== null && typeof rule.label !== "string") {
+    errors.push("The name must be text.");
+  } else if (!String(rule.label ?? "").trim()) {
+    errors.push("Needs a name.");
+  }
   if (!Array.isArray(rule.match) || rule.match.length === 0) {
     errors.push("Needs at least one domain.");
   }
   if (!MODES.some((m) => m.value === rule.mode)) errors.push("Unknown counting mode.");
   if (!ON_EXCEED.some((a) => a.value === rule.onExceed)) errors.push("Unknown action.");
 
-  if (!Number.isFinite(rule.budgetSec) || rule.budgetSec < 0) {
+  if (typeof rule.budgetSec !== "number" || !(rule.budgetSec >= 0)) {
     errors.push("Budget must be zero or more.");
+  } else if (!Number.isInteger(rule.budgetSec)) {
+    errors.push("Budget must be a whole number of seconds.");
   }
 
-  // A rule that blocks outright ignores the rest of its limits, so they are
-  // not checked: the form greys them out with whatever they held, and a value
-  // the user cannot edit must never be what refuses the save. Raising the
-  // budget brings them back, checked as usual (DESIGN.md §22).
+  // A rule that blocks outright ignores the rest of its limits, so their
+  // ranges are not checked: the form greys them out with whatever they held,
+  // and a value the user cannot edit must never be what refuses the save.
+  // Raising the budget brings them back, checked as usual (DESIGN.md §22).
+  // Their types are checked regardless, since only a file or the console can
+  // get them wrong.
+  validateTypes(rule, errors);
   if (!blocksOutright(rule)) validateLimits(rule, errors);
 
   // Unsaved rules have no id yet, so two of them are not "duplicates".

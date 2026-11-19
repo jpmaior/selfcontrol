@@ -14,6 +14,7 @@ import {
   blocksOutright,
   effectiveMode,
   droppedPath,
+  formEdit,
   hasPath,
   hostMatches,
   makeRuleId,
@@ -295,6 +296,75 @@ test("validateRule: a budget at or above the window can never trigger", () => {
   assert.deepEqual(validateRule(rule({ budgetSec: 59 * MIN, windowSec: 60 * MIN })), []);
 });
 
+test("validateRule: every value in seconds is a finite whole number, and the id is text", () => {
+  // An import file or setLimits() can carry what the form never produces. A
+  // credit that is not a number gives a spent rule no unlock instant, so no
+  // alarm and no countdown; a numeric id never matches its alarm.
+  const cases = [
+    [{ windowSec: "3600" }, /window must be a whole number of seconds/i],
+    [{ windowSec: Infinity }, /window must be a whole number of seconds/i],
+    [{ windowSec: 3600.5 }, /window must be a whole number of seconds/i],
+    [{ windowSec: null }, /window must be a whole number of seconds/i],
+    [{ minUnlockCreditSec: "abc" }, /unlock credit must be a whole number of seconds/i],
+    [{ minUnlockCreditSec: Number.NaN }, /unlock credit must be a whole number of seconds/i],
+    [{ minUnlockCreditSec: null }, /unlock credit must be a whole number of seconds/i],
+    [{ minUnlockCreditSec: undefined }, /unlock credit must be a whole number of seconds/i],
+    [{ minUnlockCreditSec: 30.5 }, /unlock credit must be a whole number of seconds/i],
+    [{ budgetSec: 90.5 }, /budget must be a whole number of seconds/i],
+    [{ budgetSec: Infinity }, /budget must be a whole number of seconds/i],
+    [{ id: 5 }, /id must be text/i],
+    [{ id: null }, /id must be text/i],
+    [{ label: 5 }, /name must be text/i],
+  ];
+  for (const [overrides, message] of cases) {
+    const errors = validateRule(rule(overrides));
+    assert.ok(errors.some((e) => message.test(e)), `${JSON.stringify(overrides)} → ${JSON.stringify(errors)}`);
+  }
+  assert.deepEqual(validateRule(rule({ budgetSec: 90, minUnlockCreditSec: 20 })), [], "seconds the form cannot show are fine");
+});
+
+test("validateRule: the pass values are whole numbers too, even while passes are off", () => {
+  const passes = (overrides) => rule({ passes: { perWeek: 0, durationSec: 60, countsTowardCaps: true, ...overrides } });
+  for (const durationSec of ["60", 90.5, Infinity, null]) {
+    assert.ok(
+      validateRule(passes({ durationSec })).some((e) => /pass length must be a whole number of seconds/i.test(e)),
+      String(durationSec),
+    );
+  }
+  assert.ok(validateRule(passes({ perWeek: "2" })).length > 0);
+});
+
+test("validateRule: a zero budget still refuses values of the wrong type", () => {
+  // Ignored values are not range-checked (DESIGN.md §22), but the form never
+  // writes a value of the wrong type, so one can only come from a file or the
+  // console, and the background reads them all again once the budget is raised.
+  for (const broken of [
+    { windowSec: "3600" },
+    { minUnlockCreditSec: null },
+    { dailyBudgetSec: "60" },
+    { weeklyBudgetSec: 1.5 },
+    { passes: { perWeek: 0, durationSec: "60", countsTowardCaps: true } },
+    { passes: "two" },
+  ]) {
+    assert.ok(validateRule(rule({ budgetSec: 0, ...broken })).length > 0, JSON.stringify(broken));
+  }
+});
+
+test("validateRule: the rolling window is two minutes to twenty-four hours", () => {
+  // Usage is counted in one-minute buckets and a budget is at least a minute,
+  // so a shorter window means nothing; longer is what the calendar caps are for.
+  const window = (windowSec, budgetSec = 60) => validateRule(rule({ windowSec, budgetSec, minUnlockCreditSec: 0 }));
+  assert.deepEqual(window(2 * MIN), []);
+  assert.deepEqual(window(24 * 60 * MIN), []);
+  for (const windowSec of [0, 60, 2 * MIN - 1, 24 * 60 * MIN + 1, 48 * 60 * MIN]) {
+    assert.ok(
+      window(windowSec, 30).some((e) => /window must be between 2 minutes and 24 hours/i.test(e)),
+      `${windowSec} s`,
+    );
+  }
+  assert.deepEqual(validateRule(rule({ budgetSec: 0, windowSec: 60 })), [], "ignored while blocked outright");
+});
+
 test("validateRule: unlock credit must fit inside the budget", () => {
   assert.deepEqual(validateRule(rule({ minUnlockCreditSec: 0 })), [], "0 is the drip-feed");
   assert.deepEqual(validateRule(rule({ minUnlockCreditSec: 5 * MIN })), [], "equal to budget is strict mode");
@@ -470,7 +540,16 @@ test("withDefaults: an old stored rule missing fields still loads", () => {
   assert.equal(filled.mode, "focus");
   assert.equal(filled.onExceed, "block");
   assert.equal(filled.windowSec, 60 * MIN);
-  assert.equal(filled.minUnlockCreditSec, 0);
+  assert.equal(filled.minUnlockCreditSec, defaultUnlockCreditSec(60), "the new-rule default, not the drip-feed");
+});
+
+test("withDefaults: a missing unlock credit is the one a new rule gets for that budget", () => {
+  const base = { id: "x", label: "X", match: ["x.com"] };
+  assert.equal(withDefaults({ ...base, budgetSec: 30 * MIN }).minUnlockCreditSec, 5 * MIN);
+  assert.equal(withDefaults({ ...base, budgetSec: 2 * MIN }).minUnlockCreditSec, 2 * MIN);
+  assert.equal(withDefaults({ ...base, budgetSec: 0 }).minUnlockCreditSec, 0);
+  assert.equal(withDefaults({ ...base, budgetSec: 30 * MIN, minUnlockCreditSec: 0 }).minUnlockCreditSec, 0, "a stored 0 is kept");
+  assert.equal(withDefaults({ ...base, budgetSec: 30 * MIN, minUnlockCreditSec: null }).minUnlockCreditSec, null, "null is not missing: validation refuses it");
 });
 
 test("withDefaults: never overrides what was stored", () => {
@@ -549,6 +628,57 @@ test("validateRule: passes need a whole non-negative count, a positive length, a
 test("strip: keeps passes in their canonical shape", () => {
   const stripped = strip(rule({ passes: { perWeek: 2, durationSec: 600, countsTowardCaps: false, junk: 1 } }));
   assert.deepEqual(stripped.passes, { perWeek: 2, durationSec: 600, countsTowardCaps: false });
+});
+
+// --- the form ----------------------------------------------------------------
+
+test("formEdit: editing one field changes only that field", () => {
+  // Fields show whole minutes. Reading every field back on any edit turned a
+  // 90 s budget into 120 s, and a 20 s one into 0, blocking the site outright,
+  // when only the name was being fixed.
+  const draft = rule({
+    budgetSec: 90,
+    windowSec: 150,
+    minUnlockCreditSec: 20,
+    dailyBudgetSec: 100,
+    weeklyBudgetSec: 200,
+    passes: { perWeek: 1, durationSec: 90, countsTowardCaps: true },
+  });
+  assert.deepEqual(formEdit(draft, "label", "Renamed"), { label: "Renamed" });
+  assert.deepEqual(formEdit(draft, "mode", "audible"), { mode: "audible" });
+  assert.deepEqual(formEdit(draft, "onExceed", "close"), { onExceed: "close" });
+  assert.deepEqual(formEdit(draft, "windowMin", "3"), { windowSec: 180 });
+  assert.deepEqual(formEdit(draft, "dailyMin", "2"), { dailyBudgetSec: 120 });
+  assert.deepEqual(formEdit(draft, "weeklyMin", ""), { weeklyBudgetSec: null });
+  assert.deepEqual(formEdit(draft, "passesPerWeek", "3").passes, { perWeek: 3, durationSec: 90, countsTowardCaps: true });
+  assert.deepEqual(formEdit(draft, "passCounts", false).passes, { perWeek: 1, durationSec: 90, countsTowardCaps: false });
+  assert.deepEqual(formEdit(draft, "passMin", "2").passes, { perWeek: 1, durationSec: 120, countsTowardCaps: true });
+  assert.deepEqual(formEdit(draft, "budgetMin", "2"), { budgetSec: 120 }, "a saved rule's credit stays");
+  assert.deepEqual(formEdit(draft, "unlockMin", "1"), { minUnlockCreditSec: 60, creditEdited: true });
+  assert.deepEqual(formEdit(draft, "nonsense", "1"), {});
+});
+
+test("formEdit: a blank budget is no budget, not zero", () => {
+  assert.deepEqual(formEdit(rule(), "budgetMin", ""), { budgetSec: null });
+  assert.deepEqual(formEdit(rule(), "budgetMin", "0"), { budgetSec: 0 });
+});
+
+test("formEdit: a new rule's credit follows its budget until it is edited itself", () => {
+  const draft = { ...blankRule(), label: "New", match: ["new.com"] };
+  assert.deepEqual(formEdit(draft, "budgetMin", "2"), { budgetSec: 120, minUnlockCreditSec: 120 });
+  assert.deepEqual(formEdit(draft, "budgetMin", "30"), { budgetSec: 1800, minUnlockCreditSec: 300 });
+  assert.deepEqual(formEdit(draft, "budgetMin", ""), { budgetSec: null }, "nothing to follow");
+  assert.deepEqual(formEdit({ ...draft, creditEdited: true }, "budgetMin", "2"), { budgetSec: 120 });
+});
+
+test("formEdit: the domains are read with the paths setting, and the setting re-reads them", () => {
+  const draft = rule({ match: ["youtube.com"], matchText: "youtube.com", matchPaths: false });
+  assert.deepEqual(formEdit(draft, "match", "https://www.youtube.com/shorts"), {
+    matchText: "https://www.youtube.com/shorts",
+    match: ["youtube.com"],
+  });
+  const typed = { ...draft, matchText: "https://www.youtube.com/shorts" };
+  assert.deepEqual(formEdit(typed, "matchPaths", true), { matchPaths: true, match: ["youtube.com/shorts"] });
 });
 
 // --- the block page's return link -------------------------------------------

@@ -10,7 +10,7 @@ import {
   parseImport,
   serializeRules,
 } from "../extension/common/transfer.js";
-import { DEFAULT_RULES, strip, withDefaults } from "../extension/common/rules.js";
+import { DEFAULT_RULES, defaultUnlockCreditSec, strip, withDefaults } from "../extension/common/rules.js";
 
 const NOW = Date.UTC(2026, 8, 19, 10, 0);
 
@@ -98,6 +98,53 @@ test("parseImport: a rule that blocks outright imports, whatever its ignored lim
   const result = parseImport(JSON.stringify(file));
   assert.equal(result.ok, true, result.error);
   assert.equal(result.rules[1].budgetSec, 0);
+});
+
+test("parseImport: values of the wrong type are refused, naming the rule and the field", () => {
+  const withRule = (overrides) => {
+    const file = serializeRules(DEFAULT_RULES, NOW);
+    file.rules[1] = { ...file.rules[1], ...overrides };
+    return JSON.stringify(file);
+  };
+  const cases = [
+    [withRule({ windowSec: "3600" }), /window/i],
+    // JSON has no Infinity, but 1e999 parses to it.
+    [withRule({ windowSec: 3599 }).replace('"windowSec":3599', '"windowSec":1e999'), /window/i],
+    [withRule({ minUnlockCreditSec: "abc" }), /unlock credit/i],
+    [withRule({ minUnlockCreditSec: null }), /unlock credit/i],
+    [withRule({ budgetSec: 90.5 }), /budget/i],
+    [withRule({ id: 7 }), /id must be text/i],
+    [withRule({ passes: { perWeek: 1, durationSec: "600", countsTowardCaps: true } }), /pass length/i],
+  ];
+  for (const [text, message] of cases) {
+    const result = parseImport(text);
+    assert.equal(result.ok, false, text);
+    assert.match(result.error, /Rule 2 \(Instagram\)/, result.error);
+    assert.match(result.error, message, result.error);
+  }
+});
+
+test("parseImport: a rule without an unlock credit gets the new-rule default, not the drip-feed", () => {
+  const file = serializeRules(
+    [
+      { ...DEFAULT_RULES[0], budgetSec: 30 * 60 },
+      { ...DEFAULT_RULES[1], budgetSec: 2 * 60 },
+    ],
+    NOW,
+  );
+  for (const rule of file.rules) delete rule.minUnlockCreditSec;
+  const result = parseImport(JSON.stringify(file));
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.rules[0].minUnlockCreditSec, defaultUnlockCreditSec(30 * 60));
+  assert.equal(result.rules[1].minUnlockCreditSec, defaultUnlockCreditSec(2 * 60));
+});
+
+test("parseImport: a rolling window over 24 hours is refused", () => {
+  const file = serializeRules(DEFAULT_RULES, NOW);
+  file.rules[0] = { ...file.rules[0], windowSec: 48 * 60 * 60 };
+  const result = parseImport(JSON.stringify(file));
+  assert.equal(result.ok, false);
+  assert.match(result.error, /2 minutes and 24 hours/);
 });
 
 test("parseImport: a rule that is not an object is refused", () => {
