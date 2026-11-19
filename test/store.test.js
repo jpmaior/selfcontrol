@@ -447,3 +447,68 @@ test("outright: the hold is left alone, so a detour through zero does not lift i
   assert.equal(s.exhausted, true, "one minute back is still not five");
   assert.equal(s.unlockAtMs, RELEASE);
 });
+
+// --- a late close credits up to the running out (DESIGN.md §7, #35) ---------
+//
+// Android freezes Firefox in the background, alarms included, and a laptop
+// sleeps through them: the alarm at the instant the budget runs out can fire
+// minutes late, with the tab still on the site. What came after that instant
+// is time a spent rule would not have counted.
+
+/** 15 of 20 minutes credited by checkpoints, the interval open since T0+15. */
+async function runningOut(id, extra = {}) {
+  const r = { ...rule(id), minUnlockCreditSec: 5 * 60, ...extra };
+  await load([r]);
+  startCounting(r, T0);
+  for (let at = T0 + CHECKPOINT_MS; at < T0 + 20 * MIN; at += CHECKPOINT_MS) checkpointRule(r, at);
+  return r;
+}
+
+test("late: an alarm that fires late credits only up to the instant the budget ran out", async () => {
+  const r = await runningOut("late-alarm");
+
+  // Due at T0+20, fired 50 s late with the tab still on the site.
+  const late = T0 + 20 * MIN + 50_000;
+  assert.equal(status(r, late).usedMs, 20 * MIN, "the live reading stops at the budget too");
+  assert.equal(reconcile(r, late, true), 5 * MIN, "credited up to T0+20");
+  assert.ok(!hasOpenInterval(r.id), "and closed");
+
+  const s = status(r, late);
+  assert.equal(s.usedMs, 20 * MIN, "charged the budget, not the late time");
+  assert.equal(s.unlockAtMs, RELEASE, "the unlock an alarm on time would have set");
+  flush(late);
+  await settled();
+  assert.equal(local.data.get("usage:late-alarm").blockedUntil, RELEASE);
+});
+
+test("late: a checkpoint that fires late closes the interval where the rule ran out", async () => {
+  const r = await runningOut("late-checkpoint");
+
+  // Both alarms were due while Firefox was frozen; the checkpoint fires first.
+  const late = T0 + 20 * MIN + 50_000;
+  assert.equal(checkpointRule(r, late), 5 * MIN, "credited up to T0+20");
+  assert.ok(!hasOpenInterval(r.id), "closed: the rule is spent, and a spent rule never counts");
+
+  // Then the rule's own alarm, with the tab still on the site.
+  assert.equal(reconcile(r, late + 5, true), 0, "nothing left to credit");
+  const s = status(r, late + 5);
+  assert.equal(s.usedMs, 20 * MIN);
+  assert.equal(s.unlockAtMs, RELEASE, "a few milliseconds in a newer bucket would have moved it");
+});
+
+test("late: a rule that ran out and came back unseen counts again from now", async () => {
+  // The drip-feed: one minute from an hour ago ages out at T0+3.
+  const r = rule("late-back");
+  await load([r]);
+  startCounting(r, T0 - 58 * MIN);
+  stopCounting(r, T0 - 57 * MIN);
+  startCounting(r, T0 - 18 * MIN);
+  for (let at = T0 - 13 * MIN; at <= T0 - 3 * MIN; at += CHECKPOINT_MS) checkpointRule(r, at);
+
+  // A minute left at T0, so it ran out at T0+1 and was open again from T0+3.
+  // An alarm on time would have put the block page up at T0+1; this one fires at T0+4.
+  const late = T0 + 4 * MIN;
+  assert.equal(reconcile(r, late, true), 4 * MIN, "T0-3 to T0+1, and nothing after");
+  assert.ok(hasOpenInterval(r.id), "open again and still in use, so counting");
+  assert.equal(stopCounting(r, late + 30_000), 30_000, "from now, not from before it ran out");
+});

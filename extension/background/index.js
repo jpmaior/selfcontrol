@@ -188,13 +188,22 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
   const now = Date.now();
 
   if (alarm.name === CHECKPOINT_ALARM) {
+    // A checkpoint that fires late, after Firefox was frozen or the machine
+    // slept, can find a rule ran out on the way: it closes the interval there,
+    // and sweeps as the rule's own alarm, due at the same thaw, would.
+    const ranOut = [];
     for (const rule of rules) {
+      const wasCounting = hasOpenInterval(rule.id);
       const credited = checkpointRule(rule, now);
-      if (credited > 0) log(`checkpoint: ${rule.id} +${clock(credited)}`);
+      if (wasCounting && !hasOpenInterval(rule.id)) {
+        log(`■ ${rule.id} spent — stopped counting at the checkpoint +${clock(credited)}`);
+        ranOut.push(rule);
+      } else if (credited > 0) log(`checkpoint: ${rule.id} +${clock(credited)}`);
     }
     const written = flush(now);
     if (written > 0) log(`flushed ${written} ledger(s) — ${stats.localWrites} local writes total`);
     await syncCheckpointAlarm();
+    for (const rule of ranOut) await enforceRule(rules, rule, now);
     for (const rule of rules) await syncRuleAlarm(rule, now);
     return;
   }

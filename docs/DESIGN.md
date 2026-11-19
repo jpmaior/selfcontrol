@@ -325,6 +325,8 @@ as exactly 5:00, and anything with quiet gaps (which drop `audible` for a second
 time on every gap. The sleep clamp above is what makes crediting up to `now` safe: a laptop
 suspended mid-interval still cannot credit more than 7.5 minutes.
 
+Up to `now`, or up to the instant the rule ran out if that came first (§7, "Running out late").
+
 ---
 
 ## 6. Storage
@@ -427,6 +429,40 @@ on that say-so. A rule they have not reported yet is opened by the report primin
 
 The checkpoint alarm follows `anyCounting()`, which no longer includes a spent rule, so a tab left
 on a spent site costs no wake-ups.
+
+### Running out late
+
+Decided 2026-11-19 (#35). The interval closes when the budget runs out because the rule's alarm
+fires then, and an alarm can fire late: Android freezes Firefox in the background, alarms included
+(§12), and a laptop sleeps through them. The close then credited everything up to the late
+wake-up. On the Android emulator a `focus` rule's alarm fired 50 s late and the rule was charged
+`2:20` of a `1:30` budget, its unlock moved later to match; on a rerun, 88 s late, `4:28` of `3:00`.
+
+The instant the rule ran out can be worked out afterwards, and what came after it is time a spent
+rule does not count. So every credit goes through `creditInUse()` in `policy.js`: of what the
+sleep clamp (§5) lets through, it credits the part before the rule runs out, and records the hold
+(§8) at that instant, as `status()` would have on time. It finds that instant by stepping through
+`evaluate()`'s `nextChangeAtMs`, the instants the alarm would have fired at, so every cap, the
+hold, a pass's end and a rolling window giving time back on the way all count as they do on time.
+The live reading projects the open interval through it too, so the popup never shows more than the
+budget. Rerun with it, the emulator charged `3:00` of `3:00` after an alarm 89 s late, and the
+unlock was the one an alarm on time would have set. Desktop, with Firefox stopped (`SIGSTOP`) across
+the instant, the same: 68 s late, `1:00` of `1:00`.
+
+- **Nothing after that instant counts, even if the rule is open again by the close**, through the
+  drip-feed or midnight. On time, the block page would have been up from that instant, and it is
+  not the site. If the tab is still on the site, `reconcile()` settles the interval up to the
+  instant and counts again from now.
+- **A late checkpoint closes the interval** when the rule ran out on the way and is still spent,
+  and sweeps. Both alarms are due at the same wake-up, and the checkpoint can fire first; moving
+  the interval on instead would leave the rule's alarm a few milliseconds to credit, in a newer
+  bucket, which moves the unlock (above).
+- **A rule already spent at the start of the interval is credited whole.** An interval opens only
+  on a rule that is not spent, and closes when it runs out, so a rule spent at its start had its
+  limits changed under it: a settings change, whose own instant is the close, and the time was
+  allowed when it was used. The event page settles every interval with the old rules before a
+  settings change swaps them in (`onRulesChanged`), so this is the store's contract more than a
+  path the page takes.
 
 ### Each tab is acted on once
 
@@ -543,7 +579,8 @@ background/ (event page — the only stateful component)
 common/ (shared by the background and the UI pages)
   ├─ rules.js       pure: rule shape, URL matching, pattern parsing, validation
   ├─ calendar.js    pure: local days and weeks, DST-safe
-  ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14)
+  ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14),
+  │                 and how much of an interval counts (§7)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
   ├─ tabs.js        pure: whether closing a tab needs a fresh one first (§12), Go back (§19),
   │                 and which limit the block page describes (§22)
@@ -580,8 +617,9 @@ This document records what was decided, not what might come next: open work and 
 **Status: verified on the emulator (2026-11-08, Firefox for Android 159).** The first run found
 two things this section had wrong: the `tabs.onUpdated` filter argument, which Android rejects
 by throwing (fixed by `onTabUpdated()` in `observers.js`), and `audible` mode, which cannot
-work there at all (below). Enforcement, alarms (including waking a suspended event page with
-Firefox in the background), `storage.session` and all three pages work unchanged.
+work there at all (below). Enforcement, alarms (including waking a suspended event page),
+`storage.session` and all three pages work unchanged; in the background, alarms wait while
+Android has Firefox frozen (below).
 [SCENARIOS.md](./SCENARIOS.md) has the checks, and [DEVELOPMENT.md](./DEVELOPMENT.md) how to
 run the extension on a phone or the emulator.
 
@@ -630,8 +668,26 @@ Options if this matters, in rough order of preference:
    has deliberately avoided throughout.
 
 The emulator confirmed the gap: about 85 seconds of a 90-second budget were charged while
-Settings was in front. The alarms kept working with Firefox in the background, so the block
-still landed on time.
+Settings was in front. The block landed on time there only while something was playing; with
+nothing playing it lands when Firefox comes back (below).
+
+### Android freezes Firefox in the background
+
+Found 2026-11-10 (#35), on the emulator (Firefox for Android 159, Android 16). With nothing
+playing, Android freezes Firefox's processes a minute or two after it goes to the background
+(logcat: `am_freeze … org.mozilla.firefox`, 71 s after Settings came to the front in one run,
+72 s and 129 s in others), and nothing in it runs until it comes back: alarms included. A rule
+alarm due at 20:00:20 fired when Firefox was brought back at 20:01:10, `fired +49950ms`.
+
+Media holding a media session keeps it running: Firefox then runs `MediaSessionService` as a
+foreground service, nothing froze, and the block landed at `+140ms`; in a rerun, after almost
+two minutes in the background, `+95ms`. A 60 s clip did it; a 2 s looping clip was not enough.
+
+So a block due while Firefox sits in the background with nothing playing lands the moment it
+comes back, before the site can be seen again. That is the case that matters for a `focus` rule,
+which keeps counting in the background (the gap above), and the rule used to be charged for the
+whole freeze. Since §7's "Running out late" it is charged its budget, and its unlock is where an
+alarm on time would have put it.
 
 ### `audible` mode does not exist on Android
 

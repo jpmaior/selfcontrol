@@ -102,7 +102,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    lands on time: `alarm for youtube fired +Nms vs scheduled`, then one `⛔ youtube spent` line,
    not one per path that woke with it (DESIGN §7), and one `youtube: alarm in … — unlocks
    (rolling)`, also with two tabs on the site (DESIGN §14). N stays within what DESIGN §5
-   records for the platform.
+   records for the platform. Stop Firefox's processes (`SIGSTOP`) across the instant the budget
+   runs out and continue them a minute later → the alarm fires about a minute late, the tab is
+   blocked at once, and `dumpUsage()` shows the budget used, not the budget plus the stop
+   (DESIGN §7).
 7. **The block page unlocks itself.** Leave it open → when the countdown ends it says
    `YouTube is available again` with no reload, and within a second its usage line gives what
    is used now, not the figure from before the time came back (DESIGN §19).
@@ -252,10 +255,19 @@ Serve a page on `127.0.0.1` and give the rule under test that domain with `setLi
    and the popup says `counts while playing`.
 4. **The known gap.** A focus rule keeps counting with Firefox in the background (on the
    emulator, ~85 of a 90 s budget while Settings was in front). Expected until DESIGN §12's gap
-   is closed; if it stops, that section needs updating.
+   is closed; if it stops, that section needs updating. Keep media with a real media session
+   playing in Firefox throughout (a 60 s clip; a 2 s loop is not enough): with nothing playing,
+   Android freezes Firefox a minute or two after it goes to the background (DESIGN §12).
 5. **The lifecycle holds.** An alarm wakes a suspended page and blocks the tab, also with
-   Firefox in the background; after `terminate` the next start finds `1 interval(s) still open`
-   and the accounting is exact.
+   Firefox in the background while media with a real session plays, as in 4: on time, `fired
+   +Nms` within DESIGN §5's range. After `terminate` the next start finds `1 interval(s) still
+   open` and the accounting is exact.
+   **Frozen, then back.** The same with nothing playing, the budget running out after logcat's
+   `am_freeze … org.mozilla.firefox`, and Firefox brought back a minute later → the alarm fires
+   about that late, the tab is blocked at once, and the rule is charged its budget, not the time
+   it was frozen, with the unlock an alarm on time would have set (DESIGN §7, "Running out
+   late"). A freeze has been seen to drop web-ext's connection and its `adb reverse`, though
+   not on every run: if `status` says web-ext is gone, re-run `start` and the `adb reverse`.
 6. **Phone-sized pages.** At 360 dp the block page fits with its return link, and the options
    page stacks with Save pinned to the bottom and draws the history chart.
 7. **Closing leaves no blank tab, unless it was the only tab.** With another tab open, a
