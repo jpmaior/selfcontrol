@@ -267,6 +267,16 @@ nothing.
 - A 20-minute budget can never produce more than ~20 non-zero buckets: **under 1KB per rule**,
   naturally self-limiting.
 
+**The window is two minutes to 24 hours** (`MIN_WINDOW_SEC` and `MAX_WINDOW_SEC` in `rules.js`),
+in validation and in the form. A budget is at least a minute and must be smaller than the window,
+and usage is counted in whole buckets, so a shorter window means nothing. A longer one is what the
+daily and weekly caps are for, and its storage is what §14 rejected long rolling windows over:
+every bucket in the window stays live until it ages out, so a week's window can be thousands of
+them, rewritten on every flush. Until 2026-11-19 only `> 0` was checked, so a rule saved earlier
+can have a window outside the range. It keeps applying as stored, since nothing rewrites stored
+rules; the options page points it out when it opens, because Save would refuse it with the next
+edit (§23).
+
 Live readings (popup, block page) are taken from a **non-destructive projection** that folds the
 currently open interval into a copy of the ledger. That keeps displayed numbers honest between
 checkpoints without writing anything.
@@ -555,6 +565,16 @@ the smallest usable chunk, and a smaller credit would bring the drip-feed back. 
 keeps a new rule's credit on that default as the budget is typed, until the credit is edited
 itself. A saved rule's credit is left alone, since it was chosen, or at least saved as shown.
 
+**A missing credit gets the same default.** `withDefaults()`, the settings migration and the
+first step of an import, used to fill a missing `minUnlockCreditSec` with 0, the drip-feed above,
+which nobody chooses by leaving a field out of a file. It fills `defaultUnlockCreditSec(budget)`
+instead. Only a missing one: `null` is a value, and validation refuses it (§23). No stored rule
+lacks the field, since every path that saves a rule has always written it (the options form,
+the shipped defaults, an import through `withDefaults()`, and `setLimits()`, which patches a
+loaded rule), so nothing already saved changes; the difference is for an import file without it.
+The one way to lose it was a console patch setting it to `undefined`, which validation now
+refuses.
+
 > ⚠️ **Subtlety, caught by a unit test.** "When will 0 ms of credit be available?" is
 > trivially satisfied *right now*, so passing `minUnlockCreditSec: 0` straight into
 > `creditAvailableAt` would mean the rule **never blocks at all** — the exact opposite of the
@@ -619,7 +639,7 @@ background/ (event page — the only stateful component)
   └─ log.js         the prefixed console logger
 
 common/ (shared by the background and the UI pages)
-  ├─ rules.js       pure: rule shape, URL matching, pattern parsing, validation
+  ├─ rules.js       pure: rule shape, URL matching, pattern parsing, validation, form edits
   ├─ calendar.js    pure: local days and weeks, DST-safe
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14),
   │                 and how much of an interval counts (§7)
@@ -923,7 +943,8 @@ A rule can now carry a daily and a weekly cap on top of its rolling window:
 That is what the words mean to the person who typed them, and it makes the unlock instant
 trivial: the start of the next period. A rolling 24-hour or 7-day window was considered and
 rejected. It would need a week of minute buckets (up to ~200KB rewritten on every flush),
-and it would hand the block page an unlock time nobody can predict. The week starts on
+and it would hand the block page an unlock time nobody can predict. For the same reason the
+rolling window itself stops at 24 hours (§5). The week starts on
 Monday; not configurable in this round.
 
 A week's countdown runs for days, so from a day on it is shown with the days first,
@@ -1193,7 +1214,8 @@ half-typed edits would be a surprise on the other end.
 **Import is all-or-nothing.** `parseImport()` fills defaults with `withDefaults`, so a
 version-1 file loads, then validates every rule against the others exactly as the form
 does. One bad rule refuses the whole file and names it, with its position: a half-applied
-rule set is worse than none. Ids are kept as they are in the file, because an id is the
+rule set is worse than none. That includes a value of the wrong type, such as a window of
+`"3600"` or `1e999` (§23). Ids are kept as they are in the file, because an id is the
 key a rule's usage hangs off; duplicate or missing ids are refused for the same reason.
 
 **The user sees the cost before confirming.** `importSummary()` says which ids are new,
@@ -1365,8 +1387,10 @@ there is one way to say "blocked outright".
 
 The ignored values are kept, not cleared. The form greys them out with their values showing, so
 raising the budget gives back exactly what was there. For the same reason `validateRule` does not
-check them while the budget is zero: a value the user cannot edit must not be what refuses Save.
-They are checked again as soon as the budget is above zero. The background never reads them for
+check their ranges while the budget is zero: a value the user cannot edit must not be what refuses
+Save. They are checked again as soon as the budget is above zero. Their types are checked
+regardless (§23): the form never writes a value of the wrong type, so only a file or the console
+can, and that is where it should be refused. The background never reads them for
 such a rule, so an import file carrying odd ones costs nothing until then, when they are refused
 like any others.
 
@@ -1379,3 +1403,54 @@ refuses, because clearing a field to retype it is not a decision to block a site
 rolling cap, so the hold is not touched. Setting the budget to zero and back in the middle of a
 cool-down therefore keeps the cool-down, rather than turning the detour into a way to clear it.
 
+---
+
+## 23. Rule values
+
+Added 2026-11-19 (issue #55). A rule reaches storage three ways: the options form, an import
+(§20) and `setLimits()` on the console. All three pass `validateRule()`, but only the form is
+limited to the values it can show, whole minutes in a number field.
+
+### Whole seconds, checked by type
+
+`validateRule()` requires a finite whole number for every value in seconds (`budgetSec`,
+`windowSec`, `minUnlockCreditSec`, the calendar caps and `passes.durationSec`), a whole number
+of passes, and text for the `id` and the label. It used to check only ranges, and a comparison
+with a string, `NaN`, `null` or `Infinity` is simply false, so they passed. Each one breaks
+something out of sight: a credit that is not a number gives a spent rule no unlock instant, so
+no alarm and no countdown on the block page; a numeric id never matches its alarm, whose name is
+text; an infinite window never lets a minute age out, so a spent rule never unlocks. Others, a
+window of `"3600"` say, happen to work because arithmetic converts them, which is no reason to
+store them.
+
+The types are checked whatever the budget, while the ranges a budget of zero ignores are not
+(§22). A pass length is checked by type even with passes off, and by range only once they are on.
+
+### A rule saved before the checks
+
+Validation runs on save, not on load, and nothing rewrites a stored rule: a rule's values are
+the user's, and a quiet correction would change what is enforced without saying so. So a rule
+saved under looser checks, say a window over 24 hours (§5), keeps applying as stored. But Save
+validates every rule at once, and would refuse it when something else is edited. The options
+page therefore validates the saved rules when it opens, and again after Revert: the rule is
+listed as needing fixing, its form shows why, and the save bar says it must be fixed before the
+next save while the saved rules still apply.
+
+### The form writes back only the field that was edited
+
+The form shows minutes, `Math.round(sec / 60)`, and used to read every field back into the
+draft on any edit. A rule from an import or `setLimits()` can hold seconds a minutes field
+cannot show, so fixing a typo in the label turned a 90 s budget into 120 s, and a 20 s one into
+0, which blocks the site outright (§22). Now an edit writes back only its own field
+(`formEdit()` in `rules.js`, pure and tested): the draft is the source of truth, and the form
+only edits it.
+
+The other way out was to keep reading every field but skip one whose text still equals the
+rounding of the stored value. It was not taken: it cannot tell a field nobody touched from one
+retyped to the same number, and every field, present and future, would need that comparison,
+where writing back one field needs nothing of the kind. The form already asked which field was
+edited for the cool-down that follows a new rule's budget (§8); now every field does.
+
+The field still shows the rounded number: a 90 s budget reads `2`, and a 20 s one `0`. Values
+like these only come from a file or the console, and the form leaves them alone until that field
+is edited.

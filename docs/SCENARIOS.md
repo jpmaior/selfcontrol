@@ -178,11 +178,23 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    limit `reddit.com/r/all` alone, under the *Match paths* checkbox. Tick it →
    `reddit.com/r/all`, the note gives way to a short explanation of matching, the label reads
    `Domains and paths`, and the checkbox does not move; untick → `reddit.com` again.
-   A budget equal to the window is refused with the reason shown, and so is a pattern another
-   rule already has, naming that rule.
+   A budget equal to the window is refused with the reason shown, and so are a window under 2
+   or over 1440 minutes and a pattern another rule already has, naming that rule.
 6. **History.** Once buckets have folded (a short window helps) → the rule's history shows
    today's bar and the 7- and 30-day totals; pass time is a blue segment on top of the used
    time, and the legend adds `On a pass`.
+7. **Seconds the form cannot show.** `setLimits` one rule to a 90 s budget, a 20 s cool-down
+   and a 90 s pass, and another to a 20 s budget with a 20 s cool-down; open the options page,
+   change only each rule's name, and Save → `dumpRaw()` has every value as it was, not rounded
+   to 120 s or 0, and the second rule is not `blocked outright` (DESIGN §23). `setLimits` with a
+   value of the wrong type, such as `{ windowSec: "3600" }` or `{ minUnlockCreditSec: null }`,
+   returns the reason and saves nothing.
+8. **A saved rule the checks now refuse.** Write a rule with a 48-hour window straight into
+   `settings` with `browser.storage.local.set`, as an older version could save, and open the
+   options page → the list says `Needs fixing` on it, its form says the window must be between
+   2 minutes and 24 hours, and the save bar says it needs fixing before the next save; Revert
+   keeps saying so. `dumpUsage()` shows the rule still applied, and `settings` is unchanged until
+   the window is fixed and saved (DESIGN §23).
 
 ## Caps, lock in and passes
 
@@ -269,8 +281,12 @@ Serve a page on `127.0.0.1` and give the rule under test that domain with `setLi
 1. **Round trip.** Export, delete a rule, import the file → the summary says the rule comes back
    without its history; after confirming, it does.
 2. **Edited file.** Change a budget in an exported file and import it → the popup shows the new
-   budget and the old usage. A file with `"budgetSec": -60` is refused, naming the rule, and
+   budget and the old usage. A file with `"budgetSec": -60`, `"windowSec": "3600"`,
+   `"windowSec": 1e999` or a numeric `id` is refused, naming the rule and what is wrong, and
    nothing changes.
+3. **No cool-down in the file.** Remove `minUnlockCreditSec` from a rule in an exported file and
+   import it → the rule's cool-down is 5 minutes, or its budget when that is less, not 0
+   (DESIGN §8).
 
 ## Firefox for Android only
 

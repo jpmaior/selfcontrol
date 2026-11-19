@@ -39,8 +39,9 @@ Updates after that are automatic. Requires Firefox 154+.
 
 Toolbar button → **Edit rules**, or *about:addons → SelfControl → Preferences*.
 
-Each rule takes a name, some domains, a counting mode, a budget, a window, and what to do when
-the budget is spent. Edits apply immediately — no restart.
+Each rule takes a name, some domains, a counting mode, a budget, a window of 2 minutes to 24
+hours, and what to do when the budget is spent. Edits apply immediately — no restart. For more
+than a day, use the daily and weekly caps.
 
 A budget of `0` blocks a site outright: it is blocked (or its tabs closed) the moment it is
 opened, until you raise the budget again. The rule's other limits are greyed out while it is `0`,
