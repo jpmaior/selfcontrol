@@ -312,7 +312,8 @@ forward.
 > the alarm had to wake a suspended event page. Desktop Firefox 158, on `tools/browser.mjs`'s
 > virtual display, over several runs on a host shared with other browsers: `+3ms` to `+587ms`
 > awake, often single digits, and `+75ms` to `+848ms` from suspended, which includes starting the
-> page and loading the ledger before the listener reads the clock. Every rule alarm logs
+> page and loading the ledger before the listener reads the clock (since #58, also priming the
+> observers and the startup settle, §7 "One queue"). Every rule alarm logs
 > `fired +Nms vs scheduled`, and SCENARIOS.md's Enforcement 6 compares it with these. A clamp would show up as a block landing up to a minute
 > late, and only for the final alarm before exhaustion.
 
@@ -464,7 +465,7 @@ from 16:19 to 16:20. The budget's end leaked the same way, from the alarm until 
 page loaded.
 
 A tab that is blocked the moment it lands was not in use. So a rule counts while the observers
-say it is in use *and* it is not spent (`status().exhausted`, whichever cap binds), decided in
+say it is in use *and* it is not spent (`decide().exhausted`, whichever cap binds), decided in
 one place, `store.reconcile()`:
 
 - **In use while spent opens nothing.** The guard and the sweep act as before.
@@ -479,8 +480,9 @@ one place, `store.reconcile()`:
 Every path that can change either half calls it: the observers' reports (`onChange`), the rule's
 alarm, both popup actions, and `settleAndArm` at startup and after a settings change. The
 observers read every rule as idle until they are primed, and an alarm often wakes the event page
-before they are, so the alarm and the pass take an open interval as in use rather than closing it
-on that say-so. A rule they have not reported yet is opened by the report priming always sends.
+before they are. The alarm and the pass used to take an open interval as in use for that reason,
+rather than close it on that say-so; every handler now waits until the observers are primed
+(below, "One queue"), so they ask the observers like the rest.
 
 The checkpoint alarm follows `anyCounting()`, which no longer includes a spent rule, so a tab left
 on a spent site costs no wake-ups.
@@ -525,15 +527,17 @@ the instant, the same: 68 s late, `1:00` of `1:00`.
   it for the settings change above, and credited the whole interval, late time included. Desktop,
   a 1:00 focus rule with 1:00 of credit, 0:20 used, away and back, Firefox stopped across the
   instant: 61 s late, `2:01` of `1:00`, the unlock a minute later. The same reading from the
-  popup, the guard or an alarm's sync, before a late checkpoint or stop, did it too. Now
-  `status()` writes the hold only when no interval is open (§8): 60 s late, `1:00` of `1:00`.
+  popup, the guard or an alarm's sync, before a late checkpoint or stop, did it too. Then
+  `status()` wrote the hold only when no interval was open: 60 s late, `1:00` of `1:00`. Now it
+  writes nothing, and the paths that change the ledger record the hold, never while an interval
+  is open (§8).
   An alarm on time is charged its budget exactly too, not the milliseconds it fires late.
 - **The steps are bounded, and hitting the bound is reported.** Each step ends strictly later
   while the rule is open, so a real interval takes a handful; the bound of 10 000 only keeps a
   bug in `evaluate()` from hanging the event page. Stopping there credits what it had and never
   learns whether the rule ran out, so the rule would be charged as if it had not, with no hold.
   `creditInUse()` stays pure and says `stoppedAtLimit`; the store's settle logs a warning, and
-  the live reading, taken every second, does not (#56).
+  the live reading, taken by every page and every decision, does not (#56).
 
 ### Each tab is acted on once
 
@@ -558,6 +562,55 @@ earlier ones being gone, and by the time it reaches a later tab its query is out
 The claims live in a module-level map, which the event page invariants allow because they are
 ephemeral, derived de-duplication: an unload that drops them costs nothing, since by then the
 actions have landed.
+
+**Still needed with the handlers in one queue** (below). The paths now run one after another
+rather than side by side, but each awaits its `tabs.update` and the next one's `tabs.query`
+still reports the old URL, and the guard acts on the tab its event carried, which is the old URL
+too. Checked on 2026-11-19 (#58) with the claims switched off: on desktop, going Back into a
+blocked site was blocked by the guard and then again by the observers' sweep, awake, and by the
+startup sweep and then the guard when Back woke the page; on the Android emulator, an alarm's
+wake-up blocked the tab from the startup sweep and again from the alarm handler, and a re-open in
+a new tab from the guard and then the observers. Each logged two `⛔` lines for one tab. With
+the claims, one.
+
+### One queue
+
+Decided 2026-11-19 (#58). Every handler that changes state (the alarms, the observers' reports,
+the messages, the settings change and the navigation guard) runs through one queue in
+`index.js` (`inOrder()`), one at a time and in the order its event arrived, and only once
+`ready` has resolved: the rules and their ledgers loaded, the observers primed with the real
+rules, and the startup `settleAndArm` done. The listeners themselves are still registered during
+synchronous module evaluation (§2); only their work waits.
+
+Each handler used to wait for `loaded`, the rules and ledgers alone, and then run side by side
+with the others. Three workarounds followed from that, each with its own comment:
+
+- **`inUse()`.** An alarm often wakes the event page before the observers are primed, when they
+  read every rule as idle, so the alarm and the pass took an open interval as in use rather than
+  close it on the observers' say-so (§7, "A spent rule never counts"). Behind `ready` the
+  observers are primed, so every handler asks them.
+- **`syncRuleAlarm()`'s own per-rule queue**, for the alarm written twice when the alarm
+  handler, the startup sweep and the first report synced it at once (§14). The one queue covers it.
+- **The settings handler reloaded every ledger** from storage while reports and alarms could still
+  change them, which could lose a credit made in that window, and when a save woke the page it
+  could run its reload after the startup `settleAndArm` (seen in the log as a second
+  `ledger loaded` among the startup's lines). It now loads only the rules a save adds
+  (`store.loadNew()`); a kept rule's ledger in memory is the truth, and nothing else runs until
+  the settle is done.
+
+The claims (above) stay, for the reason given there.
+
+What it costs is a wait: a handler that arrives during a start waits for the start, and one that
+arrives behind another waits for it. Neither is noticeable. Going Back into a blocked site with
+the event page suspended is now usually redirected by the startup sweep, before the guard's turn,
+and the block page's navigation started 124 to 265 ms after Back on desktop over three runs,
+against 129 to 263 ms before. An alarm that wakes the page is handled after the start, which has
+already settled the interval and swept, so its lateness in the log (§5) now includes the start;
+desktop gave `+181ms`, the emulator `+159ms` and `+248ms`. Awake, an alarm waited 0 to 1 ms in
+the queue.
+
+Nothing in the queue survives an unload, and nothing needs to: a task cut short leaves its writes
+queued in the store (§6), and the next start rebuilds the rest (§2).
 
 ---
 
@@ -621,15 +674,23 @@ when `now < blockedUntil` and the credit back is still short of `minUnlockCredit
 - **It only marks the block; it does not decide the release.** Release is still "enough credit
   is back", computed from the buckets, so a rule loosened mid-block lets go at once, and an
   expired hold does nothing.
-- **`status()` keeps it in step**: set when a block is seen, moved when the unlock instant moves
-  (a settings change; until §7 stopped spent rules counting, also a moment leaked in after the
-  block), cleared on release. Every decision passes through `status()` — the alarm at the
-  instant the budget runs out, the re-open guard, the popup — so a block cannot be acted on
-  without being recorded. It is flushed at once: one write per block
-  and one per unlock.
-- **Only from the ledger, never from a projection.** While an interval is open, `status()` reads
-  the ledger with that interval projected in (§5), and leaves the hold alone: the settle that
-  closes the interval records it, at the instant the rule ran out (§7, "Running out late").
+- **Recorded where the ledger or the rule changes** (`recordHold()` in `store.js`): set when a
+  block lands, moved when the unlock instant moves (a settings change; until §7 stopped spent
+  rules counting, also a moment leaked in after the block), cleared on release. The paths are
+  `reconcile()`, which every alarm, report, pass and settings change goes through, a lock-in, and
+  a checkpoint that closes the interval. Nothing else can make a block: time alone only hands
+  budget back, and the alarm at the unlock is what clears it. It is flushed at once: one write
+  per block and one per unlock.
+- **Not by `status()`, which only reads.** It used to keep the hold in step, on the grounds that
+  every decision passed through it, so a block could not be acted on without being recorded. But
+  the popup asked it every second and a log line asked it too, every caller paid for a write it
+  might make, and the write from a projection was #53 (§7). A reading that is only a reading can
+  be taken anywhere, and the background's own callers take `decide()` instead, the decision
+  alone (§14).
+- **Only from the ledger, never from a projection.** While an interval is open the ledger is not
+  the whole story, so the hold is left alone: the settle that closes the interval records it, at
+  the instant the rule ran out (§7, "Running out late"). A rule loosened while blocked is
+  reconciled before its interval opens, so the hold it lets go of is cleared first.
 - **Left alone during a pass**, whose unlock instant moves every minute; the alarm at the pass
   end records the hold that follows it.
 - `minUnlockCreditSec: 0` needs 1 ms back, which is what `remaining > 0` already meant: the
@@ -653,7 +714,7 @@ when `now < blockedUntil` and the credit back is still short of `minUnlockCredit
 
 ```
 background/ (event page — the only stateful component)
-  ├─ index.js       wiring, lifecycle, alarms, messaging
+  ├─ index.js       wiring, lifecycle, the one queue, alarms, messaging
   ├─ observers.js   tabs/windows events  →  "is rule R counting right now?"
   ├─ enforcer.js    over-budget → block or close; guards new navigations
   ├─ store.js       ledgers, debounced flush, storage.session for open intervals
@@ -980,7 +1041,10 @@ it, so `minUnlockCreditSec` applies to the rolling cap only and its clamp stays 
 ### One decision: `policy.evaluate()`
 
 `store.status()` used to compute exhaustion from the rolling cap alone. It now spreads
-`policy.evaluate(rule, usage, now, { counting })` over its identity fields. `evaluate` is
+`policy.evaluate(rule, usage, now, { counting })` over its identity fields, for the popup and
+the block page. The background's own callers, which want one field of it (the alarm's
+`nextChangeAtMs`, the guard's `exhausted`, a log line), take `store.decide()`: the same
+`evaluate` over the same projection, without the offers and the calendar totals. `evaluate` is
 pure and combines every constraint the rule carries:
 
 - **Exhausted = any constraint says so.** `unlockAtMs` is the *max* over the exhausted
@@ -1013,8 +1077,8 @@ runs, and on that wake-up the alarm handler, the startup `settleAndArm` and the 
 report each sync the rule. Side by side, two of them could each find no alarm and create it: the
 same alarm written twice and logged twice. Seen on desktop whenever two tabs were on the rule's
 site. The "check before creating" guard is only sound one call at a time, since `alarms.create()`
-replaces by name, so `syncRuleAlarm()` queues each rule's syncs behind each other; the later ones
-find the alarm in place. The queue is ephemeral, like the enforcer's claims (§7).
+replaces by name. `syncRuleAlarm()` used to queue each rule's syncs behind each other; the
+handlers' one queue (§7) now runs them one at a time, and the later ones find the alarm in place.
 
 ### The ledger already had what the caps need
 
@@ -1077,14 +1141,15 @@ popup shows the real consequence, computed by the same `evaluate` that will enfo
 **A confirm that arrives on a spent rule is refused.** The popup offers no lock-in on a spent
 rule, but one armed before the rule ran out can still be confirmed in the five seconds. The
 handler used to spend nothing, reply that it worked and log `spent 0:00`. It now refuses
-whatever `status()` does not offer (`canLockIn()`, the decision behind the offer), as it already
+whenever the rule is spent, which is what withholds the offer (`canLockIn()`), as it already
 refused a rule blocked outright (§22), and the popup says `<label> is already blocked` (#56).
 
 **An action's error stays up for ten seconds**, or until the next action is confirmed. It was
 cleared by the refresh that follows the reply, a message round trip later. A refresh a second
 later was not much better, and staying until the popup closes would leave an error about a click
-long past above rows that have changed since. The same for a pass (§17), and for a message that
-fails outright, which used to be an unhandled rejection with nothing shown.
+long past above rows that have changed since. The popup's local tick clears it (§19), not a
+refresh. The same for a pass (§17), and for a message that fails outright, which used to be an
+unhandled rejection with nothing shown.
 
 ---
 
@@ -1231,6 +1296,22 @@ its position in history whatever the reason, so that switch still finds it.
 Firefox's `tabs.update` can replace the entry instead (`loadReplace`), which would fix the
 browser's own Back, but Firefox for Android's schema has no such property, and the block would
 then drop the blocked page from the tab's history.
+
+### The popup counts by itself
+
+Decided 2026-11-19 (#58). The popup used to ask the background for every rule's status every
+second: a message a second, each building every rule's full status, for numbers the popup can
+mostly work out alone. It now does what the block page does: one reading, a local tick every
+second, and a fresh reading every 5 seconds, after an action, and when a countdown in the
+reading reaches zero (an unlock, a pass ending, a counting rule running out).
+
+The tick counts down to the instants the reading gave and counts up what a counting rule spends:
+its rolling window's used time, the daily and weekly caps' unless a pass leaves them out
+(`passCountsTowardCaps` in the status), and what is left. Kept within the budget, as the
+background's reading is. What time alone does not tell it waits for the next reading: a bucket
+ageing out of the rolling window, a rule starting or stopping, the lock-in preview, anything done
+elsewhere. Only the newest request's answer is shown, so a slow one cannot undo a later one, and
+a failed one leaves the tick going on the last reading, as on the block page.
 
 ---
 
@@ -1434,9 +1515,10 @@ refuses, because clearing a field to retype it is not a decision to block a site
 
 ### The hold is left alone
 
-`status()` keeps `blockedUntil` in step with the rolling cap (§8), and a rule with no budget has no
-rolling cap, so the hold is not touched. Setting the budget to zero and back in the middle of a
-cool-down therefore keeps the cool-down, rather than turning the detour into a way to clear it.
+`recordHold()` keeps `blockedUntil` in step with the rolling cap (§8), and a rule with no budget
+has no rolling cap, so the hold is not touched. Setting the budget to zero and back in the middle
+of a cool-down therefore keeps the cool-down, rather than turning the detour into a way to clear
+it.
 
 ---
 

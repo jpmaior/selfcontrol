@@ -106,8 +106,12 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    before it makes a sound: going back in a minute or more after the block never logs
    `▶ COUNTING`, and the unlock time, on the block page and in `dumpUsage()`, stays where it was
    (DESIGN §7). With the event page awake, the observers sometimes see the site before the guard
-   redirects it and log `▷ spent, not counting`; when going back is what wakes a suspended page
-   (`terminate` first), the guard redirects before the observers start, and only `⛔` appears.
+   redirects it and log `▷ spent, not counting`. When going back is what wakes a suspended page
+   (`terminate` first), the startup sweep redirects it, `⛔ <id> spent — blocked 1 tab(s)`, and
+   the guard, run after it, leaves the tab alone: one `⛔` per Back, and the block page's
+   navigation starts within a few hundred milliseconds of Back (`performance.timeOrigin` on the
+   block page against `Date.now()` taken as Back is called), as before the handlers were queued
+   (DESIGN §7, "One queue").
 3. **Close instead of block.** A rule with `onExceed: "close"` (the default Instagram rule) →
    the tab closes at the budget, and reopening it closes it again at once,
    `⛔ closed re-opened instagram (tab N)`. No tab opens in its place unless it was the last one,
@@ -120,16 +124,17 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 5. **The drip-feed, on request.** `minUnlockCreditSec: 0` → unlocks as soon as the first bucket
    ages out, and re-blocks soon after.
 6. **An alarm wakes the page.** With nothing attached and the page suspended, the block still
-   lands on time: `alarm for youtube fired +Nms vs scheduled`, then one `⛔ youtube spent` line,
-   not one per path that woke with it (DESIGN §7), and one `youtube: alarm in … — unlocks
-   (rolling)`, also with two tabs on the site (DESIGN §14). N stays within what DESIGN §5
-   records for the platform. Stop Firefox's processes (`SIGSTOP`) across the instant the budget
-   runs out and continue them a minute later → the alarm fires about a minute late, the tab is
-   blocked at once, and `dumpUsage()` shows the budget used, not the budget plus the stop
-   (DESIGN §7). The same with less left than the cool-down when the site counts again: on a
-   focus rule, spend a third of the budget, `focus away` and back, then stop across the instant
-   → still the budget, and the unlock an alarm on time would have set (DESIGN §8, "Only from the
-   ledger").
+   lands on time: the start the alarm causes settles the interval (`reconciled youtube: credited
+   0:30 …`) and sweeps, with one `⛔ youtube spent` line, not one per path that woke with it
+   (DESIGN §7), and one `youtube: alarm in … — unlocks (rolling)`, also with two tabs on the site
+   (DESIGN §14); then `alarm for youtube fired +Nms vs scheduled`, its handler queued behind the
+   start, finds nothing left to do. N stays within what DESIGN §5 records for the platform. Stop
+   Firefox's processes (`SIGSTOP`) across the instant the budget runs out and continue them a
+   minute later → the alarm fires about a minute late, the tab is blocked at once, and
+   `dumpUsage()` shows the budget used, not the budget plus the stop (DESIGN §7). The same with
+   less left than the cool-down when the site counts again: on a focus rule, spend a third of the
+   budget, `focus away` and back, then stop across the instant → still the budget, and the unlock
+   an alarm on time would have set (DESIGN §8, "Only from the ledger").
 7. **The block page unlocks itself.** Leave it open → when the countdown ends it says
    `YouTube is available again` with no reload, and within a second its usage line gives what
    is used now, not the figure from before the time came back (DESIGN §19).
@@ -156,6 +161,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 
 1. **Live while counting.** Open it while a video plays, even after the page has suspended →
    both rules with used / budget and a meter; the counting rule's numbers move every second.
+   The popup counts them itself (DESIGN §19): in its tab (`open popup`), wrap
+   `browser.runtime.sendMessage` to record each call → a `status` message every 5 s, not every
+   second, plus one at the instant the rule runs out, when the row turns to `done for now` at
+   once; the same at the unlock.
 2. **Paused.** Pause → the row reads `counts while playing` and the numbers hold.
 3. **Blocked.** Spend a budget → the row turns orange, reads `done for now` (or `done for today`,
    `done for the week`), as the block page's headline does, and counts down `unlocks in …` in
@@ -175,10 +184,12 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    rule and Save → `rule removed: <id> — usage discarded`, and `dumpRaw()` has no `usage:<id>`
    left. Back on the block page, it says `<label> is available again` at once rather than counting
    down to the old time, with no usage line, and `Back to …` opens the site (DESIGN §19).
-   **Asleep too:** lock in a rule from the popup, `terminate`, then delete it and Save → the same
-   log line, no `usage:<id>` or `open:<id>` left, and a rule added again with the same label starts
-   at `0:00`, not blocked (DESIGN §6). After an update from a build that left one behind, the first
-   start logs `swept usage of deleted rule(s): <id>`.
+   **Asleep too:** lock in a rule from the popup, close the popup (it would wake the page),
+   `terminate`, then delete it and Save → the same log line, no `usage:<id>` or `open:<id>` left,
+   and a rule added again with the same label starts at `0:00`, not blocked (DESIGN §6). The save
+   is handled after the start's `state re-armed (startup)`, with no second `ledger loaded` among
+   the start's lines (DESIGN §7, "One queue"). After an update from a build that left one behind,
+   the first start logs `swept usage of deleted rule(s): <id>`.
    **Import keeps the rest:** import a file sharing some ids with the saved rules, with the event
    page terminated → those rules' `usage:<id>` is unchanged, and only the rules the file leaves out
    log `rule removed`.
