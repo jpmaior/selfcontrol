@@ -14,7 +14,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  DAY_MS,
   addDays,
   atMinute,
   dayKey,
@@ -91,7 +90,6 @@ test("addDays walks by calendar days, not by 24-hour blocks", () => {
   assert.equal(addDays(before, 1), local(2026, 3, 29, 9, 0), "same wall clock across DST");
   assert.equal(addDays(before, 1) - before, 23 * HOUR);
   assert.equal(addDays(before, -7), local(2026, 3, 21, 9, 0));
-  assert.equal(DAY_MS, 24 * HOUR);
 });
 
 test("atMinute: a wall-clock minute on a given day, including 1440 as the next midnight", () => {

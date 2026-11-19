@@ -128,8 +128,7 @@ test("checkpoint clamps a sleep gap to 1.5 checkpoints", async () => {
   // The laptop slept for three hours mid-interval; the clamp turns that into
   // minutes, not hours (DESIGN.md §5).
   startCounting(r, T0);
-  assert.equal(checkpointRule(r, T0 + 3 * 60 * MIN), MAX_CHUNK_MS);
-  assert.equal(MAX_CHUNK_MS, 1.5 * CHECKPOINT_MS);
+  assert.equal(checkpointRule(r, T0 + 3 * 60 * MIN), 7.5 * MIN, "three hours asleep count as 7.5 minutes");
   assert.ok(hasOpenInterval(r.id), "a checkpoint folds in without closing the interval");
   assert.equal(status(r, T0 + 3 * 60 * MIN).usedMs, MAX_CHUNK_MS);
 });

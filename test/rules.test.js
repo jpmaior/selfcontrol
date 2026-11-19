@@ -60,9 +60,10 @@ test("ruleForUrl: ignores non-web schemes and undefined urls", () => {
   }
 });
 
-test("ruleForUrl: returns the first matching rule", () => {
-  const rules = [rule({ id: "first" }), rule({ id: "second" })];
-  assert.equal(ruleForUrl(rules, "https://example.com/x").id, "first");
+test("ruleForUrl: finds the rule for the site among others, and none for a site no rule names", () => {
+  const rules = [rule({ id: "other", match: ["example.org"] }), rule({ id: "mine", match: ["example.com"] })];
+  assert.equal(ruleForUrl(rules, "https://example.com/x").id, "mine");
+  assert.equal(ruleForUrl(rules, "https://example.net/x"), null);
 });
 
 test("ruleForUrl: a fully-qualified trailing dot is not a bypass", () => {
