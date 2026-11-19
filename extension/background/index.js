@@ -8,7 +8,7 @@ import { log } from "./log.js";
 import { isCountingNow, modeOf, onTabUpdated, platform, setRules, start } from "./observers.js";
 import { clock, countdown, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules, usageKey } from "../common/settings.js";
-import { blocksOutright, validateRule } from "../common/rules.js";
+import { blocksOutright, ruleFrom, validateRule } from "../common/rules.js";
 import { clearRemovedAlarms, enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
 import { lastTabClosesWindow } from "../common/platform.js";
 import { needsTabAfterUpdate, windowsAnUpdateCloses } from "../common/tabs.js";
@@ -102,7 +102,7 @@ ready
     log(
       `ready on ${info.os} — ${rules.length} rule(s),`,
       `window focus events: ${platform.canTrackWindowFocus ? "yes" : "NO (Android)"}.`,
-      "dumpUsage(), dumpStats(), dumpPlatform(), dumpRaw(), setLimits()",
+      "dumpUsage(), dumpStats(), dumpPlatform(), dumpRaw(), addRule(), setLimits()",
     );
   })
   .catch((error) => log("startup failed:", error));
@@ -405,9 +405,34 @@ globalThis.setLimits = async (ruleId, patch) => {
   return `${ruleId} updated`;
 };
 
+/**
+ * A new rule from some of its fields, the rest as the options form starts a
+ * new one: how a test sets up the rules it needs, since a first run has none
+ * (DESIGN.md §24). Validated and saved like setLimits(). Read from storage,
+ * not from `rules`, which only catches up once the save's change event has
+ * run: two calls in a row would otherwise each save one rule over the other.
+ */
+globalThis.addRule = async (fields) => {
+  await ready;
+  const current = await loadRules();
+  const rule = ruleFrom(fields, current.map((r) => r.id));
+  if (current.some((r) => r.id === rule.id)) return `${rule.id} already exists; setLimits() changes it`;
+  const next = [...current, rule];
+  const errors = validateRule(rule, next);
+  if (errors.length > 0) return errors;
+  await saveRules(next);
+  return `${rule.id} added`;
+};
+
+/**
+ * Delete every rule, as deleting each one in the options page would: through
+ * the same save, so their usage and alarms go too, with no reload. What is
+ * left is what a first run starts with.
+ */
 globalThis.resetRules = async () => {
-  await browser.storage.local.remove("settings");
-  return "settings cleared — reload the extension to re-seed the defaults";
+  await ready;
+  await saveRules([]);
+  return "every rule deleted, with its usage";
 };
 
 globalThis.resetUsage = async () => {

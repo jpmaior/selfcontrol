@@ -32,35 +32,6 @@ export const ON_EXCEED = [
 /** perWeek 0 disables passes; the other two only matter once it is not. */
 export const DEFAULT_PASSES = { perWeek: 0, durationSec: 60 * 60, countsTowardCaps: true };
 
-export const DEFAULT_RULES = [
-  {
-    id: "youtube",
-    label: "YouTube",
-    match: ["youtube.com"],
-    mode: "audible", // clock runs while a matching tab produces sound
-    budgetSec: 5 * 60,
-    windowSec: 60 * 60,
-    onExceed: "block",
-    minUnlockCreditSec: 5 * 60,
-    dailyBudgetSec: null, // calendar day, local time; null = no daily cap
-    weeklyBudgetSec: null, // calendar week from Monday, local time; null = none
-    passes: { ...DEFAULT_PASSES },
-  },
-  {
-    id: "instagram",
-    label: "Instagram",
-    match: ["instagram.com"],
-    mode: "focus", // clock runs only while it is the focused tab
-    budgetSec: 5 * 60,
-    windowSec: 60 * 60,
-    onExceed: "close",
-    minUnlockCreditSec: 5 * 60,
-    dailyBudgetSec: null,
-    weeklyBudgetSec: null,
-    passes: { ...DEFAULT_PASSES },
-  },
-];
-
 /**
  * Whether a rule has no time at all: a budget of zero blocks its sites the
  * moment they are opened, and keeps them blocked until the budget is raised
@@ -304,6 +275,21 @@ export function blankRule() {
     weeklyBudgetSec: null,
     passes: { ...DEFAULT_PASSES },
   };
+}
+
+/**
+ * A whole rule from some of its fields, the rest as a new rule in the form
+ * starts: what the `addRule()` console handle saves, so a test can make the
+ * rules it needs now that a first run has none (DESIGN.md §24). The cool-down
+ * follows the budget unless it is given, as it does in the form, and the id is
+ * minted from the label around `taken` unless one is given. Not validated:
+ * the caller validates against the rule set it joins.
+ */
+export function ruleFrom(fields, taken = []) {
+  const { minUnlockCreditSec, ...defaults } = blankRule();
+  const rule = strip(withDefaults({ ...defaults, ...fields }));
+  if (!rule.id) rule.id = makeRuleId(rule.label, taken);
+  return rule;
 }
 
 // The form shows whole minutes; a rule holds seconds.

@@ -8,7 +8,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  DEFAULT_RULES,
   blankRule,
   defaultUnlockCreditSec,
   blocksOutright,
@@ -22,6 +21,7 @@ import {
   parsePatterns,
   returnUrlFrom,
   ruleForUrl,
+  ruleFrom,
   strip,
   validateRule,
   withDefaults,
@@ -45,6 +45,12 @@ function rule(overrides = {}) {
 
 // --- matching ------------------------------------------------------------
 
+/** A YouTube and an Instagram rule, as the matching tests have always used. */
+const SITES = [
+  rule({ id: "youtube", label: "YouTube", match: ["youtube.com"], mode: "audible" }),
+  rule({ id: "instagram", label: "Instagram", match: ["instagram.com"], onExceed: "close" }),
+];
+
 test("hostMatches: suffix match, not substring", () => {
   assert.ok(hostMatches("youtube.com", "youtube.com"));
   assert.ok(hostMatches("m.youtube.com", "youtube.com"));
@@ -56,7 +62,7 @@ test("hostMatches: suffix match, not substring", () => {
 
 test("ruleForUrl: ignores non-web schemes and undefined urls", () => {
   for (const url of [undefined, "", "about:debugging", "moz-extension://abc/x.html", "file:///tmp"]) {
-    assert.equal(ruleForUrl(DEFAULT_RULES, url), null, `${url} should not match`);
+    assert.equal(ruleForUrl(SITES, url), null, `${url} should not match`);
   }
 });
 
@@ -67,8 +73,8 @@ test("ruleForUrl: finds the rule for the site among others, and none for a site 
 });
 
 test("ruleForUrl: a fully-qualified trailing dot is not a bypass", () => {
-  assert.equal(ruleForUrl(DEFAULT_RULES, "https://youtube.com./watch").id, "youtube");
-  assert.equal(ruleForUrl(DEFAULT_RULES, "https://www.youtube.com./watch").id, "youtube");
+  assert.equal(ruleForUrl(SITES, "https://youtube.com./watch").id, "youtube");
+  assert.equal(ruleForUrl(SITES, "https://www.youtube.com./watch").id, "youtube");
 });
 
 // --- part of a site (#21) --------------------------------------------------
@@ -534,6 +540,32 @@ test("blankRule: its unlock credit is the default for its budget", () => {
   assert.equal(r.minUnlockCreditSec, defaultUnlockCreditSec(r.budgetSec));
 });
 
+// --- a rule from the console (addRule) ------------------------------------
+
+test("ruleFrom: what is given over a new rule's defaults, in the saved shape", () => {
+  const r = ruleFrom({ label: "YouTube", match: ["youtube.com"], mode: "audible" });
+  assert.deepEqual(r, strip({ ...blankRule(), id: "youtube", label: "YouTube", match: ["youtube.com"], mode: "audible" }));
+  assert.deepEqual(validateRule(r, [r]), []);
+});
+
+test("ruleFrom: the id is minted from the label, around the ids taken", () => {
+  assert.equal(ruleFrom({ label: "Instagram" }).id, "instagram");
+  assert.equal(ruleFrom({ label: "Instagram" }, ["instagram"]).id, "instagram-2");
+  assert.equal(ruleFrom({ id: "insta", label: "Instagram" }, ["instagram"]).id, "insta", "a given id is kept");
+});
+
+test("ruleFrom: the cool-down follows a given budget unless it is given too, as in the form", () => {
+  assert.equal(ruleFrom({ label: "A", budgetSec: 30 }).minUnlockCreditSec, 30);
+  assert.equal(ruleFrom({ label: "A", budgetSec: 30 * MIN }).minUnlockCreditSec, 5 * MIN);
+  assert.equal(ruleFrom({ label: "A", budgetSec: 30, minUnlockCreditSec: 0 }).minUnlockCreditSec, 0);
+});
+
+test("ruleFrom: keeps the passes it is not given, and drops what is not a rule field", () => {
+  const r = ruleFrom({ label: "A", passes: { perWeek: 2 }, junk: true });
+  assert.deepEqual(r.passes, { ...blankRule().passes, perWeek: 2 });
+  assert.equal("junk" in r, false);
+});
+
 // --- forward compatibility ----------------------------------------------
 
 test("withDefaults: an old stored rule missing fields still loads", () => {
@@ -558,12 +590,6 @@ test("withDefaults: never overrides what was stored", () => {
   const filled = withDefaults(stored);
   assert.equal(filled.mode, "audible");
   assert.equal(filled.onExceed, "close");
-});
-
-test("the shipped defaults are valid", () => {
-  for (const r of DEFAULT_RULES) {
-    assert.deepEqual(validateRule(r, DEFAULT_RULES), [], `${r.id} should validate`);
-  }
 });
 
 // --- daily and weekly caps ------------------------------------------------

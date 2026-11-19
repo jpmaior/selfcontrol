@@ -37,7 +37,9 @@ Updates after that are automatic. Requires Firefox 154+.
 
 ## Configure
 
-Toolbar button → **Edit rules**, or *about:addons → SelfControl → Preferences*.
+It starts with no rules, so nothing is limited until you add one: the toolbar button offers
+**Add a rule**. After that, toolbar button → **Edit rules**, or *about:addons → SelfControl →
+Preferences*.
 
 Each rule takes a name, some domains, a counting mode, a budget, a window of 2 minutes to 24
 hours, and what to do when the budget is spent. Edits apply immediately — no restart. For more

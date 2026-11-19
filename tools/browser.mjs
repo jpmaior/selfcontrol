@@ -65,7 +65,7 @@ const USAGE = `usage: node tools/browser.mjs <command>   (inside \`nix develop .
                                 --page: only the active tab's viewport
   popup                         click the toolbar button, opening the real popup
   eval <expr> [--bg]            evaluate in the active tab, print the JSON. --bg: in
-                                the event page instead (dumpUsage(), setLimits()…),
+                                the event page instead (addRule(), setLimits()…),
                                 which wakes it
   chrome <expr>                 evaluate in the browser window, with chrome privileges
   terminate                     terminate the event page, like about:debugging;

@@ -24,10 +24,24 @@
     <main class="body">
       <ul class="rules" id="rules"></ul>
 
+      <!-- A first run has no rules (DESIGN.md §24): say what one is for, and
+           open the options page on a new one. -->
+      <section class="empty" id="empty" hidden>
+        <h2>No rules yet</h2>
+        <p>
+          Pick a site you lose time on and give it a budget. Its clock only runs while you are
+          actually using it.
+        </p>
+        <button type="button" id="add" class="primary add">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          Add a rule
+        </button>
+      </section>
+
       <p class="note" id="note" hidden></p>
     </main>
 
-    <footer class="foot">
+    <footer class="foot" id="foot">
       <button type="button" id="edit" class="secondary edit">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />

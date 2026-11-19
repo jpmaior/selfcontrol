@@ -101,10 +101,19 @@
       </li>
     </template>
 
+    <!-- What a first run shows, with no rules at all (DESIGN.md §24). -->
     <template id="empty-template">
       <section class="card empty">
-        <h2>No rules</h2>
-        <p>Nothing is being limited. Add a rule to put a clock on a site.</p>
+        <img src="../icons/rules.svg" alt="" width="48" height="48" />
+        <h2>No rules yet</h2>
+        <p>
+          Nothing is being limited. Add a rule for a site you lose time on: give it a name, its
+          domains and a budget, and its clock runs only while you are using the site.
+        </p>
+        <button type="button" class="primary" data-action="add">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          Add a rule
+        </button>
       </section>
     </template>
 

@@ -48,7 +48,8 @@ the most important decision in the design: there is no YouTube feature and no In
 feature, only modes.
 
 Later sections add optional fields to the rule (daily and weekly caps, §14; passes, §17).
-`DEFAULT_RULES` and `withDefaults()` in `rules.js` are the full shape.
+`blankRule()` and `withDefaults()` in `rules.js` are the full shape. The two rules above are
+examples: a first run starts with none (§24).
 
 A tab belongs to at most one rule: the one with the most specific matching pattern, so a
 `youtube.com/shorts` rule can sit beside a `youtube.com` one (§21).
@@ -400,9 +401,8 @@ Two parts, either of which would have caught that run:
   rules just loaded is forgotten. It runs inside `loaded`, before any handler can write a ledger,
   so nothing it removes belongs to a live rule. It catches a deletion whose event never ran, and
   the orphans an earlier build left, on the first start after the update. With nothing to sweep
-  it reads both areas once and writes nothing. A rule set seeded afresh (`resetRules()`) keeps
-  only the usage of the default rules whose ids it shares: the other rules are gone, and so is
-  their usage.
+  it reads both areas once and writes nothing. `resetRules()` saves an empty rule set, so it
+  takes this path too: every rule's usage and alarm go with it (§24).
 
 The rule's alarm (§14) goes on both paths too (`clearRemovedAlarms()` in `enforcer.js`, which owns
 the alarm names): any `rule:<id>` alarm whose id is not in the rules. Its handler ignores an
@@ -522,7 +522,7 @@ the instant, the same: 68 s late, `1:00` of `1:00`.
   store's contract more than a path the page takes.
 - **So nothing may write the hold before the settle** (#53). `status()` used to record it from
   its projection, and `reconcile()` asks `status()` before it settles. With less left at the
-  interval's start than the unlock credit, as on the default rules (five minutes of budget,
+  interval's start than the unlock credit, as on a new rule's defaults (five minutes of budget,
   five of credit) after any earlier use, the settle then found the rule held at the start, took
   it for the settings change above, and credited the whole interval, late time included. Desktop,
   a 1:00 focus rule with 1:00 of credit, 0:20 used, away and back, Firefox stopped across the
@@ -1571,3 +1571,47 @@ edited for the cool-down that follows a new rule's budget (§8); now every field
 The field still shows the rounded number: a 90 s budget reads `2`, and a 20 s one `0`. Values
 like these only come from a file or the console, and the form leaves them alone until that field
 is edited.
+
+---
+
+## 24. Starting with no rules
+
+Decided 2026-11-19 (#59). A first install used to seed two rules, YouTube while playing and
+Instagram while focused, five minutes an hour each. It now starts with none, and the popup and
+the options page invite the user to add the first one. A rule nobody chose limits a site they
+may not use, at a budget they did not pick, and the first thing they learned was how to undo it.
+
+### What a first run is
+
+No `settings` key reads as an empty rule set (`loadRules()`), the same as a saved empty one, and
+nothing is written until the first save: there is no first-run flag, and nothing to tell the two
+apart by. Loading never rewrites what is stored, so an install that already has rules keeps them
+exactly as they are, the seeded ones included: their ids, and so their usage (§6), are never
+regenerated, and nothing tries to recognise a seeded rule to remove it. An install whose every
+rule was deleted shows the same empty states as a new one, which is what it is in effect.
+
+### The empty states
+
+The popup, with no rules, replaces its rows and *Edit rules* with a short invitation and one
+*Add a rule* button. The button opens the options page on a new rule's form: the page is opened
+as `options.html#add-<n>`, adds a rule for that request, and drops the hash, so a reload adds
+nothing. An options tab already open is reused rather than a second one opened, so unsaved edits
+are not split across two tabs: changing only the hash does not reload it. Each request carries
+its own `<n>` because Firefox for Android navigates an open tab to the new hash twice, two
+`hashchange` events for one tap, which added two rules on the emulator. The popup also drops the
+row of a rule deleted while it is open, so deleting the last one brings the invitation back.
+
+The options page, with no rules, says what a rule is in its detail pane, with its own *Add a
+rule* button beside the list's. Its wording names no counting mode, since Android offers none
+(§12).
+
+### Rules for tests
+
+The browser scenarios name a `youtube` and an `instagram` rule, which used to come from the seed.
+A test now makes them with the `addRule()` console handle: the fields it is given over a new
+rule's defaults, the cool-down following the budget unless given and the id minted from the
+label, as the options form does (`ruleFrom()` in `rules.js`, pure and tested), then validated
+against the saved rules and saved like `setLimits()`. It reads the rules from storage rather than
+the event page's copy, which catches up only once the save's change event has run, so two calls
+in a row keep both rules. `resetRules()` deletes every rule through the same save, and leaves
+what a first run starts with.

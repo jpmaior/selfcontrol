@@ -273,9 +273,13 @@ function renderList() {
 }
 
 function renderDetail() {
-  detailEl.replaceChildren(
-    selected ? buildForm(selected) : emptyTemplateEl.content.firstElementChild.cloneNode(true),
-  );
+  if (selected) {
+    detailEl.replaceChildren(buildForm(selected));
+    return;
+  }
+  const empty = emptyTemplateEl.content.firstElementChild.cloneNode(true);
+  empty.querySelector('[data-action="add"]').addEventListener("click", addRule);
+  detailEl.replaceChildren(empty);
 }
 
 function render() {
@@ -679,13 +683,35 @@ document.getElementById("transfer-cancel").addEventListener("click", cancelImpor
 
 // --- wiring --------------------------------------------------------------
 
-document.getElementById("add").addEventListener("click", () => {
+function addRule() {
   const draft = blankRule();
   drafts.push(draft);
   selected = draft;
   render();
   detailEl.querySelector('[data-field="label"]').focus();
-});
+}
+
+/** The last `#add-<n>` acted on. */
+let addedFor = null;
+
+/**
+ * The popup's "Add a rule" opens this page as options.html#add-<n>, or points
+ * an open one there. Each <n> adds one rule: Firefox for Android navigates an
+ * open tab to it twice, so two hashchange events arrive for one tap. The hash
+ * goes once it is read, so a reload does not add another.
+ */
+function addFromHash() {
+  if (!location.hash.startsWith("#add")) return;
+  const request = location.hash;
+  // window.history: `history` here is the usage history.
+  window.history.replaceState(null, "", location.pathname);
+  if (request === addedFor) return;
+  addedFor = request;
+  addRule();
+}
+
+document.getElementById("add").addEventListener("click", addRule);
+window.addEventListener("hashchange", addFromHash);
 
 document.getElementById("save").addEventListener("click", save);
 revertEl.addEventListener("click", revert);
@@ -701,3 +727,4 @@ selected = drafts[0] ?? null;
 reservedIds = drafts.map((rule) => rule.id);
 await loadHistory(drafts);
 flagSavedInvalid();
+addFromHash();
