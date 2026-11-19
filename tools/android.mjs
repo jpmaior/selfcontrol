@@ -33,8 +33,9 @@ import { fileURLToPath } from "node:url";
 
 const USAGE = `usage: node tools/android.mjs <command>   (inside \`nix develop .#android\`)
 
-  start               boot the emulator if no device is attached, then load the
-                      extension with \`web-ext run\` (it reloads on every change)
+  start               boot this project's emulator unless a phone is attached,
+                      then load the extension with \`web-ext run\` (it reloads
+                      on every change)
   stop                stop web-ext, so edits are no longer reloaded. The add-on
                       stays loaded until Firefox restarts; the emulator keeps
                       running (\`emu-stop\`)
@@ -53,8 +54,10 @@ const USAGE = `usage: node tools/android.mjs <command>   (inside \`nix develop .
                       evaluate in the event page (woken first if stopped) and
                       print the JSON: eval 'dumpUsage()'. --page: in an open
                       extension page instead, e.g. --page options.html
+  chrome <expr>       evaluate in Firefox's parent process, with chrome
+                      privileges (AddonManager, Services…); attaches nothing
 
-  ANDROID_SERIAL picks the device when more than one is attached.`;
+  With several devices attached, the one \`start\` used, or ANDROID_SERIAL.`;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = path.join(ROOT, "extension");
@@ -109,10 +112,27 @@ function devices() {
 }
 
 function device() {
-  const all = devices();
   if (process.env.ANDROID_SERIAL) return process.env.ANDROID_SERIAL;
+  const all = devices();
   if (all.length === 1) return all[0];
+  // The one `start` used: this project's emulator beside another project's.
+  const started = readState()?.serial;
+  if (started && all.includes(started)) return started;
   throw new Error(all.length === 0 ? "no device attached — `start` boots the emulator" : `several devices (${all.join(", ")}): set ANDROID_SERIAL`);
+}
+
+/**
+ * The device `start` runs on: ANDROID_SERIAL, else a phone if one is attached,
+ * else this project's emulator, booted if need be. Not just any device: an
+ * emulator already running may be another project's.
+ */
+function startDevice() {
+  if (process.env.ANDROID_SERIAL) return process.env.ANDROID_SERIAL;
+  if (devices().some((s) => !s.startsWith("emulator-"))) return device();
+  const out = execFileSync("emu-start", { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+  const serial = /^booted: (\S+)$/m.exec(out)?.[1];
+  if (!serial) throw new Error(`emu-start said no serial: ${out.trim()}`);
+  return serial;
 }
 
 /** The local port forwarded to Firefox's debugger socket, by web-ext or anyone. */
@@ -231,12 +251,14 @@ async function evaluate(rdp, consoleActor, expr) {
   return ok;
 }
 
-/** Evaluate with chrome privileges in the parent process. Attaches to nothing. */
-async function inParent(rdp, expr) {
+/** Evaluate with chrome privileges in the parent process, as JSON. Attaches to nothing. */
+async function inParentJSON(rdp, expr) {
   const { processDescriptor } = await rdp.request("root", "getProcess", { id: 0 });
   const { process: target } = await rdp.request(processDescriptor.actor, "getTarget");
-  return JSON.parse(await evaluate(rdp, target.consoleActor, expr));
+  return evaluate(rdp, target.consoleActor, expr);
 }
+
+const inParent = async (rdp, expr) => JSON.parse(await inParentJSON(rdp, expr));
 
 const POLICY = `WebExtensionPolicy.getByID(${q(EXT_ID)})?.extension`;
 const backgroundState = (rdp) => inParent(rdp, `${POLICY}?.backgroundState ?? "not installed"`);
@@ -333,8 +355,7 @@ const CONSOLE = { resourceTypes: ["console-message", "error-message"] };
 const commands = {
   async start() {
     requireTools(["adb", "emulator", "web-ext", "emu-start"]);
-    if (devices().length === 0) execFileSync("emu-start", { stdio: "inherit" });
-    const serial = device();
+    const serial = startDevice();
 
     const running = readState();
     if (running && alive(running.webExtPid)) {
@@ -376,15 +397,17 @@ const commands = {
 
   async stop() {
     const state = readState();
+    // The serial stays: the other commands still need to know the device.
+    const forget = () => fs.writeFileSync(STATE, JSON.stringify({ serial: state.serial }, null, 2));
     if (!state || !alive(state.webExtPid)) {
-      fs.rmSync(STATE, { force: true });
+      if (state) forget();
       return console.log("web-ext is not running");
     }
     process.kill(state.webExtPid, "SIGINT");
     await waitFor(() => !alive(state.webExtPid), "web-ext to exit", 15_000).catch(() =>
       process.kill(state.webExtPid, "SIGTERM"),
     );
-    fs.rmSync(STATE, { force: true });
+    forget();
     console.log("web-ext stopped; the add-on stays loaded until Firefox restarts, the emulator until `emu-stop`");
   },
 
@@ -456,6 +479,11 @@ const commands = {
     await rdp.request(watcher, "watchResources", CONSOLE);
     if (seconds > 0) setTimeout(() => process.exit(0), seconds * 1000);
     await new Promise(() => {});
+  },
+
+  async chrome(args) {
+    if (!args[0]) throw new Error("evaluate what?");
+    console.log(await withDebugger((rdp) => inParentJSON(rdp, args[0])));
   },
 
   async eval(args) {

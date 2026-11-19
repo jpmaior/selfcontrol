@@ -76,6 +76,11 @@ It attaches no devtools, so the event page suspends as it would for a user. The 
 `.browser/`. On a fresh profile YouTube opens behind an EU consent dialog that pauses playback;
 reject it once and the profile remembers.
 
+`eval` waits at most 30 s for a promise. To watch a page over minutes (a countdown, a usage
+line), leave a recorder in it and read it back later:
+`eval 'window.rec = []; setInterval(() => rec.push([Date.now(), document.body.innerText.slice(0, 80)]), 1000)'`,
+then `eval 'rec'`. In a tab, not the event page, which takes it along when it suspends.
+
 ## Firefox for Android
 
 ### On a phone
@@ -126,14 +131,51 @@ node tools/android.mjs log              # the event page's console since it star
 `start` leaves `web-ext` running in the background: it installs the working tree as a temporary
 add-on and reloads it on every change under `extension/`. Firefox for Android sends extension
 console output nowhere a shell can read, so the tool talks to Firefox's remote debugging port,
-which `web-ext` forwards over adb. `status`, `wake` and `terminate` attach nothing, so the page
-still suspends; `log` and `eval` attach only briefly, and `follow` keeps it alive while it
-streams. `eval … --page options.html` reaches an open extension page. Run it with no arguments
-for the full list; its header comment explains what attaches and what does not.
+which `web-ext` forwards over adb. `status`, `wake`, `terminate` and `chrome` attach nothing, so
+the page still suspends; `log` and `eval` attach only briefly, and `follow` keeps it alive while
+it streams. `eval … --page options.html` reaches an open extension page. Run it with no
+arguments for the full list; its header comment explains what attaches and what does not.
+
+`log` shows only what the event page logged since it last started: once it suspends, Firefox
+keeps nothing of what it said. Read it before then, `follow` while it happens (which keeps the
+page alive), or read the outcome with `eval 'dumpUsage()'`.
+
+`emu-start` boots this project's AVD, `selfcontrol_api36`, also while another project's emulator
+runs: on the next free port, `emulator-5556` beside one on 5554, and it prints the serial.
+`emu-stop` stops only that AVD. `tools/android.mjs` keeps to the device `start` used; `adb` and
+`screenshot`, `ui-list` and `tap-text` need `export ANDROID_SERIAL=emulator-5556` first.
 
 The options page is ⋮ → Extensions → SelfControl → Settings; under software rendering it can
 stay blank for a few seconds before it draws. `node tools/android.mjs stop` stops `web-ext`
 (the add-on stays loaded until Firefox restarts), then `emu-stop`.
+
+### A real update
+
+`web-ext run` cannot stand in for an update: it restarts Firefox before it installs, and what it
+installs is temporary. A temporary install over a permanent one replaces it, and the permanent
+one is gone with the next restart. To update the way a user does, from an older signed release
+to the one `updates.json` offers, install that release permanently through the parent process:
+
+```bash
+A="node tools/android.mjs"
+AM='const { AddonManager } = ChromeUtils.importESModule("resource://gre/modules/AddonManager.sys.mjs");'
+gh release download v0.3.2 -p '*.xpi' -D /tmp/old && adb push /tmp/old/*.xpi /data/local/tmp/old.xpi
+$A stop      # or web-ext reinstalls the working tree on the next change
+$A chrome "(async () => { $AM (await AddonManager.getAddonByID('selfcontrol@jpmaior')).uninstall() })()"
+$A chrome "(async () => { $AM
+  const i = await AddonManager.getInstallForFile(await IOUtils.getFile('/data/local/tmp/old.xpi'));
+  return (await i.install()).version })()"
+$A chrome "(async () => { $AM
+  const a = await AddonManager.getAddonByID('selfcontrol@jpmaior');
+  const i = await new Promise((r) => a.findUpdates({ onUpdateAvailable: (_, i) => r(i),
+    onUpdateFinished: (_, error) => r(error) }, AddonManager.UPDATE_WHEN_USER_REQUESTED));
+  return i.install ? (await i.install()).version : 'no update, error ' + i })()"
+```
+
+With another emulator running, `export ANDROID_SERIAL` first (above). A fetch of
+`updates.json` that fails reads as no update with a non-zero error, and a slow one can outlast
+`chrome`'s wait: check the version and try again. Uninstalling the temporary add-on clears its
+storage. `start` goes back to the working tree.
 
 ### Watching the emulator in T3 Code
 
@@ -166,7 +208,8 @@ thread. T3 re-checks `~/Android/Sdk` on each call, and `~/.nix-profile/bin` is a
 it must point there rather than at the Nix SDK, or T3 rejects the SDK again after its next
 restart. `~/.profile` exports `ANDROID_HOME=~/Android/Sdk` for that reason.
 
-Once `emu-start` has booted it, the emulator appears in the Device panel as `emulator-5554`; open
-it there. T3 also lists the AVDs that are not running, but booting through `emu-start` is the
-path that has been checked. After a nixpkgs bump that changes the cmdline-tools version,
-`latest` dangles: re-run the `ln … latest` line.
+Once `emu-start` has booted it, the emulator appears in the Device panel under the serial
+`emu-start` printed, `emulator-5554` when it is the only one; open it there. T3 also lists the
+AVDs that are not running, but booting through `emu-start` is the path that has been checked.
+After a nixpkgs bump that changes the cmdline-tools version, `latest` dangles: re-run the
+`ln … latest` line.
