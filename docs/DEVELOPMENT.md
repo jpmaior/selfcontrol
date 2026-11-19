@@ -81,6 +81,47 @@ line), leave a recorder in it and read it back later:
 `eval 'window.rec = []; setInterval(() => rec.push([Date.now(), document.body.innerText.slice(0, 80)]), 1000)'`,
 then `eval 'rec'`. In a tab, not the event page, which takes it along when it suspends.
 
+### A real update
+
+Release Firefox installs only signed add-ons permanently, and an update replaces a temporary
+add-on only at the next restart, so the version under test cannot be the one updated from
+there. Firefox Developer Edition accepts unsigned ones once told to. Run it from a second
+worktree: the tool keeps its profile in the checkout's `.browser/`, and once Developer Edition
+has opened a profile, an older release Firefox refuses it.
+
+```bash
+git worktree add ../selfcontrol-devedition && cd ../selfcontrol-devedition
+mkdir -p .browser/bin
+ln -sf "$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#firefox-devedition)/bin/firefox-devedition" .browser/bin/firefox
+nix develop .#browser
+export PATH="$PWD/.browser/bin:$PATH" MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1   # 159 asks for the second
+B="node tools/browser.mjs"; AM='const { AddonManager } = ChromeUtils.importESModule("resource://gre/modules/AddonManager.sys.mjs");'
+$B start
+# Unsigned add-ons, and an update_url that is not https.
+$B chrome 'Services.prefs.setBoolPref("xpinstall.signatures.required", false)'
+$B chrome 'Services.prefs.setBoolPref("extensions.checkUpdateSecurity", false)'
+
+# Two builds of the working tree, a.1 and a.2; a local updates.json offers the second.
+a=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' extension/manifest.json)
+for v in "$a.1" "$a.2"; do
+  rm -rf /tmp/upd/src && mkdir -p /tmp/upd && cp -r extension /tmp/upd/src
+  sed -i "s/\"version\": \"$a\"/\"version\": \"$v\"/; s#https://jpmaior.github.io/selfcontrol#http://127.0.0.1:8765#" /tmp/upd/src/manifest.json
+  web-ext build -s /tmp/upd/src -a /tmp/upd -n "$v.xpi" -o
+done
+echo "{\"addons\":{\"selfcontrol@jpmaior\":{\"updates\":[{\"version\":\"$a.2\",
+  \"update_link\":\"http://127.0.0.1:8765/$a.2.xpi\"}]}}}" > /tmp/upd/updates.json
+node -e 'const fs = require("fs"); require("http").createServer((q, r) => fs.createReadStream("/tmp/upd" + q.url)
+  .on("error", () => r.writeHead(404).end()).pipe(r)).listen(8765, "127.0.0.1")' &
+
+$B chrome "(async () => { $AM (await AddonManager.getAddonByID('selfcontrol@jpmaior')).uninstall() })()"
+$B chrome "(async () => { $AM
+  const i = await AddonManager.getInstallForFile(await IOUtils.getFile('/tmp/upd/$a.1.xpi'));
+  return (await i.install()).version })()"
+```
+
+Then set up what the update should meet, and update with `findUpdates`, as in Firefox for
+Android's [real update](#a-real-update-1). The add-on's UUID stays the one `start` printed.
+
 ## Firefox for Android
 
 ### On a phone
