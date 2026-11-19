@@ -10,6 +10,8 @@ import { clock, countdown, wallClock } from "../common/format.js";
 import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { blocksOutright, validateRule } from "../common/rules.js";
 import { enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
+import { lastTabClosesWindow } from "../common/platform.js";
+import { needsTabAfterUpdate } from "../common/tabs.js";
 import {
   CHECKPOINT_MS,
   anyCounting,
@@ -306,6 +308,16 @@ browser.runtime.onMessage.addListener((message) => {
     await loaded;
     return handler(message);
   })();
+});
+
+// An update closes the add-on's own pages. When a block page was the last tab,
+// Firefox for Android is left frozen on it with no tab, and nothing the old
+// version runs can see it coming (DESIGN.md §12); the new one opens a tab.
+browser.runtime.onInstalled.addListener(async (details) => {
+  const perWindow = await lastTabClosesWindow();
+  if (!needsTabAfterUpdate(details, await browser.tabs.query({}), { perWindow })) return;
+  await browser.tabs.create({ active: false });
+  log("opened a tab: the update closed the last one");
 });
 
 browser.runtime.onSuspend.addListener(() => {
