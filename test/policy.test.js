@@ -594,6 +594,29 @@ test("creditInUse: a pass ending mid-interval ends the credit at the pass end", 
   assert.equal(u.blockedUntil, e.unlockAtMs, "the hold that follows the pass");
 });
 
+test("creditInUse: says so when it stops at its step limit, rather than stopping silently", () => {
+  // The limit only guards against a bug in evaluate() that would never reach
+  // the end. Stopping there credits what it had and finds no instant the rule
+  // ran out, so the caller must be told, or it would charge the rule as if it
+  // never had (#56). The window giving time back takes three steps here.
+  const r = rule({ minUnlockCreditSec: 0 });
+  const u = commit(createUsage(), T0 - HOUR, T0 - HOUR + MIN);
+  commit(u, T0 - 16 * MIN, T0);
+  assert.deepEqual(creditInUse(r, u, T0, T0 + 10 * MIN, { maxSteps: 1 }), {
+    creditedMs: 3 * MIN,
+    ranOutAtMs: null,
+    stoppedAtLimit: true,
+  });
+
+  const whole = commit(createUsage(), T0 - HOUR, T0 - HOUR + MIN);
+  commit(whole, T0 - 16 * MIN, T0);
+  assert.deepEqual(
+    creditInUse(r, whole, T0, T0 + 10 * MIN, { maxSteps: 3 }),
+    { creditedMs: 4 * MIN, ranOutAtMs: T0 + 4 * MIN },
+    "enough steps to finish reports nothing",
+  );
+});
+
 test("creditInUse: a rule spent from the start was changed under the interval, which counts whole", () => {
   // An interval only opens on a rule that is not spent, and closes at the
   // instant it runs out, so finding it spent at the start means its limits

@@ -214,6 +214,11 @@ Three events fully determine the foreground:
 From these we maintain one derived value — *which rule, if any, currently owns the foreground*
 — and start/stop its clock on change.
 
+Working that value out takes a query, and a tab event that changes something else leaves the
+report to it: `handleTabUpdated()` updates the audible tabs and lets `resolveFocus()` report, for
+an active tab. So a query that fails keeps the old foreground and still reports what changed;
+returning without it left a video that started playing uncounted until the next event (#56).
+
 `idle` (deferred) closes the remaining hole: `idle.setDetectionInterval(60)` plus
 `idle.onStateChanged` stops the clock when the user leaves Instagram focused and walks away.
 Without it, lunch costs the Instagram budget.
@@ -393,6 +398,12 @@ Two parts, either of which would have caught that run:
   only the usage of the default rules whose ids it shares: the other rules are gone, and so is
   their usage.
 
+The rule's alarm (§14) goes on both paths too (`clearRemovedAlarms()` in `enforcer.js`, which owns
+the alarm names): any `rule:<id>` alarm whose id is not in the rules. Its handler ignores an
+unknown id, so a leftover only cost a wake-up at the old unlock, but the deletion promises that
+nothing of the rule is left. It is read from the alarms, not from the removed rules, so the
+first start after the update also clears those an earlier build left behind (#56).
+
 ### Ephemeral state lives in `storage.session`
 
 `storage.session` is memory-backed, never touches disk, and clears on browser restart — exactly
@@ -512,6 +523,12 @@ the instant, the same: 68 s late, `1:00` of `1:00`.
   popup, the guard or an alarm's sync, before a late checkpoint or stop, did it too. Now
   `status()` writes the hold only when no interval is open (§8): 60 s late, `1:00` of `1:00`.
   An alarm on time is charged its budget exactly too, not the milliseconds it fires late.
+- **The steps are bounded, and hitting the bound is reported.** Each step ends strictly later
+  while the rule is open, so a real interval takes a handful; the bound of 10 000 only keeps a
+  bug in `evaluate()` from hanging the event page. Stopping there credits what it had and never
+  learns whether the rule ran out, so the rule would be charged as if it had not, with no hold.
+  `creditInUse()` stays pure and says `stoppedAtLimit`; the store's settle logs a warning, and
+  the live reading, taken every second, does not (#56).
 
 ### Each tab is acted on once
 
@@ -1050,6 +1067,18 @@ Lock-in acts on usage, which is hot state owned by the background, so it goes th
 the button becomes "Blocks YouTube until 14:32. Confirm" for five seconds, then reverts.
 `status()` carries `lockIn: { ms, unlockAtMs, reason }` (or `null` when blocked) so the
 popup shows the real consequence, computed by the same `evaluate` that will enforce it.
+
+**A confirm that arrives on a spent rule is refused.** The popup offers no lock-in on a spent
+rule, but one armed before the rule ran out can still be confirmed in the five seconds. The
+handler used to spend nothing, reply that it worked and log `spent 0:00`. It now refuses
+whatever `status()` does not offer (`canLockIn()`, the decision behind the offer), as it already
+refused a rule blocked outright (§22), and the popup says `<label> is already blocked` (#56).
+
+**An action's error stays up for ten seconds**, or until the next action is confirmed. It was
+cleared by the refresh that follows the reply, a message round trip later. A refresh a second
+later was not much better, and staying until the popup closes would leave an error about a click
+long past above rows that have changed since. The same for a pass (§17), and for a message that
+fails outright, which used to be an unhandled rejection with nothing shown.
 
 ---
 

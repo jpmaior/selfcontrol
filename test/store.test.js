@@ -215,6 +215,19 @@ test("lockInRule: nothing to spend on an exhausted rule", async () => {
   assert.equal(lockInRule(r, T0 + 20 * MIN), 0);
 });
 
+test("lockIn: a spent rule offers none, also one that ran out counting before its alarm", async () => {
+  // The lockIn handler refuses what status() does not offer, so a confirm armed
+  // before the rule ran out is refused rather than spending nothing (#56).
+  const r = rule("lock-spent");
+  await load([r]);
+  startCounting(r, T0);
+  for (let m = 5; m <= 15; m += 5) checkpointRule(r, T0 + m * MIN);
+  assert.notEqual(status(r, T0 + 19 * MIN).lockIn, null, "a minute left: offered");
+  assert.equal(status(r, T0 + 20 * MIN + 500).lockIn, null, "ran out, the alarm not in yet");
+  stopCounting(r, T0 + 20 * MIN + 500);
+  assert.equal(status(r, T0 + 21 * MIN).lockIn, null, "spent and settled");
+});
+
 test("usePassOnRule: checkpoints first, so the interval before the click stays in b", async () => {
   const r = { ...rule("passer"), passes: { perWeek: 1, durationSec: 10 * 60, countsTowardCaps: true } };
   await load([r]);

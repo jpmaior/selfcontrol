@@ -195,7 +195,11 @@ async function resolveFocus(why) {
     }
     nextRuleId = tab ? (ruleForUrl(rules, tab.url)?.id ?? null) : null;
   } catch (error) {
+    // The focused rule stays as it was, but a caller may have changed other
+    // state and left the report to this, as handleTabUpdated() does with
+    // audibleTabs: report it anyway, or it waits for the next event.
     warn("could not resolve focus:", error);
+    recompute(why);
     return;
   }
 

@@ -14,6 +14,15 @@ const REFRESH_MS = 1000;
 /** How long the "Confirm" step of an action stays armed. */
 const CONFIRM_MS = 5000;
 
+/**
+ * How long an action's error stays up, unless another action is confirmed
+ * first. Not until the next refresh: that is a second away, and clearing
+ * there left the error up for one message round trip. Not until the popup
+ * closes either: the rows go on changing under it, and an error about a click
+ * long past reads as one about what the rows show now.
+ */
+const ACTION_ERROR_MS = 10_000;
+
 const listEl = document.getElementById("rules");
 const noteEl = document.getElementById("note");
 
@@ -79,16 +88,12 @@ function createRow(status) {
   // do not mix.
   const actions = document.createElement("div");
   actions.className = "actions";
-  const lockIn = actionButton("lock-in", "Lock in", null, async () => {
-    const reply = await browser.runtime.sendMessage({ type: "lockIn", ruleId: status.id });
-    if (!reply?.ok) setNote(reply?.error ?? "Could not lock in.");
-    await refresh();
-  });
-  const usePass = actionButton("use-pass", "Use a pass", "../icons/pass.svg", async () => {
-    const reply = await browser.runtime.sendMessage({ type: "usePass", ruleId: status.id });
-    if (!reply?.ok) setNote(reply?.error ?? "Could not use a pass.");
-    await refresh();
-  });
+  const lockIn = actionButton("lock-in", "Lock in", null, () =>
+    runAction({ type: "lockIn", ruleId: status.id }, "Could not lock in."),
+  );
+  const usePass = actionButton("use-pass", "Use a pass", "../icons/pass.svg", () =>
+    runAction({ type: "usePass", ruleId: status.id }, "Could not use a pass."),
+  );
   actions.append(usePass.button, lockIn.button);
 
   li.append(row, meter, detail, calendar, actions);
@@ -252,6 +257,25 @@ function setNote(text) {
   noteEl.hidden = !text;
 }
 
+/** The last action's error while it stays up: { text, untilMs }, or null. */
+let actionError = null;
+
+/**
+ * Send an action to the background and show why it failed, if it did. A
+ * rejected message is a failure like a refusal, not an unhandled rejection.
+ */
+async function runAction(message, fallback) {
+  actionError = null;
+  let reply = null;
+  try {
+    reply = await browser.runtime.sendMessage(message);
+  } catch {
+    // Left to the fallback below.
+  }
+  if (!reply?.ok) actionError = { text: reply?.error ?? fallback, untilMs: Date.now() + ACTION_ERROR_MS };
+  await refresh();
+}
+
 async function refresh() {
   let statuses;
   try {
@@ -269,8 +293,10 @@ async function refresh() {
   const now = Date.now();
   for (const status of statuses) render(status, now);
 
-  // Clears any error left over from a refresh that failed earlier.
-  setNote(null);
+  // Clears any error left over from a refresh that failed earlier, and an
+  // action's error once its time is up.
+  if (actionError && now >= actionError.untilMs) actionError = null;
+  setNote(actionError?.text ?? null);
 }
 
 function openRules() {
