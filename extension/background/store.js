@@ -275,8 +275,8 @@ export function flush(nowMs) {
   return count;
 }
 
-/** Forget a rule entirely — used when a rule is deleted in Step 7. */
-export function forget(ruleId) {
+/** Forget a rule entirely: its ledger, its open interval and both their keys. */
+function forget(ruleId) {
   ledgers.delete(ruleId);
   openSince.delete(ruleId);
   dirty.delete(ruleId);
@@ -286,6 +286,50 @@ export function forget(ruleId) {
       browser.storage.session.remove(openKey(ruleId)),
     ]),
   );
+}
+
+/**
+ * Forget every rule in `before` that `next` leaves out, and return their ids.
+ * `before` is the set the save replaced, as storage reported it, and may also
+ * name the set the event page last held: when the save is what woke the page,
+ * that is already the new one, and comparing with it alone finds nothing
+ * removed (#54). A rule in `next` is never forgotten, whichever set names it.
+ */
+export function forgetRemoved(before, next) {
+  const keep = new Set(next.map((rule) => rule.id));
+  const removed = [...new Set(before.map((rule) => rule.id))].filter((id) => !keep.has(id));
+  for (const id of removed) forget(id);
+  return removed;
+}
+
+/**
+ * Forget any usage or open interval that belongs to no rule in `rules`, and
+ * return those ids. Run once per start, before anything can write a ledger,
+ * with the rules just loaded: a deletion whose settings event was missed, or
+ * one from a build that missed it (#54), would otherwise hand its history to
+ * the next rule minted with the same id (DESIGN.md §6).
+ */
+export async function sweep(rules) {
+  await settled();
+  const ids = new Set(rules.map((rule) => rule.id));
+  const [local, session] = await Promise.all([
+    browser.storage.local.get(null),
+    browser.storage.session.get(null),
+  ]);
+  const orphans = new Set();
+  for (const [area, prefix] of [
+    [local, usageKey("")],
+    [session, openKey("")],
+  ]) {
+    for (const key of Object.keys(area)) {
+      if (!key.startsWith(prefix)) continue;
+      const id = key.slice(prefix.length);
+      if (!ids.has(id)) orphans.add(id);
+    }
+  }
+  for (const id of orphans) forget(id);
+  if (orphans.size > 0) log(`swept usage of deleted rule(s): ${[...orphans].join(", ")}`);
+  return [...orphans];
 }
 
 // --- reading -------------------------------------------------------------

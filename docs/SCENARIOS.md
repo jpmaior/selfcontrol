@@ -165,6 +165,13 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    rule and Save → `rule removed: <id> — usage discarded`, and `dumpRaw()` has no `usage:<id>`
    left. Back on the block page, it says `<label> is available again` at once rather than counting
    down to the old time, with no usage line, and `Back to …` opens the site (DESIGN §19).
+   **Asleep too:** lock in a rule from the popup, `terminate`, then delete it and Save → the same
+   log line, no `usage:<id>` or `open:<id>` left, and a rule added again with the same label starts
+   at `0:00`, not blocked (DESIGN §6). After an update from a build that left one behind, the first
+   start logs `swept usage of deleted rule(s): <id>`.
+   **Import keeps the rest:** import a file sharing some ids with the saved rules, with the event
+   page terminated → those rules' `usage:<id>` is unchanged, and only the rules the file leaves out
+   log `rule removed`.
 4. **Renaming keeps it.** Rename a rule and Save → its used time is unchanged.
 5. **The form shows what was understood.** Paste `https://www.reddit.com/r/all` into Domains and
    leave the field → it reads `reddit.com`, with a note that only the site is kept and how to

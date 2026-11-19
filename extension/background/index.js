@@ -18,7 +18,7 @@ import {
   checkpointRule,
   describe,
   flush,
-  forget,
+  forgetRemoved,
   hasOpenInterval,
   load,
   lockInRule,
@@ -27,6 +27,7 @@ import {
   stats,
   status,
   stopCounting,
+  sweep,
   usePassOnRule,
 } from "./store.js";
 
@@ -41,6 +42,8 @@ log(`event page started — v${browser.runtime.getManifest().version}`);
 const loaded = (async () => {
   rules = await loadRules();
   await load(rules);
+  // Before any handler can write a ledger, so nothing it removes is live.
+  await sweep(rules);
 })();
 
 // Not awaited, and deliberately started with an empty rule set: an MV3 event
@@ -127,21 +130,23 @@ function inUse(rule) {
 
 // The options page writes storage; we react. No message protocol needed, and
 // it works the same whether the edit came from the options page or the console.
-onRulesChanged(async (next) => {
+onRulesChanged(async (next, previous) => {
   await loaded;
   const now = Date.now();
 
-  // Close out the old set before swapping, or an open interval would be
-  // credited against a rule that no longer exists.
-  for (const rule of rules) stopCounting(rule, now);
+  // The old set is the one the save replaced, not `rules`: when the save is
+  // what woke the event page, `loaded` has already read the new set, and
+  // nothing would look removed (DESIGN.md §6). `rules` still counts, for a
+  // rule it holds that the stored old set does not.
+  const before = [...previous, ...rules];
+
+  // Close out the old set before swapping, with the old limits, or an open
+  // interval would be credited against a rule that no longer exists. The
+  // first close of a rule wins; the rest find nothing open.
+  for (const rule of before) stopCounting(rule, now);
   flush(now);
 
-  for (const old of rules) {
-    if (!next.some((r) => r.id === old.id)) {
-      forget(old.id);
-      log(`rule removed: ${old.id} — usage discarded`);
-    }
-  }
+  for (const id of forgetRemoved(before, next)) log(`rule removed: ${id} — usage discarded`);
 
   rules = next;
   await load(rules);
