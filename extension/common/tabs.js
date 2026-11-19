@@ -1,9 +1,9 @@
 // Which open tabs count when a `close` rule decides whether the tab it closes
 // is the last one, and when an update decides which windows it would close
-// and whether it left Firefox with none; when the block page offers Go back and how far back it reaches, and
-// which limit the block page describes. PURE: no `browser.*` and no `history`;
-// the caller passes the tabs, the platform and the history it sees, so both
-// platforms are covered by node --test.
+// and whether it left Firefox with none; when the block page offers Go back
+// and how far back it reaches, and which limit the block page describes. PURE:
+// no `browser.*` and no `history`; the caller passes the tabs, the platform and
+// the history it sees, so both platforms are covered by node --test.
 //
 // The tab list cannot be taken at its word on Android: it carries a hidden
 // tab Firefox prepares when the address bar is tapped, and counting it left
