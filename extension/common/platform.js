@@ -1,29 +1,25 @@
-// What this browser can observe, for the decisions that depend on it. Shared
-// by the background, the popup and the options page so they cannot disagree.
+// Which Firefox this is, for what feature detection cannot see (DESIGN.md §12).
+// Shared by the background, the popup and the options page so they cannot
+// disagree.
 
-/**
- * Whether tabs report `audible`, which an `audible` rule counts on.
- *
- * Firefox for Android does not: it has the property, and it returns undefined
- * (bug 2032751; DESIGN.md §12). Feature detection cannot see that without a
- * tab that is playing, so the platform is the signal.
- */
-export async function reportsAudible() {
-  const { os } = await browser.runtime.getPlatformInfo();
-  return os !== "android";
+async function isAndroid() {
+  return (await browser.runtime.getPlatformInfo()).os === "android";
 }
 
 /**
- * Whether removing a window's last tab closes the window, and closing the last
- * window closes Firefox (closeWindowWithLastTab), so a `close` rule must open
- * a fresh tab before it removes a window's last one.
- *
- * Desktop only. Firefox for Android has no window to lose, and each tab there
- * reports a window of its own, so every tab would look like a window's last;
- * there the fresh tab is for the last tab Firefox has. needsFreshTab() and
- * needsTabAfterUpdate() in tabs.js take the answer (DESIGN.md §12).
+ * Whether tabs report `audible`, which an `audible` rule counts on. Firefox for
+ * Android has the property and returns undefined (bug 2032751), which only a
+ * tab that is playing could show.
+ */
+export async function reportsAudible() {
+  return !(await isAndroid());
+}
+
+/**
+ * Whether removing a window's last tab closes the window, and with the last
+ * window Firefox: desktop. On Android every tab reports a window of its own,
+ * so the last tab of all is what counts there (needsFreshTab() in tabs.js).
  */
 export async function lastTabClosesWindow() {
-  const { os } = await browser.runtime.getPlatformInfo();
-  return os !== "android";
+  return !(await isAndroid());
 }

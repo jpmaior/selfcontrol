@@ -220,8 +220,8 @@ const MAX_STEPS = 10_000;
  *
  * An interval is normally closed at that instant by the rule's alarm, so this
  * only bites when the close comes late: Android freezes Firefox in the
- * background, and its alarms with it, and a laptop sleeps through them. The
- * late time used to be credited, and moved the unlock later with it (#35).
+ * background, and its alarms with it, and a laptop sleeps through them
+ * (DESIGN.md §7, "Running out late").
  *
  * The sleep clamp (`maxChunkMs`, see accountant.commit) applies first; of what
  * it lets through, the part before the rule runs out counts. Running out is
@@ -230,7 +230,7 @@ const MAX_STEPS = 10_000;
  * them, and a rolling window that gives time back on the way is followed.
  * The hold is recorded at that instant: while an interval is open, status()
  * leaves it to this, since a hold it wrote from its projection would make the
- * rule look spent at `fromMs` (#53).
+ * rule look spent at `fromMs`.
  * What comes after it does not count even if the rule is open again by
  * `toMs`: on time, the block page would have been up by then.
  *

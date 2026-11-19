@@ -303,7 +303,6 @@ test("fold: days older than the retention are dropped, the rest kept", () => {
 });
 
 test("fold: pass buckets fold into the day's pass component", () => {
-  // Written before passes exist (Step 5) so that step cannot forget it.
   const u = createUsage();
   u.p[bucketOf(DAY0)] = 4 * MIN;
   commit(u, DAY0 + MIN, DAY0 + 2 * MIN);

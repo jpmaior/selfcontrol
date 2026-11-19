@@ -115,10 +115,8 @@ const QUIPS = [
   "You set this limit while thinking clearly. Trust that person.",
 ];
 
-/** Deterministic per rule and hour, so it does not flicker on every tick. */
 function pickQuip() {
-  const seed = [...`${ruleId}${new Date().getHours()}`].reduce((a, c) => a + c.charCodeAt(0), 0);
-  return QUIPS[seed % QUIPS.length];
+  return QUIPS[Math.floor(Math.random() * QUIPS.length)];
 }
 
 let unlockAtMs = Number(params.get("until")) || Date.now();

@@ -1,4 +1,5 @@
-// Popup: a live read-only view of every rule.
+// Popup: every rule's usage and state, live, and its two actions: lock in and
+// use a pass.
 //
 // Sending a message wakes the background if it was unloaded, so opening the
 // popup is always enough to get a fresh answer. Rows are built once and then

@@ -255,7 +255,7 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 // message, so only a message we actually answer returns one.
 //
 // Usage is hot state owned by the background, so the popup's actions on it
-// (lock in, and later a pass) go through here rather than through storage.
+// (lock in, a pass) go through here rather than through storage.
 // The options page still never messages the background.
 const handlers = {
   // Every rule, always: the block page reads a rule missing from this reply as

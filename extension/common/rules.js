@@ -318,8 +318,9 @@ const minutesToSecOrNull = (text) => (String(text).trim() === "" ? null : Math.r
  *
  * Only the edited field, on purpose. The form shows whole minutes, and a rule
  * from setLimits() or an import can hold seconds it cannot show; reading every
- * field back on any edit turned a 90 s budget into 120 s, and a 20 s one into
- * 0, which blocks the site outright, when only the name was being fixed.
+ * field back on any edit would turn a 90 s budget into 120 s, and a 20 s one
+ * into 0, which blocks the site outright, when only the name was being fixed
+ * (DESIGN.md §23).
  */
 export function formEdit(draft, field, value) {
   const passes = (change) => ({ passes: { ...draft.passes, ...change } });

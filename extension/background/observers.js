@@ -1,8 +1,8 @@
 // Tab and window observation.
 //
 // Sole job: answer "is rule R being consumed right now?" and report every
-// change in that answer. No timing, no storage, no enforcement — those arrive
-// in Steps 3, 4 and 5.
+// change in that answer. No timing, no storage, no enforcement: index.js hands
+// each report to the store and the enforcer.
 //
 // IMPORTANT: every piece of state in this module is derived, never authoritative.
 // MV3 kills the event page constantly (DESIGN.md §2), so all of it must be
@@ -33,13 +33,12 @@ export const modeOf = (rule) => effectiveMode(rule, platform);
 /**
  * `tabs.onUpdated.addListener` with a filter where the platform accepts one.
  *
- * Firefox for Android has the event but not its filter argument, and rejects
- * the call outright ("Incorrect argument types for tabs.onUpdated") instead of
- * ignoring it. At module scope in index.js that throw aborted evaluation before
- * the message listener existed, so the popup only ever said "Background script
- * not responding" (DESIGN.md §12). The fallback registers unfiltered and
- * drops what the filter would have, so both platforms see the same events.
- * Synchronous on purpose: listeners must exist by the end of module evaluation.
+ * Firefox for Android has the event but not its filter argument, and throws
+ * ("Incorrect argument types for tabs.onUpdated") rather than ignoring it,
+ * which at module scope would stop the event page before its other listeners
+ * exist (DESIGN.md §12). The fallback registers unfiltered and drops what the
+ * filter would have, so both platforms see the same events. Synchronous on
+ * purpose: listeners must exist by the end of module evaluation.
  */
 export function onTabUpdated(handler, properties) {
   try {
@@ -198,11 +197,9 @@ function setFocusedRule(ruleId, why, generation) {
 // --- derivation ----------------------------------------------------------
 
 /**
- * The observers' current view of a rule, as last reported.
- *
- * Step 4 reconciles against this on startup: the ledger may hold an interval
- * left open when the event page was killed, and only the observers can say
- * whether that interval is still live or is a leftover to be settled.
+ * The observers' current view of a rule, as last reported. Startup reconciles
+ * against it: the ledger may hold an interval left open when the event page
+ * was unloaded, and only the observers can say whether it is still live.
  */
 export function isCountingNow(ruleId) {
   return reported.get(ruleId) ?? false;

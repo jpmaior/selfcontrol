@@ -1,21 +1,13 @@
-// Which open tabs count: when a `close` rule decides whether the tab it closes
-// is the last one, and when an update decides which windows it would close and
-// whether it left Firefox with none (DESIGN.md §12). PURE: no `browser.*`; the
-// caller passes the tabs and the platform, so both platforms are covered by
-// node --test.
-//
-// The tab list cannot be taken at its word on Android: it carries a hidden
-// tab Firefox prepares when the address bar is tapped, and counting it left
-// Firefox frozen on the closed site.
+// Which open tabs count, when a `close` rule removes a tab and when an update
+// closes the add-on's pages (DESIGN.md §12). PURE: the caller passes the tabs
+// and the platform, so node --test covers both platforms. On Android the list
+// carries a hidden tab, and counting it left Firefox frozen on a closed site.
 
 /**
  * Whether a `close` rule must open a fresh tab before it removes `closing`.
- *
- * `tabs` is every open tab, from tabs.query({}), with or without `closing`
- * still in it. `perWindow` is lastTabClosesWindow() in platform.js: on desktop
- * only the window's tabs count, because removing its last one closes the
- * window; on Android every tab counts, except the one prepared for the
- * address bar.
+ * `tabs` is tabs.query({}), with or without `closing`. `perWindow` is
+ * lastTabClosesWindow(): on desktop only the window's tabs count, on Android
+ * every tab the user can see.
  */
 export function needsFreshTab(closing, tabs, { perWindow }) {
   const others = tabs.filter((tab) => tab.id !== closing.id);
@@ -23,25 +15,20 @@ export function needsFreshTab(closing, tabs, { perWindow }) {
 }
 
 /**
- * Whether the extension must open a tab as it starts, given its
- * runtime.onInstalled `details`. An update closes the add-on's own pages, and
- * when one was the last tab, Firefox for Android stays frozen on it with no
- * tab (DESIGN.md §12). By the time the new version runs they are gone, so
- * `tabs` is what Firefox has left. `perWindow` as for needsFreshTab(): on
- * desktop the window went with its last tab, and nothing is left frozen.
+ * Whether the new version must open a tab, given runtime.onInstalled's
+ * `details` and the tabs the update left: on Android, when it closed the last
+ * one the user had. On desktop the window went with its last tab, and nothing
+ * is left frozen to repair.
  */
 export function needsTabAfterUpdate({ reason }, tabs, { perWindow }) {
   return reason === "update" && !perWindow && noTabLeft(tabs);
 }
 
 /**
- * The windows an update would close, as the old version learns of it from
- * runtime.onUpdateAvailable: those holding nothing but the add-on's own pages,
- * whose origin is `origin`, runtime.getURL(""). Firefox closes those pages as
- * it unloads the old version, a window goes with its last tab, and with the
- * last window Firefox quits, before the new version could repair anything
- * (DESIGN.md §12). Desktop only: Firefox for Android has no window to lose,
- * and needsTabAfterUpdate() repairs its last tab afterwards.
+ * The windows an update would close, for the old version to keep open: those
+ * holding nothing but the add-on's own pages, whose origin is `origin`
+ * (runtime.getURL("")). Desktop only; on Android needsTabAfterUpdate() repairs
+ * the last tab afterwards.
  */
 export function windowsAnUpdateCloses(tabs, origin) {
   return [...Map.groupBy(tabs, (tab) => tab.windowId)]
@@ -49,15 +36,15 @@ export function windowsAnUpdateCloses(tabs, origin) {
     .map(([windowId]) => windowId);
 }
 
-/** Firefox for Android has no tab the user can see. */
+/** No tab the user can see is left. */
 function noTabLeft(tabs) {
   return tabs.every(preparedForAddressBar);
 }
 
 /**
- * Firefox for Android's hidden tab for the next new tab. A blank tab created in
- * the background and never shown looks the same and is ignored with it; at
- * worst that opens one blank tab too many.
+ * The hidden tab Firefox for Android prepares when the address bar is tapped.
+ * A blank background tab never shown looks the same and is ignored with it: at
+ * worst, one blank tab too many.
  */
 function preparedForAddressBar(tab) {
   return tab.url === "about:blank" && tab.width === 0 && tab.height === 0;
