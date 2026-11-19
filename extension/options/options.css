@@ -494,7 +494,7 @@
 }
 
 /* Says that a typed path was cut away: unnoticed, it limits the whole site. */
-.field > .path-dropped {
+.match-group .path-dropped {
   color: var(--warn);
 }
 

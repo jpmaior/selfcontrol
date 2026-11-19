@@ -266,7 +266,11 @@ function tick() {
   const remaining = unlockAtMs - now;
 
   if (remaining <= 0) {
+    // The usage line is refresh()'s, and still says what was used before the
+    // time came back. Ask now rather than at the next refresh, up to 5 s on.
+    const fresh = !document.body.classList.contains("unlocked");
     unlock();
+    if (fresh && document.visibilityState === "visible") refresh();
     return;
   }
 

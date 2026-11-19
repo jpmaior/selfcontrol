@@ -264,6 +264,19 @@ export function makeRuleId(label, taken = []) {
   }
 }
 
+/** The cool-down a new rule starts with, while its budget allows it (DESIGN.md §8). */
+const DEFAULT_UNLOCK_CREDIT_SEC = 5 * 60;
+
+/**
+ * The unlock credit a new rule gets for a budget: five minutes, or the whole
+ * budget when that is less, since the credit can never exceed the budget. The
+ * options form keeps a new rule's credit on this as the budget is typed, until
+ * the credit is edited itself (DESIGN.md §8).
+ */
+export function defaultUnlockCreditSec(budgetSec) {
+  return Math.min(DEFAULT_UNLOCK_CREDIT_SEC, Math.max(0, budgetSec));
+}
+
 /**
  * A new, unsaved rule. Its id is deliberately empty: ids are minted at save
  * time from the settled label, and an id is the key a rule's usage data hangs
@@ -278,7 +291,7 @@ export function blankRule() {
     budgetSec: 5 * 60,
     windowSec: 60 * 60,
     onExceed: "block",
-    minUnlockCreditSec: 5 * 60,
+    minUnlockCreditSec: defaultUnlockCreditSec(5 * 60),
     dailyBudgetSec: null,
     weeklyBudgetSec: null,
     passes: { ...DEFAULT_PASSES },

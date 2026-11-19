@@ -55,7 +55,8 @@ since they are not on `/shorts`.
 The one setting worth explaining is **"stay blocked until this much is free again"**. On a
 rolling window, a spent budget starts returning one minute at a time, which would let you back in
 for a minute, then block you, then let you back in. Setting this to 5 minutes means you come back
-in usable chunks instead. Set it to `0` if you actually want the drip.
+in usable chunks instead. A new rule starts at 5 minutes, or at its whole budget when that is
+smaller. Set it to `0` if you actually want the drip.
 
 ## How it works
 

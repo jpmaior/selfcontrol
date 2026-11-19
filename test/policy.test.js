@@ -287,6 +287,47 @@ test("evaluate during a pass: with countsTowardCaps false the daily cap does not
   assert.equal(e.nextChangeAtMs, T0 + 50 * MIN, "the pass end, not a cap");
 });
 
+// --- what the next change is: the alarm says what it is for ---------------
+
+test("nextChange: names what nextChangeAtMs is for", () => {
+  const counting = evaluate(rule(), spent(3 * MIN), T0 + 3 * MIN, { counting: true });
+  assert.equal(counting.nextChange, "rolling", "counting: the cap that runs out");
+
+  assert.equal(evaluate(rule(), spent(3 * MIN), T0 + 3 * MIN).nextChange, null, "idle: nothing");
+
+  const blocked = evaluate(rule(), spent(20 * MIN), T0 + 20 * MIN);
+  assert.equal(blocked.nextChange, "unlock");
+
+  const daily = evaluate(rule({ dailyBudgetSec: 5 * 60 }), spent(3 * MIN), T0 + 3 * MIN, { counting: true });
+  assert.equal(daily.nextChange, "daily");
+});
+
+test("nextChange: a pass used while nothing plays wakes for the pass's end, not a cap", () => {
+  // The daily cap has less left than the pass, so it is the binding one, but
+  // nothing is counting: the alarm is the pass's end.
+  const r = withPasses({ dailyBudgetSec: 23 * 60 }, { countsTowardCaps: true });
+  const { u, now } = midPass(r, 0);
+  const e = evaluate(r, u, now);
+  assert.equal(e.binding, "daily");
+  assert.equal(e.nextChangeAtMs, T0 + 50 * MIN);
+  assert.equal(e.nextChange, "pass");
+
+  const playing = evaluate(r, u, now, { counting: true });
+  assert.equal(playing.nextChangeAtMs, now + 3 * MIN);
+  assert.equal(playing.nextChange, "daily", "counting, the daily cap runs out first");
+});
+
+test("nextChange: a pass that ends before any cap runs out is the pass", () => {
+  const r = withPasses();
+  const { u, now } = midPass(r);
+  assert.equal(evaluate(r, u, now, { counting: true }).nextChange, "pass");
+  assert.equal(evaluate(r, u, now).nextChange, "pass");
+});
+
+test("nextChange: a rule blocked outright has none", () => {
+  assert.equal(evaluate(rule({ budgetSec: 0 }), createUsage(), T0).nextChange, null);
+});
+
 test("evaluate just after the pass: the rolling cap is spent by the pass buckets", () => {
   const r = withPasses();
   const u = spent(20 * MIN);

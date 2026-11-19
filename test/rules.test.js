@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_RULES,
   blankRule,
+  defaultUnlockCreditSec,
   blocksOutright,
   effectiveMode,
   droppedPath,
@@ -440,6 +441,26 @@ test("validateRule: two unsaved rules are not duplicates of each other", () => {
 
 test("blankRule: has no id, so saving cannot orphan an existing rule's usage", () => {
   assert.equal(blankRule().id, "");
+});
+
+test("defaultUnlockCreditSec: five minutes, or the whole budget when that is less", () => {
+  assert.equal(defaultUnlockCreditSec(30 * 60), 5 * 60);
+  assert.equal(defaultUnlockCreditSec(5 * 60), 5 * 60);
+  assert.equal(defaultUnlockCreditSec(60), 60, "a 1-minute budget unlocks whole");
+  assert.equal(defaultUnlockCreditSec(0), 0, "blocked outright: nothing to unlock");
+});
+
+test("defaultUnlockCreditSec: a new rule with any small budget saves as it is", () => {
+  for (const budgetSec of [60, 2 * 60, 4 * 60, 5 * 60, 10 * 60]) {
+    const r = { ...blankRule(), label: "New", match: ["new.com"], budgetSec };
+    r.minUnlockCreditSec = defaultUnlockCreditSec(budgetSec);
+    assert.deepEqual(validateRule(r, [r]), [], `${budgetSec / 60} min`);
+  }
+});
+
+test("blankRule: its unlock credit is the default for its budget", () => {
+  const r = blankRule();
+  assert.equal(r.minUnlockCreditSec, defaultUnlockCreditSec(r.budgetSec));
 });
 
 // --- forward compatibility ----------------------------------------------

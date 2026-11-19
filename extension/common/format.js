@@ -10,9 +10,21 @@ export function clock(ms) {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
-/** Same, but rounding up — for countdowns, so they never show 0:00 while waiting. */
+const DAY_MS = 24 * 3_600_000;
+
+/**
+ * Same, but rounding up — for countdowns, so they never show 0:00 while
+ * waiting. From a day on, the days come first ("5d 3:52:32"): a weekly cap
+ * counts down for up to a week, and 123 hours says nothing at a glance. An
+ * amount of time, such as a budget, stays in hours through clock().
+ */
 export function countdown(ms) {
-  return clock(Math.ceil(Math.max(0, ms) / 1000) * 1000);
+  const rounded = Math.ceil(Math.max(0, ms) / 1000) * 1000;
+  if (rounded < DAY_MS) return clock(rounded);
+  const rest = rounded % DAY_MS;
+  const h = Math.floor(rest / 3_600_000);
+  const tail = clock(rest);
+  return `${Math.floor(rounded / DAY_MS)}d ${h > 0 ? tail : `0:${tail.padStart(5, "0")}`}`;
 }
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

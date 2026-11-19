@@ -100,10 +100,12 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    ages out, and re-blocks soon after.
 6. **An alarm wakes the page.** With nothing attached and the page suspended, the block still
    lands on time: `alarm for youtube fired +Nms vs scheduled`, then one `⛔ youtube spent` line,
-   not one per path that woke with it (DESIGN §7). N stays within what DESIGN §5 records for the
-   platform.
+   not one per path that woke with it (DESIGN §7), and one `youtube: alarm in … — unlocks
+   (rolling)`, also with two tabs on the site (DESIGN §14). N stays within what DESIGN §5
+   records for the platform.
 7. **The block page unlocks itself.** Leave it open → when the countdown ends it says
-   `YouTube is available again` with no reload.
+   `YouTube is available again` with no reload, and within a second its usage line gives what
+   is used now, not the figure from before the time came back (DESIGN §19).
 8. **And blocks again.** With an unlocked block page open, spend its rule again with Lock in (in
    the popup, or a `lockIn` message sent from the page) → on its next refresh the page is blocked
    again: `You were on …` instead of `Back to …`, and a countdown to the unlock time
@@ -137,8 +139,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 
 1. **Edits apply live.** Change a budget and Save → the log says `rules updated` and
    `state re-armed`, the popup shows the new budget, and nothing was reloaded.
-2. **A new rule works.** Add a focus rule with a 1-minute budget for some site and Save →
-   sitting on that site blocks it.
+2. **A new rule works.** Add a focus rule with a 1-minute budget for some site → its cool-down
+   follows the budget down to 1 minute, and Save works without touching it (DESIGN §8). Sitting
+   on that site blocks it. Once the cool-down is edited by hand it stays as typed, and a saved
+   rule's cool-down does not follow its budget.
 3. **Deleting discards usage.** With item 2's block page still open in another tab, delete the
    rule and Save → `rule removed: <id> — usage discarded`, and `dumpRaw()` has no `usage:<id>`
    left. Back on the block page, it says `<label> is available again` at once rather than counting
@@ -146,9 +150,9 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 4. **Renaming keeps it.** Rename a rule and Save → its used time is unchanged.
 5. **The form shows what was understood.** Paste `https://www.reddit.com/r/all` into Domains and
    leave the field → it reads `reddit.com`, with a note that only the site is kept and how to
-   limit `reddit.com/r/all` alone. Tick *Match paths* → `reddit.com/r/all`, the note goes, the
-   label reads `Domains and paths` and a short explanation of matching appears; untick →
-   `reddit.com` again.
+   limit `reddit.com/r/all` alone, under the *Match paths* checkbox. Tick it →
+   `reddit.com/r/all`, the note gives way to a short explanation of matching, the label reads
+   `Domains and paths`, and the checkbox does not move; untick → `reddit.com` again.
    A budget equal to the window is refused with the reason shown, and so is a pattern another
    rule already has, naming that rule.
 6. **History.** Once buckets have folded (a short window helps) → the rule's history shows
@@ -162,14 +166,16 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 2. **Removing it lifts the block.** Clear the daily cap in the options page → the block lifts at
    once.
 3. **Weekly cap.** Weekly 60 s and daily 120 s, play 1 minute → `done for the week`, unlocking
-   next Monday at 00:00.
+   next Monday at 00:00. The countdown, on the block page and in the popup, is in days from a
+   day on: `3d 18:35:52`, not `90:35:52`.
 4. **Lock in while playing.** Popup → Lock in → `Blocks YouTube until HH:MM. Confirm`; confirm →
    the tab is blocked at once and the block page counts down to that time.
 5. **Lock in while idle.** With 3 minutes left → `dumpRaw()` shows 180000 more ms in the current
    bucket and nothing else changed; after `terminate`, the popup still shows it spent.
 6. **A pass.** Rolling cap 2 minutes, one 5-minute pass a week. Play past 2 minutes → blocked.
    Popup → `Use a pass (1 left)` → confirm → the open block page unlocks on its next refresh,
-   and the popup reads `pass, 4:5x left`.
+   and the popup reads `pass, 4:5x left`. Used while nothing plays, even with a daily cap that
+   has less left than the pass, the log says `alarm in 5:00 — pass ends` (DESIGN §14).
 7. **The pass ends.** Keep playing with nothing attached → blocked within seconds of the end;
    `dumpRaw()` shows ~5 minutes in `p` and one entry in `passUses`; the popup offers no pass.
 8. **Pass time and the caps.** `countsTowardCaps: true` with a 3-minute daily cap → the block

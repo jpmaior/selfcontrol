@@ -9,6 +9,7 @@ import {
   MODES,
   ON_EXCEED,
   blankRule,
+  defaultUnlockCreditSec,
   blocksOutright,
   droppedPath,
   hasPath,
@@ -178,6 +179,13 @@ function buildForm(draft) {
     // Blank is no budget at all, refused on Save, not 0: an emptied field is
     // not a choice to block the site outright.
     draft.budgetSec = toSecOrNull(field("budgetMin").value);
+    // A new rule's cool-down follows its budget until it is edited itself, so
+    // a budget under five minutes is not refused for a default nobody chose
+    // (DESIGN.md §8). A saved rule's cool-down was chosen, or saved as it was.
+    if (event.target === field("unlockMin")) draft.creditEdited = true;
+    if (!draft.id && !draft.creditEdited && draft.budgetSec !== null) {
+      field("unlockMin").value = toMin(defaultUnlockCreditSec(draft.budgetSec));
+    }
     draft.windowSec = toSec(field("windowMin").value);
     draft.minUnlockCreditSec = toSec(field("unlockMin").value);
     draft.dailyBudgetSec = toSecOrNull(field("dailyMin").value);
