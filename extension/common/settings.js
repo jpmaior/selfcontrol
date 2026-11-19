@@ -45,7 +45,9 @@ export async function saveRules(rules) {
 }
 
 /**
- * Call `onChange(rules)` whenever the rule set is edited anywhere.
+ * Call `onChange(rules, previous)` whenever the rule set is edited anywhere.
+ * `previous` is the set the edit replaced, empty on first run: the only
+ * record of it when the edit is what woke the event page (DESIGN.md §6).
  *
  * This is how the options page reaches the background without a message
  * protocol. It filters hard on the settings key: the background writes
@@ -54,8 +56,9 @@ export async function saveRules(rules) {
 export function onRulesChanged(onChange) {
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    const next = changes[SETTINGS_KEY]?.newValue;
+    const { newValue: next, oldValue: old } = changes[SETTINGS_KEY] ?? {};
     if (!Array.isArray(next?.rules)) return;
-    onChange(next.rules.map(withDefaults));
+    const previous = Array.isArray(old?.rules) ? old.rules.map(withDefaults) : [];
+    onChange(next.rules.map(withDefaults), previous);
   });
 }

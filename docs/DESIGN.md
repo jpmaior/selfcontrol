@@ -354,6 +354,35 @@ The unlock instant is deliberately *not* stored: it is derived on demand by
 `blockedUntil` is not an unlock instant: it only records that a block is in progress, which the
 buckets cannot show once the first one has folded (§8).
 
+### A deleted rule's usage goes with it
+
+Decided 2026-11-19 (#54). An id is minted from the label (`makeRuleId`), so a rule added later
+with a deleted rule's label gets its id back, and with it whatever `usage:<id>` and `open:<id>`
+were left: the old history, the hold and an open interval, credited from when it opened. So
+deleting a rule removes both keys (`store.forget()`), and the options page and the import summary
+promise as much.
+
+The background used to find the deleted rules by comparing the saved set with the one it held.
+The options page never messages it (§10), so a save is often what wakes the event page, and by
+the time the settings handler runs, startup has already read the new set: nothing looked removed.
+On desktop, with the event page terminated, deleting a locked-in rule left its `usage:<id>`
+behind, and a rule added afterwards with the same label was blocked at once, five minutes used,
+until the old unlock time.
+
+Two parts, either of which would have caught that run:
+
+- **The settings handler takes the old set from the save** (`changes.settings.oldValue`), together
+  with the set the page held, and forgets every rule the new set leaves out
+  (`store.forgetRemoved()`). A rule in the new set is never forgotten, whichever set names it, so
+  import keeps the history of every id it shares with the saved rules (§20).
+- **Every start sweeps** (`store.sweep()`): any `usage:*` or `open:*` key whose id is not in the
+  rules just loaded is forgotten. It runs inside `loaded`, before any handler can write a ledger,
+  so nothing it removes belongs to a live rule. It catches a deletion whose event never ran, and
+  the orphans an earlier build left, on the first start after the update. With nothing to sweep
+  it reads both areas once and writes nothing. A rule set seeded afresh (`resetRules()`) keeps
+  only the usage of the default rules whose ids it shares: the other rules are gone, and so is
+  their usage.
+
 ### Ephemeral state lives in `storage.session`
 
 `storage.session` is memory-backed, never touches disk, and clears on browser restart — exactly
@@ -460,9 +489,9 @@ the instant, the same: 68 s late, `1:00` of `1:00`.
 - **A rule already spent at the start of the interval is credited whole.** An interval opens only
   on a rule that is not spent, and closes when it runs out, so a rule spent at its start had its
   limits changed under it: a settings change, whose own instant is the close, and the time was
-  allowed when it was used. The event page settles every interval with the old rules before a
-  settings change swaps them in (`onRulesChanged`), so this is the store's contract more than a
-  path the page takes.
+  allowed when it was used. The event page settles every interval with the old rules, taken from
+  the save itself (§6), before a settings change swaps them in (`onRulesChanged`), so this is the
+  store's contract more than a path the page takes.
 - **So nothing may write the hold before the settle** (#53). `status()` used to record it from
   its projection, and `reconcile()` asks `status()` before it settles. With less left at the
   interval's start than the unlock credit, as on the default rules (five minutes of budget,

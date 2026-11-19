@@ -22,7 +22,8 @@ function makeStorageArea() {
     data,
     async get(keys) {
       const out = {};
-      for (const key of Array.isArray(keys) ? keys : [keys]) {
+      // null is "everything", as in Firefox.
+      for (const key of keys === null ? [...data.keys()] : Array.isArray(keys) ? keys : [keys]) {
         if (data.has(key)) out[key] = structuredClone(data.get(key));
       }
       return out;
@@ -47,6 +48,7 @@ const {
   MAX_CHUNK_MS,
   checkpointRule,
   flush,
+  forgetRemoved,
   hasOpenInterval,
   load,
   lockInRule,
@@ -55,6 +57,7 @@ const {
   startCounting,
   status,
   stopCounting,
+  sweep,
   usePassOnRule,
 } = await import("../extension/background/store.js");
 
@@ -596,4 +599,125 @@ test("on time, below the credit: the block is charged exactly the budget and rec
   const s = status(r, T0 + 62 * MIN);
   assert.equal(s.exhausted, true, "one minute back is not five");
   assert.equal(s.unlockAtMs, RELEASE_BELOW);
+});
+
+// --- a deleted rule's usage goes with it (DESIGN.md §6) ----------------------
+//
+// Last in the file: sweep() removes every key with no rule, and these tests
+// share one storage stub.
+
+/** A stored ledger with five minutes in one bucket, and an interval left open. */
+function storedUsage(id) {
+  local.data.set(`usage:${id}`, { b: { [T0]: 5 * MIN }, p: {}, d: {}, blockedUntil: T0 + 65 * MIN });
+  session.data.set(`open:${id}`, T0 + 10 * MIN);
+}
+
+test("forgetRemoved: a rule the new set leaves out loses its usage, even one the ledger never loaded", async () => {
+  // The save woke the event page, which read the new set: the deleted rule was
+  // never loaded, and is known only from the old set.
+  const kept = rule("removed-kept");
+  const gone = rule("removed-gone");
+  storedUsage(kept.id);
+  storedUsage(gone.id);
+  await load([kept]);
+
+  assert.deepEqual(forgetRemoved([kept, gone], [kept]), [gone.id]);
+  await settled();
+  assert.ok(!local.data.has("usage:removed-gone"), "its usage is discarded");
+  assert.ok(!session.data.has("open:removed-gone"), "and its open interval");
+  assert.ok(local.data.has("usage:removed-kept"), "a kept rule's usage is untouched");
+  assert.ok(session.data.has("open:removed-kept"), "and its open interval");
+});
+
+test("forgetRemoved: a rule in the new set is never forgotten, whichever old set names it", async () => {
+  const r = rule("removed-never");
+  storedUsage(r.id);
+  await load([r]);
+
+  // The old set as stored and as the page last held it, overlapping.
+  assert.deepEqual(forgetRemoved([r, r], [r]), []);
+  await settled();
+  assert.ok(local.data.has("usage:removed-never"));
+  assert.ok(session.data.has("open:removed-never"));
+});
+
+test("forgetRemoved: a new rule given a deleted rule's id starts from nothing", async () => {
+  const old = rule("removed-reminted");
+  storedUsage(old.id);
+  await load([]);
+
+  forgetRemoved([old], []);
+  // Saved again with a rule of the same label, so the same id.
+  const again = rule("removed-reminted");
+  await load([again]);
+  const s = status(again, T0 + 20 * MIN);
+  assert.equal(s.usedMs, 0, "no history inherited");
+  assert.equal(s.exhausted, false, "and no hold");
+  assert.equal(hasOpenInterval(again.id), false, "and no open interval");
+});
+
+test("sweep: removes usage and open intervals that belong to no rule, and nothing else", async () => {
+  // Every earlier test's ledger is an orphan here.
+  await settled();
+  local.data.clear();
+  session.data.clear();
+  const kept = rule("swept-kept");
+  storedUsage(kept.id);
+  storedUsage("swept-orphan");
+  // A rule whose id is a prefix of the orphan's must not protect it, nor be swept by it.
+  storedUsage("swept");
+  const rules = [kept, rule("swept")];
+  local.data.set("settings", { version: 2, rules });
+  await load(rules);
+
+  assert.deepEqual(await sweep(rules), ["swept-orphan"]);
+  await settled();
+  assert.ok(!local.data.has("usage:swept-orphan"));
+  assert.ok(!session.data.has("open:swept-orphan"));
+  for (const id of ["swept-kept", "swept"]) {
+    assert.ok(local.data.has(`usage:${id}`), `${id} keeps its usage`);
+    assert.ok(session.data.has(`open:${id}`), `${id} keeps its open interval`);
+  }
+  assert.ok(local.data.has("settings"), "keys that are not usage are left alone");
+});
+
+test("sweep: an orphan's id minted again starts from nothing", async () => {
+  storedUsage("swept-reminted");
+  await sweep([]);
+
+  const again = rule("swept-reminted");
+  await load([again]);
+  const s = status(again, T0 + 20 * MIN);
+  assert.equal(s.usedMs, 0, "no history inherited");
+  assert.equal(s.exhausted, false, "and no hold");
+  assert.equal(hasOpenInterval(again.id), false, "and no open interval");
+});
+
+test("sweep: with no rule at all, every rule's usage goes", async () => {
+  storedUsage("swept-last");
+  await sweep([]);
+  await settled();
+  assert.deepEqual(
+    [...local.data.keys(), ...session.data.keys()].filter((key) => /^(usage|open):/.test(key)),
+    [],
+  );
+});
+
+test("sweep: nothing to remove writes nothing", async () => {
+  const r = rule("swept-clean");
+  storedUsage(r.id);
+  await load([r]);
+  let removes = 0;
+  const { remove } = local;
+  local.remove = async (keys) => {
+    removes++;
+    return remove(keys);
+  };
+  try {
+    assert.deepEqual(await sweep([r]), []);
+    await settled();
+  } finally {
+    local.remove = remove;
+  }
+  assert.equal(removes, 0);
 });
