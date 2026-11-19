@@ -7,7 +7,7 @@
 
 import { clock, countdown, wallClock } from "../common/format.js";
 import { returnUrlFrom } from "../common/rules.js";
-import { blockPageIndex, describedReason, GO_BACK_STEPS, showsGoBack } from "../common/tabs.js";
+import { blockPageIndex, describedReason, GO_BACK_STEPS, showsGoBack } from "../common/blockpage.js";
 
 const params = new URLSearchParams(location.search);
 const ruleId = params.get("rule");
