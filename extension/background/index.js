@@ -11,7 +11,7 @@ import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
 import { blocksOutright, validateRule } from "../common/rules.js";
 import { enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
 import { lastTabClosesWindow } from "../common/platform.js";
-import { needsTabAfterUpdate } from "../common/tabs.js";
+import { needsTabAfterUpdate, windowsAnUpdateCloses } from "../common/tabs.js";
 import {
   CHECKPOINT_MS,
   anyCounting,
@@ -310,9 +310,32 @@ browser.runtime.onMessage.addListener((message) => {
   })();
 });
 
-// An update closes the add-on's own pages. When a block page was the last tab,
-// Firefox for Android is left frozen on it with no tab, and nothing the old
-// version runs can see it coming (DESIGN.md §12); the new one opens a tab.
+// An update closes the add-on's own pages as it unloads this version, and a
+// window holding nothing else goes with them: with the last window, Firefox
+// quits before the new version starts (DESIGN.md §12). Listening postpones the
+// update until runtime.reload(), so each such window gets a tab first. Reload
+// whatever happens, or the update waits for the next Firefox restart.
+//
+// Desktop only, told apart by browser.windows because a listener cannot wait
+// for getPlatformInfo(). Firefox for Android has no window to lose, and the
+// new version repairs its last tab (onInstalled, below); listening there would
+// only postpone its updates through a path no run has checked.
+if (browser.windows) {
+  browser.runtime.onUpdateAvailable.addListener(async ({ version }) => {
+    try {
+      const windows = windowsAnUpdateCloses(await browser.tabs.query({}), browser.runtime.getURL(""));
+      for (const windowId of windows) await browser.tabs.create({ windowId, active: false });
+      const kept = windows.length > 0 ? `; opened a tab in ${windows.length} window(s) it would close` : "";
+      log(`updating to v${version}${kept}`);
+    } catch (error) {
+      log(`updating to v${version}; could not keep its windows open:`, error.message);
+    }
+    browser.runtime.reload();
+  });
+}
+
+// When a block page was the last tab, Firefox for Android is left frozen on it
+// with no tab after an update (DESIGN.md §12); the new version opens a tab.
 browser.runtime.onInstalled.addListener(async (details) => {
   const perWindow = await lastTabClosesWindow();
   if (!needsTabAfterUpdate(details, await browser.tabs.query({}), { perWindow })) return;

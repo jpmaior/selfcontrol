@@ -1,6 +1,6 @@
 // Unit tests for the last-tab decision a `close` rule makes before it removes
-// a tab and the one an update makes once it has closed the add-on's pages
-// (DESIGN.md §12), and for how far back the block page's Go back reaches
+// a tab, the ones an update makes before and after it closes the add-on's
+// pages (DESIGN.md §12), and for how far back the block page's Go back reaches
 // (DESIGN.md §19).
 //   nix develop --command node --test
 
@@ -14,6 +14,7 @@ import {
   needsFreshTab,
   needsTabAfterUpdate,
   showsGoBack,
+  windowsAnUpdateCloses,
 } from "../extension/common/tabs.js";
 
 // What lastTabClosesWindow() answers on each platform.
@@ -127,6 +128,36 @@ test("needsTabAfterUpdate android: only an update closed pages of ours", () => {
 test("needsTabAfterUpdate desktop: never, the window went with its last tab", () => {
   assert.equal(needsTabAfterUpdate(updated, [], DESKTOP), false);
   assert.equal(needsTabAfterUpdate(updated, [tab(2, 1)], DESKTOP), false);
+});
+
+// runtime.getURL(""): the origin of the add-on's own pages.
+const OURS = "moz-extension://5f0c2a1e-0000-4000-8000-000000000001/";
+const page = (id, windowId, path = "blocked/blocked.html?rule=youtube") => tab(id, windowId, `${OURS}${path}`);
+
+test("windowsAnUpdateCloses: a window holding only our pages is closed with them", () => {
+  // Firefox closes the add-on's pages as it unloads the old version, and a
+  // window goes with its last tab; with the last window, Firefox quits (#50).
+  assert.deepEqual(windowsAnUpdateCloses([page(1, 1)], OURS), [1]);
+  assert.deepEqual(windowsAnUpdateCloses([page(1, 1), page(2, 1, "options/options.html")], OURS), [1]);
+});
+
+test("windowsAnUpdateCloses: any other tab keeps the window open", () => {
+  assert.deepEqual(windowsAnUpdateCloses([page(1, 1), tab(2, 1)], OURS), []);
+  assert.deepEqual(windowsAnUpdateCloses([tab(1, 1), tab(2, 2)], OURS), []);
+});
+
+test("windowsAnUpdateCloses: each window is decided on its own tabs", () => {
+  const tabs = [tab(1, 1), page(2, 1), page(3, 2), page(4, 3), page(5, 3), tab(6, 4)];
+  assert.deepEqual(windowsAnUpdateCloses(tabs, OURS), [2, 3]);
+});
+
+test("windowsAnUpdateCloses: another add-on's page is not closed with ours", () => {
+  const theirs = tab(2, 1, "moz-extension://0d6ee0a7-0000-4000-8000-000000000002/page.html");
+  assert.deepEqual(windowsAnUpdateCloses([page(1, 1), theirs], OURS), []);
+});
+
+test("windowsAnUpdateCloses: no tabs, no windows", () => {
+  assert.deepEqual(windowsAnUpdateCloses([], OURS), []);
 });
 
 test("blockPageIndex: freshly opened, the block page is the tab's last entry", () => {

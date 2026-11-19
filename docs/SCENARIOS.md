@@ -76,6 +76,13 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
    checkpoint, not one per second (DESIGN §6). Transitions write too, without logging it.
    `dumpStats()` counts every write, but only since the event page last started.
 8. **Size.** `dumpRaw()` → a few kilobytes per rule at most, history included (DESIGN §6, §13).
+9. **An update keeps the window** *(desktop)*. A real update, set up as in DEVELOPMENT.md (it
+   needs Firefox Developer Edition), with a block page as the only tab of the only window and
+   the event page terminated → the old version logs `updating to v…; opened a tab in 1 window(s)
+   it would close`, the new version starts, and Firefox stays open on a new tab. The same with
+   only the options page in a second window. With another tab beside the block page, nothing
+   opens: `updating to v…` alone. From a version without it, the window closes, and Firefox
+   with it (DESIGN §12).
 
 ## Enforcement
 

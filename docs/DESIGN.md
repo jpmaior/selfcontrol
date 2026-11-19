@@ -756,13 +756,12 @@ closed page's last frame, a tab counter of 0, taps ignored until the tab tray is
 #37). Seen on the emulator with a reload and with a real update, a signed 0.3.2 updating to
 0.3.3 from `updates.json`.
 
-The old version cannot see it coming. During a reload neither `runtime.onSuspend` nor
-`runtime.onUpdateAvailable` fired. `onUpdateAvailable` would fire before a real update, but
-only in a version that already has it, it postpones the update until that version calls
-`runtime.reload()`, and it cannot be tried without two signed versions. So the new version
-repairs it instead: its `runtime.onInstalled` comes with `reason: "update"` (for a reload too)
-after the old pages are gone, and when `needsTabAfterUpdate()` in `tabs.js` finds no tab but
-the hidden one prepared for the address bar, it opens a tab. Inactive is enough: with no tab
+The old version gets no say on Android. During a reload neither `runtime.onSuspend` nor
+`runtime.onUpdateAvailable` fires, and the old version does not listen for `onUpdateAvailable`
+there (below). So the new version repairs it instead: its `runtime.onInstalled` comes with
+`reason: "update"` (for a reload too) after the old pages are gone, and when
+`needsTabAfterUpdate()` in `tabs.js` finds no tab but the hidden one prepared for the address
+bar, it opens a tab. Inactive is enough: with no tab
 selected, Firefox shows it at once, and is usable from it. The frozen frame lasts as long as the
 new version takes to start, which on the emulator was too quick to see. The blocked site is
 never involved; what replaces the block page is a blank tab.
@@ -773,7 +772,45 @@ update installed then adds one blank tab to the tab tray. The home screen stays 
 too many, never the frozen screen.
 
 On desktop the new version does nothing. The window went with its last tab, and with the last
-window Firefox quits, so nothing is left frozen for it to repair (issue #50).
+window Firefox quits, so nothing is left frozen for it to repair. That is the next section.
+
+### An update keeps the windows it would close
+
+Found 2026-11-19 (#50). On desktop, a window holding nothing but the add-on's pages (a block
+page, the options page) is closed with them when the old version unloads (`page-shutdown` in
+Firefox's `ext-browser.js` removes each tab, and `closeWindowWithLastTab` takes the window); with
+the last window, Firefox quits. Seen with a real update, signed 0.3.2 to 0.3.3 in release Firefox
+158: the block page's window closed, and with it as the only window, Firefox exited. The new
+version cannot repair that, as it does on Android, and `runtime.onSuspend` did not fire: Firefox
+sends it only when an idle event page is suspended, not when the add-on unloads.
+
+So the old version acts before it goes. While anything listens to `runtime.onUpdateAvailable`,
+Firefox postpones the update (`checkForBlockers()` in `XPIInstall.sys.mjs`) and fires it; the
+update then waits for `runtime.reload()`, which installs it at once. The listener opens an inactive
+new tab in each window `windowsAnUpdateCloses()` in `tabs.js` finds, those holding only the
+add-on's own pages, then reloads. When the block page closes, the window is left on the new tab.
+The blocked site is never involved. The postponement costs nothing measurable: the update
+landed within a second, also with the event page suspended, since the listener is persistent and
+wakes it. The reload comes whatever happens in between, because a postponed update that is never
+resumed waits for the next restart of Firefox.
+
+Tested in Firefox Developer Edition 159, the build that installs unsigned add-ons when told to,
+because no signed version carries the listener yet: a version with it installed permanently,
+updating from a local `updates.json` with the block page as the only tab of the only window,
+the event page suspended (DEVELOPMENT.md has the setup). Firefox stayed open on the new tab.
+From a version without the listener, the block page's window closed. Release Firefox fires it too, but there
+the old version can only be a temporary add-on, which an update replaces only at the next restart.
+
+Only an update is covered, and only from the version that first carries the listener: the update
+to that version can still close the window. A reload, disabling the add-on and uninstalling it
+close its pages too, with no event first. The other prevention was considered and left: never
+let the add-on's page be a window's only tab, by opening a tab beside the block page whenever it
+replaced the window's last one. That covers every path, but puts an extra tab beside every such
+block, and still not beside the options page, or after the user closes the other tab.
+
+Android does not listen (`browser.windows` decides, since a listener cannot wait for
+`getPlatformInfo()`). Its update path through GeckoView with a postponed install has not been run,
+and the new version already repairs its last tab, so there the update is left as it was.
 
 ---
 

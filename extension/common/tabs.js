@@ -1,9 +1,9 @@
 // Which open tabs count when a `close` rule decides whether the tab it closes
-// is the last one, and when an update decides whether it left Firefox with
-// none; when the block page offers Go back and how far back it reaches, and
-// which limit the block page describes. PURE: no `browser.*` and no `history`;
-// the caller passes the tabs, the platform and the history it sees, so both
-// platforms are covered by node --test.
+// is the last one, and when an update decides which windows it would close
+// and whether it left Firefox with none; when the block page offers Go back
+// and how far back it reaches, and which limit the block page describes. PURE:
+// no `browser.*` and no `history`; the caller passes the tabs, the platform and
+// the history it sees, so both platforms are covered by node --test.
 //
 // The tab list cannot be taken at its word on Android: it carries a hidden
 // tab Firefox prepares when the address bar is tapped, and counting it left
@@ -33,6 +33,21 @@ export function needsFreshTab(closing, tabs, { perWindow }) {
  */
 export function needsTabAfterUpdate({ reason }, tabs, { perWindow }) {
   return reason === "update" && !perWindow && noTabLeft(tabs);
+}
+
+/**
+ * The windows an update would close, as the old version learns of it from
+ * runtime.onUpdateAvailable: those holding nothing but the add-on's own pages,
+ * whose origin is `origin`, runtime.getURL(""). Firefox closes those pages as
+ * it unloads the old version, a window goes with its last tab, and with the
+ * last window Firefox quits, before the new version could repair anything
+ * (DESIGN.md §12). Desktop only: Firefox for Android has no window to lose,
+ * and needsTabAfterUpdate() repairs its last tab afterwards.
+ */
+export function windowsAnUpdateCloses(tabs, origin) {
+  return [...Map.groupBy(tabs, (tab) => tab.windowId)]
+    .filter(([, inWindow]) => inWindow.every((tab) => tab.url?.startsWith(origin)))
+    .map(([windowId]) => windowId);
 }
 
 /** Firefox for Android has no tab the user can see. */
