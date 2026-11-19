@@ -441,7 +441,7 @@ wake-up. On the Android emulator a `focus` rule's alarm fired 50 s late and the 
 The instant the rule ran out can be worked out afterwards, and what came after it is time a spent
 rule does not count. So every credit goes through `creditInUse()` in `policy.js`: of what the
 sleep clamp (§5) lets through, it credits the part before the rule runs out, and records the hold
-(§8) at that instant, as `status()` would have on time. It finds that instant by stepping through
+(§8) at that instant. It finds that instant by stepping through
 `evaluate()`'s `nextChangeAtMs`, the instants the alarm would have fired at, so every cap, the
 hold, a pass's end and a rolling window giving time back on the way all count as they do on time.
 The live reading projects the open interval through it too, so the popup never shows more than the
@@ -463,6 +463,16 @@ the instant, the same: 68 s late, `1:00` of `1:00`.
   allowed when it was used. The event page settles every interval with the old rules before a
   settings change swaps them in (`onRulesChanged`), so this is the store's contract more than a
   path the page takes.
+- **So nothing may write the hold before the settle** (#53). `status()` used to record it from
+  its projection, and `reconcile()` asks `status()` before it settles. With less left at the
+  interval's start than the unlock credit, as on the default rules (five minutes of budget,
+  five of credit) after any earlier use, the settle then found the rule held at the start, took
+  it for the settings change above, and credited the whole interval, late time included. Desktop,
+  a 1:00 focus rule with 1:00 of credit, 0:20 used, away and back, Firefox stopped across the
+  instant: 61 s late, `2:01` of `1:00`, the unlock a minute later. The same reading from the
+  popup, the guard or an alarm's sync, before a late checkpoint or stop, did it too. Now
+  `status()` writes the hold only when no interval is open (§8): 60 s late, `1:00` of `1:00`.
+  An alarm on time is charged its budget exactly too, not the milliseconds it fires late.
 
 ### Each tab is acted on once
 
@@ -546,6 +556,9 @@ when `now < blockedUntil` and the credit back is still short of `minUnlockCredit
   instant the budget runs out, the re-open guard, the popup — so a block cannot be acted on
   without being recorded. It is flushed at once: one write per block
   and one per unlock.
+- **Only from the ledger, never from a projection.** While an interval is open, `status()` reads
+  the ledger with that interval projected in (§5), and leaves the hold alone: the settle that
+  closes the interval records it, at the instant the rule ran out (§7, "Running out late").
 - **Left alone during a pass**, whose unlock instant moves every minute; the alarm at the pass
   end records the hold that follows it.
 - `minUnlockCreditSec: 0` needs 1 ms back, which is what `remaining > 0` already meant: the

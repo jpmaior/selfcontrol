@@ -117,7 +117,10 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    records for the platform. Stop Firefox's processes (`SIGSTOP`) across the instant the budget
    runs out and continue them a minute later → the alarm fires about a minute late, the tab is
    blocked at once, and `dumpUsage()` shows the budget used, not the budget plus the stop
-   (DESIGN §7).
+   (DESIGN §7). The same with less left than the cool-down when the site counts again: on a
+   focus rule, spend a third of the budget, `focus away` and back, then stop across the instant
+   → still the budget, and the unlock an alarm on time would have set (DESIGN §8, "Only from the
+   ledger").
 7. **The block page unlocks itself.** Leave it open → when the countdown ends it says
    `YouTube is available again` with no reload, and within a second its usage line gives what
    is used now, not the figure from before the time came back (DESIGN §19).

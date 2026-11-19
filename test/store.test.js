@@ -512,3 +512,88 @@ test("late: a rule that ran out and came back unseen counts again from now", asy
   assert.ok(hasOpenInterval(r.id), "open again and still in use, so counting");
   assert.equal(stopCounting(r, late + 30_000), 30_000, "from now, not from before it ran out");
 });
+
+// --- ... with less left than the unlock credit (#53) -------------------------
+//
+// The late tests above start with exactly the credit left, on the boundary of
+// the hold (`remaining < credit`). With less, as on the shipped defaults (five
+// minutes of budget, five of credit) after any earlier use, a reading taken
+// before the settle, by reconcile() itself or by the popup, the guard or the
+// alarm's sync, projected the open interval, saw the rule spent and wrote that
+// block's hold onto the ledger. The settle then found the rule held at the
+// interval's start, took it for a rule whose limits changed under it, and
+// credited the whole interval, late time included.
+
+/**
+ * The shipped defaults, strict: five minutes of budget, five of credit. Two
+ * watched from T0, a pause, then playing again from T0+3: it runs out at T0+6.
+ */
+async function belowCredit(id) {
+  const r = { ...rule(id), budgetSec: 5 * 60, minUnlockCreditSec: 5 * 60 };
+  await load([r]);
+  startCounting(r, T0);
+  stopCounting(r, T0 + 2 * MIN);
+  startCounting(r, T0 + 3 * MIN);
+  return r;
+}
+
+const RAN_OUT = T0 + 6 * MIN;
+/** The last spent bucket, T0+5, ages out at T0+66: all five minutes are back. */
+const RELEASE_BELOW = T0 + 66 * MIN;
+
+test("late, below the credit: an alarm that fires late charges the budget, not the late time", async () => {
+  const r = await belowCredit("below-alarm");
+
+  // Due at T0+6, fired 50 s late with the tab still on the site.
+  const late = RAN_OUT + 50_000;
+  assert.equal(reconcile(r, late, true), 3 * MIN, "credited from T0+3 up to T0+6");
+  assert.ok(!hasOpenInterval(r.id), "and closed");
+
+  const s = status(r, late);
+  assert.equal(s.usedMs, 5 * MIN, "charged the budget, not the late time");
+  assert.equal(s.unlockAtMs, RELEASE_BELOW, "the unlock an alarm on time would have set");
+  flush(late);
+  await settled();
+  assert.equal(local.data.get("usage:below-alarm").blockedUntil, RELEASE_BELOW);
+});
+
+test("late, below the credit: a reading before a late checkpoint does not change what it credits", async () => {
+  const r = await belowCredit("below-checkpoint");
+
+  // The thaw delivers a navigation, a popup poll or another rule's sync first.
+  const late = RAN_OUT + 50_000;
+  assert.equal(status(r, late).exhausted, true, "the reading sees the block");
+  assert.equal(checkpointRule(r, late), 3 * MIN, "credited up to T0+6");
+  assert.ok(!hasOpenInterval(r.id), "closed: the rule is spent");
+  assert.equal(status(r, late).unlockAtMs, RELEASE_BELOW);
+});
+
+test("late, below the credit: a reading before a late stop does not change what it credits", async () => {
+  const r = await belowCredit("below-stop");
+
+  // Paused while Firefox was frozen: the report and a reading arrive at the thaw.
+  const late = RAN_OUT + 50_000;
+  assert.equal(status(r, late).usedMs, 5 * MIN, "the live reading stops at the budget");
+  assert.equal(reconcile(r, late, false), 3 * MIN, "credited up to T0+6");
+  const s = status(r, late);
+  assert.equal(s.usedMs, 5 * MIN);
+  assert.equal(s.unlockAtMs, RELEASE_BELOW);
+});
+
+test("on time, below the credit: the block is charged exactly the budget and records its hold", async () => {
+  const r = await belowCredit("below-on-time");
+
+  // The alarm fires a few milliseconds after the instant, as alarms do (DESIGN.md §5).
+  const onTime = RAN_OUT + 3;
+  assert.equal(reconcile(r, onTime, true), 3 * MIN, "nothing for the alarm's own lateness");
+  assert.ok(!hasOpenInterval(r.id));
+  flush(onTime);
+  await settled();
+  assert.equal(local.data.get("usage:below-on-time").blockedUntil, RELEASE_BELOW, "the hold is recorded");
+
+  // Still held after the first bucket ages out at T0+61, from storage alone.
+  await load([r]);
+  const s = status(r, T0 + 62 * MIN);
+  assert.equal(s.exhausted, true, "one minute back is not five");
+  assert.equal(s.unlockAtMs, RELEASE_BELOW);
+});
