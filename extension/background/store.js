@@ -315,6 +315,12 @@ function projection(rule, nowMs) {
  * changes once per block and once per unlock, and losing it to a killed event
  * page would bring the drip-feed back.
  *
+ * Only from the ledger itself, never from a projection: while an interval is
+ * open, the settle that closes it records the hold, at the instant the rule
+ * ran out (policy.creditInUse). A projected hold written first made that
+ * settle find the rule held at the interval's start and credit all of it,
+ * late time included, whenever less than the unlock credit was left (#53).
+ *
  * Left alone during a pass, which suspends the rolling cap: its unlock instant
  * moves every minute the pass is used, and the alarm at the pass end
  * records the hold that follows it.
@@ -348,7 +354,7 @@ export function status(rule, nowMs) {
   const { usage } = projection(rule, nowMs);
   const counting = openSince.has(rule.id);
   const decision = evaluate(rule, usage, nowMs, { counting });
-  syncHold(rule, decision, nowMs);
+  if (!counting) syncHold(rule, decision, nowMs);
 
   return {
     id: rule.id,
