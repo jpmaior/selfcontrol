@@ -9,7 +9,7 @@
 // file, since an id is the key a rule's usage hangs off (DESIGN.md §20).
 
 import { SETTINGS_VERSION } from "./settings.js";
-import { strip, validateRule, withDefaults } from "./rules.js";
+import { isObject, strip, validateRule, withDefaults } from "./rules.js";
 
 export const FORMAT = "selfcontrol-rules";
 
@@ -21,8 +21,6 @@ export function serializeRules(rules, nowMs) {
     rules: rules.map(strip),
   };
 }
-
-const isObject = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
 
 /**
  * `{ ok: true, rules }` with defaults filled and every rule validated against

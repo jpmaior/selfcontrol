@@ -19,6 +19,7 @@
 // accumulate rounding drift; the JSON size difference is a few hundred bytes.
 
 import { addDays, dayKey, startOfWeek } from "./calendar.js";
+import { isObject } from "./rules.js";
 
 export const BUCKET_MS = 60_000;
 
@@ -38,22 +39,20 @@ export function createUsage() {
   return { b: {}, p: {}, d: {}, pass: null, passUses: [], blockedUntil: null };
 }
 
-const isMap = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
-
 /**
  * Fill in whatever a ledger stored by an older build is missing, the way
  * `withDefaults` does for rules. Anything that is not the right shape is
  * reset on its own; a value that is not a ledger at all becomes a fresh one.
  */
 export function normalizeUsage(value) {
-  if (!isMap(value) || !isMap(value.b)) return createUsage();
-  const pass = isMap(value.pass) && Number.isFinite(value.pass.from) && Number.isFinite(value.pass.to)
+  if (!isObject(value) || !isObject(value.b)) return createUsage();
+  const pass = isObject(value.pass) && Number.isFinite(value.pass.from) && Number.isFinite(value.pass.to)
     ? value.pass
     : null;
   return {
     b: value.b,
-    p: isMap(value.p) ? value.p : {},
-    d: isMap(value.d) ? value.d : {},
+    p: isObject(value.p) ? value.p : {},
+    d: isObject(value.d) ? value.d : {},
     pass,
     passUses: Array.isArray(value.passUses) ? value.passUses : [],
     blockedUntil: Number.isFinite(value.blockedUntil) ? value.blockedUntil : null,

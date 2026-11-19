@@ -26,6 +26,7 @@ import { startOfDay, startOfWeek } from "../common/calendar.js";
 import { canUsePass, creditInUse, evaluate, holdAfter, lockInAmount, lockInPreview } from "../common/policy.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
+import { usageKey } from "../common/settings.js";
 
 /**
  * How often an open interval is folded into the ledger and flushed
@@ -35,7 +36,6 @@ import { clock } from "../common/format.js";
 export const CHECKPOINT_MS = 5 * 60_000;
 export const MAX_CHUNK_MS = 1.5 * CHECKPOINT_MS;
 
-const usageKey = (ruleId) => `usage:${ruleId}`;
 const openKey = (ruleId) => `open:${ruleId}`;
 
 /** ruleId -> usage ledger */
@@ -162,23 +162,29 @@ export function anyCounting() {
   return openSince.size > 0;
 }
 
+/** The open interval, from `sinceMs`, in memory and in storage.session. */
+function setOpen(ruleId, sinceMs) {
+  openSince.set(ruleId, sinceMs);
+  stats.sessionWrites++;
+  enqueue(() => browser.storage.session.set({ [openKey(ruleId)]: sinceMs }));
+}
+
+function clearOpen(ruleId) {
+  openSince.delete(ruleId);
+  stats.sessionWrites++;
+  enqueue(() => browser.storage.session.remove(openKey(ruleId)));
+}
+
 /** Open an interval. Idempotent — a rule already counting keeps its start time. */
 export function startCounting(rule, nowMs) {
-  if (openSince.has(rule.id)) return;
-  openSince.set(rule.id, nowMs);
-  stats.sessionWrites++;
-  enqueue(() => browser.storage.session.set({ [openKey(rule.id)]: nowMs }));
+  if (!openSince.has(rule.id)) setOpen(rule.id, nowMs);
 }
 
 /** Close the open interval and fold it in. Returns the milliseconds credited. */
 export function stopCounting(rule, nowMs) {
   const since = openSince.get(rule.id);
   if (since === undefined) return 0;
-
-  openSince.delete(rule.id);
-  stats.sessionWrites++;
-  enqueue(() => browser.storage.session.remove(openKey(rule.id)));
-
+  clearOpen(rule.id);
   return settle(rule, since, nowMs).creditedMs;
 }
 
@@ -198,16 +204,8 @@ export function checkpointRule(rule, nowMs) {
   if (since === undefined) return 0;
 
   const { creditedMs, ranOutAtMs } = settle(rule, since, nowMs);
-  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs).exhausted) {
-    openSince.delete(rule.id);
-    stats.sessionWrites++;
-    enqueue(() => browser.storage.session.remove(openKey(rule.id)));
-    return creditedMs;
-  }
-
-  openSince.set(rule.id, nowMs);
-  stats.sessionWrites++;
-  enqueue(() => browser.storage.session.set({ [openKey(rule.id)]: nowMs }));
+  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs).exhausted) clearOpen(rule.id);
+  else setOpen(rule.id, nowMs);
   return creditedMs;
 }
 

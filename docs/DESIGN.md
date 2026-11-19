@@ -981,7 +981,8 @@ pure and combines every constraint the rule carries:
 - **Exhausted = any constraint says so.** `unlockAtMs` is the *max* over the exhausted
   constraints' release instants, because the site is usable only once all of them allow it.
   `reason` names the one that releases last, so the block page can say "done for today"
-  and count down to midnight rather than to the rolling window's earlier return.
+  and count down to midnight rather than to the rolling window's earlier return. The popup's
+  row words it the same way, from the one map both read (`BLOCKED` in `format.js`).
 - **`remainingMs` is the *min* over the caps**, and `binding` names that cap, so the popup
   can say "12:00 left (today)" when the daily cap is what will bite first.
 - **`nextChangeAtMs` is the earliest instant the answer could flip:** `now + remainingMs`
@@ -1390,7 +1391,7 @@ already re-runs everything (§10).
 
 `null` is the one new thing every reader of `unlockAtMs` has to know. The enforcer leaves `until`
 out of the block page's URL, since `"null"` read back as now. The block page drops its meter and
-countdown and says what lifts the block, the popup says `always blocked` and `no time allowed`,
+countdown and says what lifts the block, the popup says `blocked` and `no time allowed`,
 and the logs say `no budget, stays blocked`.
 
 Raising the budget with the block page open unlocks it on the next refresh, like any other

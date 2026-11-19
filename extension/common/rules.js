@@ -394,7 +394,8 @@ export function withDefaults(rule) {
   return filled;
 }
 
-const isObject = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
+/** A plain object: not null, and not an array. */
+export const isObject = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
 
 /**
  * Only the fields a rule is made of, in their canonical shape. A whitelist on

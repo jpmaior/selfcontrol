@@ -5,7 +5,7 @@
 // mutated in place — rebuilding the list every second would restart the CSS
 // transitions and make the meters stutter.
 
-import { clock, countdown, wallClock } from "../common/format.js";
+import { BLOCKED, clock, countdown, wallClock } from "../common/format.js";
 import { MODES, effectiveMode } from "../common/rules.js";
 import { reportsAudible } from "../common/platform.js";
 
@@ -33,14 +33,6 @@ const MODE_HINT = Object.fromEntries(MODES.map((mode) => [mode.value, mode.hint]
 
 /** On Android an `audible` rule counts while focused; say what it does there. */
 const AUDIBLE = await reportsAudible();
-
-/** State text while blocked, by the constraint that releases last. */
-const BLOCKED_STATE = {
-  rolling: "blocked",
-  daily: "done for today",
-  weekly: "done for the week",
-  always: "always blocked",
-};
 
 const CAP_NAME = { rolling: "window", daily: "today", weekly: "this week" };
 
@@ -118,10 +110,10 @@ function render(status, nowMs) {
   // An SVG element has no .hidden property; the attribute is what the CSS reads.
   parts.clockIcon.toggleAttribute("hidden", !status.exhausted || outright);
   if (outright) {
-    parts.state.textContent = BLOCKED_STATE.always;
+    parts.state.textContent = BLOCKED.always;
     parts.right.textContent = "";
   } else if (status.exhausted) {
-    parts.state.textContent = BLOCKED_STATE[status.reason] ?? "blocked";
+    parts.state.textContent = BLOCKED[status.reason] ?? BLOCKED.rolling;
     parts.right.textContent = `unlocks in ${countdown(status.unlockAtMs - nowMs)}`;
   } else if (status.pass?.active) {
     // The rolling meter is suspended; the pass is what is running out.

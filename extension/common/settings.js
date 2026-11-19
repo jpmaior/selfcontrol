@@ -7,6 +7,9 @@
 import { DEFAULT_RULES, withDefaults } from "./rules.js";
 
 export const SETTINGS_KEY = "settings";
+
+/** A rule's hot key: its ledger, written on every flush (store.js). */
+export const usageKey = (ruleId) => `usage:${ruleId}`;
 /**
  * 1: the rolling cap only. 2: dailyBudgetSec and weeklyBudgetSec (and every
  * later additive field). `withDefaults` is the migration in both directions,

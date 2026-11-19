@@ -7,7 +7,7 @@
 import { log } from "./log.js";
 import { isCountingNow, modeOf, onTabUpdated, platform, setRules, start } from "./observers.js";
 import { clock, countdown, wallClock } from "../common/format.js";
-import { loadRules, onRulesChanged, saveRules } from "../common/settings.js";
+import { loadRules, onRulesChanged, saveRules, usageKey } from "../common/settings.js";
 import { blocksOutright, validateRule } from "../common/rules.js";
 import { clearRemovedAlarms, enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
 import { lastTabClosesWindow } from "../common/platform.js";
@@ -388,7 +388,7 @@ globalThis.resetRules = async () => {
 
 globalThis.resetUsage = async () => {
   await loaded; // the rule ids, or nothing would be removed
-  await browser.storage.local.remove(rules.map((r) => `usage:${r.id}`));
+  await browser.storage.local.remove(rules.map((r) => usageKey(r.id)));
   await browser.storage.session.clear();
   return "usage cleared — reload the extension";
 };

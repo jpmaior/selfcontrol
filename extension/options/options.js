@@ -17,10 +17,10 @@ import {
   strip,
   validateRule,
 } from "../common/rules.js";
-import { loadRules, saveRules } from "../common/settings.js";
+import { loadRules, saveRules, usageKey } from "../common/settings.js";
 import { normalizeUsage, usedByDay } from "../common/accountant.js";
 import { addDays, dayKey, startOfDay } from "../common/calendar.js";
-import { clock } from "../common/format.js";
+import { clock, strong } from "../common/format.js";
 import { describeImport, parseImport, serializeRules } from "../common/transfer.js";
 import { reportsAudible } from "../common/platform.js";
 
@@ -485,11 +485,8 @@ function note(text) {
 }
 
 async function loadHistory(rules) {
-  const keys = rules.map((rule) => `usage:${rule.id}`);
-  const stored = await browser.storage.local.get(keys);
-  history = new Map(
-    rules.map((rule) => [rule.id, usedByDay(normalizeUsage(stored[`usage:${rule.id}`]))]),
-  );
+  const stored = await browser.storage.local.get(rules.map((rule) => usageKey(rule.id)));
+  history = new Map(rules.map((rule) => [rule.id, usedByDay(normalizeUsage(stored[usageKey(rule.id)]))]));
 }
 
 // --- validation and saving ----------------------------------------------
@@ -532,12 +529,6 @@ function updateSaveBar() {
   if (statusEl.textContent === text && statusEl.className === `status ${kind}`.trim()) return;
   statusEl.replaceChildren(...parts);
   statusEl.className = `status ${kind}`.trim();
-}
-
-function strong(text) {
-  const el = document.createElement("strong");
-  el.textContent = text;
-  return el;
 }
 
 function setStatus(text, kind = "") {
