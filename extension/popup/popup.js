@@ -2,25 +2,38 @@
 // use a pass.
 //
 // Sending a message wakes the background if it was unloaded, so opening the
-// popup is always enough to get a fresh answer. Rows are built once and then
-// mutated in place — rebuilding the list every second would restart the CSS
-// transitions and make the meters stutter.
+// popup is always enough to get a fresh answer. Between answers the popup
+// counts by itself, as the block page does: one reading, a local tick every
+// second, and a fresh reading every few seconds, after an action and when a
+// countdown reaches zero (DESIGN.md §19). Asking every second built every
+// rule's full status each time, for numbers the popup can work out alone.
+// Rows are built once and then mutated in place — rebuilding the list every
+// second would restart the CSS transitions and make the meters stutter.
 
 import { BLOCKED, clock, countdown, wallClock } from "../common/format.js";
 import { MODES, effectiveMode } from "../common/rules.js";
 import { reportsAudible } from "../common/platform.js";
 
-const REFRESH_MS = 1000;
+/** The local tick, which moves the countdowns and a counting rule's numbers. */
+const TICK_MS = 1000;
+
+/**
+ * How often the popup asks the background again. What the tick cannot know
+ * comes from here: a bucket ageing out of the rolling window, a rule
+ * starting or stopping, and anything done elsewhere.
+ */
+const REFRESH_MS = 5000;
 
 /** How long the "Confirm" step of an action stays armed. */
 const CONFIRM_MS = 5000;
 
 /**
  * How long an action's error stays up, unless another action is confirmed
- * first. Not until the next refresh: that is a second away, and clearing
- * there left the error up for one message round trip. Not until the popup
- * closes either: the rows go on changing under it, and an error about a click
- * long past reads as one about what the rows show now.
+ * first, and cleared by the local tick, not by a refresh: the next refresh
+ * may be a moment away, and clearing there once left the error up for one
+ * message round trip. Not until the popup closes either: the rows go on
+ * changing under it, and an error about a click long past reads as one about
+ * what the rows show now.
  */
 const ACTION_ERROR_MS = 10_000;
 
@@ -266,30 +279,108 @@ async function runAction(message, fallback) {
     // Left to the fallback below.
   }
   if (!reply?.ok) actionError = { text: reply?.error ?? fallback, untilMs: Date.now() + ACTION_ERROR_MS };
+  tick();
   await refresh();
 }
 
+/** The last answer from the background, and when it came: { statuses, atMs }, or null. */
+let reading = null;
+
+/** Why there is no reading to show, until the next one succeeds. */
+let readingNote = null;
+
+/** The first instant after the reading at which one of its countdowns reaches zero. */
+let nextZeroMs = null;
+
+/** Only the newest request may land: an older answer arriving late would undo it. */
+let requests = 0;
+
 async function refresh() {
+  const request = ++requests;
   let statuses;
   try {
     statuses = await browser.runtime.sendMessage({ type: "status" });
   } catch {
-    setNote("Background script not responding.");
-    return;
+    statuses = undefined;
   }
+  if (request !== requests) return;
 
-  if (!Array.isArray(statuses) || statuses.length === 0) {
-    setNote("No rules configured.");
-    return;
+  if (statuses === undefined) {
+    // The tick goes on from the last reading meanwhile, as on the block page.
+    readingNote = "Background script not responding.";
+  } else if (!Array.isArray(statuses) || statuses.length === 0) {
+    readingNote = "No rules configured.";
+    reading = null;
+  } else {
+    readingNote = null;
+    const atMs = Date.now();
+    reading = { statuses, atMs };
+    nextZeroMs = firstZero(statuses, atMs);
   }
+  tick();
+}
 
+/**
+ * Where one rule's reading is `elapsedMs` later, as far as time alone moves
+ * it. The countdowns need nothing here, since they count to fixed instants;
+ * this is what a counting rule spends meanwhile: its rolling window's used
+ * time, the calendar caps' unless a pass leaves them out, and what is left.
+ * Kept within the budget, as the background's reading is: the zero brings a
+ * fresh one.
+ */
+function projected(status, elapsedMs) {
+  if (!status.counting || status.exhausted || elapsedMs <= 0) return status;
+  const onPass = Boolean(status.pass?.active);
+  const spend = (cap) => cap && { ...cap, usedMs: Math.min(cap.budgetMs, cap.usedMs + elapsedMs) };
+  const capsCount = !onPass || status.passCountsTowardCaps;
+  return {
+    ...status,
+    // A pass suspends the rolling cap, but its time still goes into the window (DESIGN.md §17).
+    usedMs: onPass ? status.usedMs + elapsedMs : Math.min(status.budgetMs, status.usedMs + elapsedMs),
+    remainingMs: Math.max(0, status.remainingMs - elapsedMs),
+    caps: status.caps && {
+      ...status.caps,
+      daily: capsCount ? spend(status.caps.daily) : status.caps.daily,
+      weekly: capsCount ? spend(status.caps.weekly) : status.caps.weekly,
+    },
+  };
+}
+
+/**
+ * The instants after `atMs` at which a reading stops being true on its own,
+ * and the popup should ask again: an unlock, a pass ending, a counting rule
+ * running out. The earliest of them, or null.
+ */
+function firstZero(statuses, atMs) {
+  let first = null;
+  for (const s of statuses) {
+    const zeros = [
+      s.exhausted ? s.unlockAtMs : null,
+      s.pass?.active ? s.pass.endsAtMs : null,
+      s.counting && !s.exhausted ? atMs + s.remainingMs : null,
+    ];
+    for (const at of zeros) {
+      if (at !== null && at > atMs && (first === null || at < first)) first = at;
+    }
+  }
+  return first;
+}
+
+/** Every second: the last reading, moved on to now. */
+function tick() {
   const now = Date.now();
-  for (const status of statuses) render(status, now);
+  if (reading) {
+    for (const status of reading.statuses) render(projected(status, now - reading.atMs), now);
+  }
 
-  // Clears any error left over from a refresh that failed earlier, and an
-  // action's error once its time is up.
+  // An action's error goes once its time is up, whatever the refreshes do.
   if (actionError && now >= actionError.untilMs) actionError = null;
-  setNote(actionError?.text ?? null);
+  setNote(readingNote ?? actionError?.text ?? null);
+
+  if (nextZeroMs !== null && now >= nextZeroMs) {
+    nextZeroMs = null;
+    refresh();
+  }
 }
 
 function openRules() {
@@ -301,4 +392,5 @@ document.getElementById("edit").addEventListener("click", openRules);
 document.getElementById("settings").addEventListener("click", openRules);
 
 refresh();
+setInterval(tick, TICK_MS);
 setInterval(refresh, REFRESH_MS);

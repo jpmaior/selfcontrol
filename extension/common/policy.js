@@ -228,8 +228,8 @@ const MAX_STEPS = 10_000;
  * decided by evaluate() itself, stepping from one `nextChangeAtMs` to the next,
  * so every cap, the hold and a pass's end are taken as the alarms would take
  * them, and a rolling window that gives time back on the way is followed.
- * The hold is recorded at that instant: while an interval is open, status()
- * leaves it to this, since a hold it wrote from its projection would make the
+ * The hold is recorded at that instant: while an interval is open, the store
+ * leaves it to this, since a hold written from a projection would make the
  * rule look spent at `fromMs`.
  * What comes after it does not count even if the rule is open again by
  * `toMs`: on time, the block page would have been up by then.
