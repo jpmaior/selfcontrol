@@ -12,7 +12,6 @@
 // writes are batched: nothing is written during playback except at checkpoints.
 
 import {
-  commit,
   createUsage,
   fold,
   lockIn,
@@ -24,7 +23,7 @@ import {
   windowOf,
 } from "./accountant.js";
 import { startOfDay, startOfWeek } from "../common/calendar.js";
-import { canUsePass, evaluate, lockInAmount, lockInPreview } from "../common/policy.js";
+import { canUsePass, creditInUse, evaluate, holdAfter, lockInAmount, lockInPreview } from "../common/policy.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
 
@@ -122,7 +121,9 @@ export async function load(rules) {
  * discarded up to a whole checkpoint per stop, and a video with silent gaps
  * stops many times; a 7-minute video showed as exactly 5:00 (2026-09-05).
  * settle() applies the sleep clamp, so a suspended machine still cannot credit
- * more than MAX_CHUNK_MS here.
+ * more than MAX_CHUNK_MS here, and credits only up to the instant the rule ran
+ * out, for a close that comes late (a frozen Firefox on Android, a sleeping
+ * laptop): what came after it is time a spent rule does not count (#35).
  *
  * Returns the milliseconds credited, or 0 if nothing was closed.
  */
@@ -130,6 +131,12 @@ export function reconcile(rule, nowMs, inUse) {
   // status() projects the open interval, so this asks whether the rule is spent
   // with everything up to now counted.
   if (inUse && !status(rule, nowMs).exhausted) {
+    // Open again, but the open interval ran out on the way and came back while
+    // nobody was looking, a late alarm's drip-feed or midnight: settle it up to
+    // where it ran out, and count again from now.
+    if (openSince.has(rule.id) && projection(rule, nowMs).ranOutAtMs !== null) {
+      return checkpointRule(rule, nowMs);
+    }
     startCounting(rule, nowMs);
     return 0;
   }
@@ -172,22 +179,36 @@ export function stopCounting(rule, nowMs) {
   stats.sessionWrites++;
   enqueue(() => browser.storage.session.remove(openKey(rule.id)));
 
-  return settle(rule, since, nowMs);
+  return settle(rule, since, nowMs).creditedMs;
 }
 
 /**
  * Fold an open interval in *without* closing it, so a long session is never one
  * enormous unrecorded stretch. Returns the milliseconds credited.
+ *
+ * Unless the rule ran out on the way, which only a late checkpoint can find
+ * (both alarms were due while Firefox was frozen, and this one fired first):
+ * then it is closed if the rule is still spent, as the rule's alarm would have
+ * closed it (DESIGN.md §7). Left open past that instant, the rule's alarm would
+ * credit the moments from here to its own firing, and those few milliseconds,
+ * in a newer bucket, would move the unlock.
  */
 export function checkpointRule(rule, nowMs) {
   const since = openSince.get(rule.id);
   if (since === undefined) return 0;
 
+  const { creditedMs, ranOutAtMs } = settle(rule, since, nowMs);
+  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs).exhausted) {
+    openSince.delete(rule.id);
+    stats.sessionWrites++;
+    enqueue(() => browser.storage.session.remove(openKey(rule.id)));
+    return creditedMs;
+  }
+
   openSince.set(rule.id, nowMs);
   stats.sessionWrites++;
   enqueue(() => browser.storage.session.set({ [openKey(rule.id)]: nowMs }));
-
-  return settle(rule, since, nowMs);
+  return creditedMs;
 }
 
 /**
@@ -223,12 +244,13 @@ export function usePassOnRule(rule, nowMs) {
   return true;
 }
 
+/** Credit an interval of use to the ledger: `{ creditedMs, ranOutAtMs }`. */
 function settle(rule, fromMs, toMs) {
   const usage = ledgerFor(rule.id);
-  commit(usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS, pass: usage.pass });
+  const result = creditInUse(rule, usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS });
   fold(usage, toMs, rule.windowSec * 1000);
   dirty.add(rule.id);
-  return Math.min(Math.max(0, toMs - fromMs), MAX_CHUNK_MS);
+  return result;
 }
 
 // --- flushing ------------------------------------------------------------
@@ -270,14 +292,17 @@ export function forget(ruleId) {
 
 /**
  * A read-only projection of the ledger that includes the currently open
- * interval, so live readings are honest between checkpoints. Never written back.
+ * interval, credited as settle() would credit it, so live readings are honest
+ * between checkpoints. Never written back. `ranOutAtMs` is where the open
+ * interval ran out, if it did.
  */
-function projected(rule, nowMs) {
+function projection(rule, nowMs) {
   const usage = ledgerFor(rule.id);
   const since = openSince.get(rule.id);
-  if (since === undefined) return usage;
+  if (since === undefined) return { usage, ranOutAtMs: null };
   const copy = { ...usage, b: { ...usage.b }, p: { ...usage.p } };
-  return commit(copy, since, nowMs, { maxChunkMs: MAX_CHUNK_MS, pass: usage.pass });
+  const { ranOutAtMs } = creditInUse(rule, copy, since, nowMs, { maxChunkMs: MAX_CHUNK_MS });
+  return { usage: copy, ranOutAtMs };
 }
 
 /**
@@ -295,12 +320,11 @@ function projected(rule, nowMs) {
  * records the hold that follows it.
  */
 function syncHold(rule, decision, nowMs) {
-  const rolling = decision.caps.rolling;
   // A rule that blocks outright has no rolling cap to hold, and a hold already
   // recorded is kept, so setting the budget to zero and back mid-block does not
   // lift it (DESIGN.md §22).
-  if (decision.pass.active || !rolling) return;
-  const next = rolling.exhausted ? rolling.unlockAtMs : null;
+  const next = holdAfter(decision);
+  if (next === undefined) return;
   const usage = ledgerFor(rule.id);
   if (usage.blockedUntil === next) return;
   usage.blockedUntil = next;
@@ -321,7 +345,7 @@ function period(usage, startMs) {
  * meter's numbers and the calendar totals.
  */
 export function status(rule, nowMs) {
-  const usage = projected(rule, nowMs);
+  const { usage } = projection(rule, nowMs);
   const counting = openSince.has(rule.id);
   const decision = evaluate(rule, usage, nowMs, { counting });
   syncHold(rule, decision, nowMs);

@@ -8,7 +8,7 @@ process.env.TZ = "Europe/Lisbon";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { canLockIn, canUsePass, evaluate, lockInAmount, lockInPreview } from "../extension/common/policy.js";
+import { canLockIn, canUsePass, creditInUse, evaluate, lockInAmount, lockInPreview } from "../extension/common/policy.js";
 import {
   BUCKET_MS,
   bucketExpiresAt,
@@ -492,4 +492,116 @@ test("evaluate: raising a zero budget back counts the ledger as it stands", () =
   const e = evaluate(rule(), u, T0 + 3 * MIN);
   assert.equal(e.exhausted, false);
   assert.equal(e.remainingMs, 17 * MIN);
+});
+
+// --- crediting use up to the instant the rule runs out (DESIGN.md §7) -------
+//
+// An interval is credited when it closes, and that can be late: Android freezes
+// Firefox in the background and its alarms with it, and a suspended laptop
+// misses them too. A rule alarm due when the budget ran out fired 50 s late on
+// the emulator, and the whole interval was credited: 2:20 of a 1:30 budget, and
+// the unlock moved later to match (#35). A spent rule never counts, so what
+// came after the instant it ran out is not credited.
+
+test("creditInUse: a late close credits only up to the instant the budget ran out", () => {
+  const r = rule();
+  const u = spent(18 * MIN);
+  const late = T0 + 25 * MIN; // ran out at T0+20, closed five minutes later
+  const { creditedMs, ranOutAtMs } = creditInUse(r, u, T0 + 18 * MIN, late);
+  assert.equal(creditedMs, 2 * MIN);
+  assert.equal(ranOutAtMs, T0 + 20 * MIN);
+
+  const e = evaluate(r, u, late);
+  assert.equal(e.caps.rolling.usedMs, 20 * MIN, "the budget, not the late time");
+  assert.equal(e.exhausted, true);
+  const onTime = spent(20 * MIN);
+  assert.equal(e.unlockAtMs, evaluate(r, onTime, T0 + 20 * MIN).unlockAtMs, "the unlock an on-time alarm promised");
+  assert.equal(u.blockedUntil, e.unlockAtMs, "and the hold recorded at that instant");
+});
+
+test("creditInUse: closed on time or before running out, the whole interval counts", () => {
+  const r = rule();
+  const onTime = spent(18 * MIN);
+  assert.deepEqual(creditInUse(r, onTime, T0 + 18 * MIN, T0 + 20 * MIN), { creditedMs: 2 * MIN, ranOutAtMs: null });
+  assert.equal(onTime.blockedUntil, null, "status() records the hold, as it always has");
+
+  const early = spent(3 * MIN);
+  assert.deepEqual(creditInUse(r, early, T0 + 3 * MIN, T0 + 10 * MIN), { creditedMs: 7 * MIN, ranOutAtMs: null });
+});
+
+test("creditInUse: the sleep clamp still applies first", () => {
+  const u = createUsage();
+  const { creditedMs, ranOutAtMs } = creditInUse(rule(), u, T0, T0 + 3 * HOUR, { maxChunkMs: 7.5 * MIN });
+  assert.equal(creditedMs, 7.5 * MIN);
+  assert.equal(ranOutAtMs, null);
+  assert.equal(evaluate(rule(), u, T0 + 3 * HOUR).caps.rolling.usedMs, 7.5 * MIN);
+
+  // Of what the clamp lets through, only what comes before running out counts.
+  const nearly = commit(createUsage(), T0 + 2 * HOUR, T0 + 2 * HOUR + 18 * MIN);
+  const at = T0 + 3 * HOUR;
+  const r = rule({ windowSec: 2 * 60 * 60 });
+  const result = creditInUse(r, nearly, T0, at, { maxChunkMs: 7.5 * MIN });
+  assert.deepEqual(result, { creditedMs: 2 * MIN, ranOutAtMs: at - 7.5 * MIN + 2 * MIN });
+});
+
+test("creditInUse: time the rolling window gives back on the way counts until it runs out", () => {
+  // Three minutes left at T0, and a minute from an hour ago ages out at T0+1:
+  // an alarm set for T0+3 would have found a minute more and moved to T0+4.
+  const r = rule({ minUnlockCreditSec: 0 });
+  const u = commit(createUsage(), T0 - HOUR, T0 - HOUR + MIN);
+  commit(u, T0 - 16 * MIN, T0);
+  assert.equal(evaluate(r, u, T0).remainingMs, 3 * MIN);
+  const { creditedMs, ranOutAtMs } = creditInUse(r, u, T0, T0 + 10 * MIN);
+  assert.equal(ranOutAtMs, T0 + 4 * MIN);
+  assert.equal(creditedMs, 4 * MIN);
+});
+
+test("creditInUse: nothing after running out counts, even once the rule is open again", () => {
+  // The drip-feed: one minute ages out at T0+3, after the rule ran out at T0+1.
+  // An on-time alarm would have put the block page up at T0+1, and the block page
+  // is not the site, so the minute from T0+3 on was never going to count.
+  const r = rule({ minUnlockCreditSec: 0 });
+  const u = commit(createUsage(), T0 - 58 * MIN, T0 - 57 * MIN);
+  commit(u, T0 - 18 * MIN, T0);
+  assert.equal(evaluate(r, u, T0).remainingMs, MIN);
+  const { creditedMs, ranOutAtMs } = creditInUse(r, u, T0, T0 + 5 * MIN);
+  assert.equal(ranOutAtMs, T0 + MIN);
+  assert.equal(creditedMs, MIN);
+  assert.equal(evaluate(r, u, T0 + 5 * MIN).exhausted, false, "open again by the time it closed");
+});
+
+test("creditInUse: a daily or weekly cap running out ends the credit the same way", () => {
+  const daily = rule({ dailyBudgetSec: 10 * 60 });
+  const u = spent(9 * MIN);
+  assert.deepEqual(creditInUse(daily, u, T0 + 9 * MIN, T0 + 15 * MIN), { creditedMs: MIN, ranOutAtMs: T0 + 10 * MIN });
+  assert.equal(evaluate(daily, u, T0 + 15 * MIN).reason, "daily");
+  assert.equal(u.blockedUntil, null, "the rolling cap is not what ran out, so there is no hold");
+
+  const weekly = rule({ weeklyBudgetSec: 4 * 60 });
+  const w = spent(3 * MIN);
+  assert.deepEqual(creditInUse(weekly, w, T0 + 3 * MIN, T0 + 9 * MIN), { creditedMs: MIN, ranOutAtMs: T0 + 4 * MIN });
+});
+
+test("creditInUse: a pass ending mid-interval ends the credit at the pass end", () => {
+  const r = withPasses();
+  const { u, now } = midPass(r, 25); // the pass runs T0+20..T0+50
+  const late = T0 + 55 * MIN;
+  const { creditedMs, ranOutAtMs } = creditInUse(r, u, now, late);
+  assert.equal(ranOutAtMs, T0 + 50 * MIN, "the rolling cap is full of pass minutes");
+  assert.equal(creditedMs, 5 * MIN);
+  const e = evaluate(r, u, late);
+  assert.equal(e.caps.rolling.usedMs, 50 * MIN, "20 before the pass, its 30, nothing after");
+  assert.equal(u.blockedUntil, e.unlockAtMs, "the hold that follows the pass");
+});
+
+test("creditInUse: a rule spent from the start was changed under the interval, which counts whole", () => {
+  // An interval only opens on a rule that is not spent, and closes at the
+  // instant it runs out, so finding it spent at the start means its limits
+  // changed while it was open: a settings change, whose instant is the close.
+  const u = spent(20 * MIN);
+  assert.deepEqual(creditInUse(rule({ budgetSec: 10 * 60 }), u, T0 + 20 * MIN, T0 + 21 * MIN), {
+    creditedMs: MIN,
+    ranOutAtMs: null,
+  });
+  assert.deepEqual(creditInUse(outright(), createUsage(), T0, T0 + 2 * MIN), { creditedMs: 2 * MIN, ranOutAtMs: null });
 });

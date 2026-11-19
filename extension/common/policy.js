@@ -18,6 +18,7 @@
 // releases last; `binding` names the cap with the least left.
 
 import {
+  commit,
   lockIn,
   passActive,
   passesLeft,
@@ -197,6 +198,74 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
   }
 
   return { exhausted, reason, binding, remainingMs, unlockAtMs, nextChangeAtMs, nextChange, caps, pass };
+}
+
+// --- the hold (DESIGN.md §8) ----------------------------------------------
+
+/**
+ * What the ledger's `blockedUntil` should be after `decision`: the rolling
+ * cap's unlock instant while it is spent, null once it is not, and `undefined`
+ * to leave it alone: during a pass, whose unlock instant moves every minute it
+ * is used, and for a rule that blocks outright, which has no rolling cap
+ * (DESIGN.md §22).
+ */
+export function holdAfter(decision) {
+  const rolling = decision.caps.rolling;
+  if (decision.pass.active || !rolling) return undefined;
+  return rolling.exhausted ? rolling.unlockAtMs : null;
+}
+
+// --- crediting use (DESIGN.md §7) -------------------------------------------
+
+/**
+ * Credit `[fromMs, toMs)` of use to `usage`, but only up to the instant the
+ * rule runs out: a spent rule never counts. Mutates `usage`, and returns the
+ * milliseconds credited and the instant it ran out (null if it did not).
+ *
+ * An interval is normally closed at that instant by the rule's alarm, so this
+ * only bites when the close comes late: Android freezes Firefox in the
+ * background, and its alarms with it, and a laptop sleeps through them. The
+ * late time used to be credited, and moved the unlock later with it (#35).
+ *
+ * The sleep clamp (`maxChunkMs`, see accountant.commit) applies first; of what
+ * it lets through, the part before the rule runs out counts. Running out is
+ * decided by evaluate() itself, stepping from one `nextChangeAtMs` to the next,
+ * so every cap, the hold and a pass's end are taken as the alarms would take
+ * them, and a rolling window that gives time back on the way is followed.
+ * The hold is recorded at that instant, as status() would have recorded it.
+ * What comes after it does not count even if the rule is open again by
+ * `toMs`: on time, the block page would have been up by then.
+ *
+ * A rule spent at `fromMs` itself is credited whole. An interval only opens on
+ * a rule that is not spent and is closed when it runs out, so a rule spent at
+ * its start had its limits changed under it, by a settings change whose own
+ * instant is the close: the time was allowed when it was used.
+ */
+export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity } = {}) {
+  if (!(toMs > fromMs)) return { creditedMs: 0, ranOutAtMs: null };
+  const startMs = Math.max(fromMs, toMs - maxChunkMs);
+
+  if (evaluate(rule, usage, startMs).exhausted) {
+    commit(usage, startMs, toMs, { pass: usage.pass });
+    return { creditedMs: toMs - startMs, ranOutAtMs: null };
+  }
+
+  // Each step ends where evaluate() says the answer could change, which is
+  // strictly later while the rule is open, so this always ends; the bound only
+  // keeps a bug there from hanging the event page.
+  let at = startMs;
+  for (let step = 0; at < toMs && step < 10_000; step++) {
+    const decision = evaluate(rule, usage, at, { counting: true });
+    if (decision.exhausted) {
+      const hold = holdAfter(decision);
+      if (hold !== undefined) usage.blockedUntil = hold;
+      return { creditedMs: at - startMs, ranOutAtMs: at };
+    }
+    const until = Math.min(decision.nextChangeAtMs ?? toMs, toMs);
+    commit(usage, at, until, { pass: usage.pass });
+    at = until;
+  }
+  return { creditedMs: at - startMs, ranOutAtMs: null };
 }
 
 // --- passes (DESIGN.md §17) -------------------------------------------------
