@@ -42,6 +42,7 @@
 //   guard in enforcer.js's act(), which the close scenario is there to test.
 
 import { execFileSync, spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -79,7 +80,14 @@ const DIR = path.join(ROOT, ".browser");
 const PROFILE = path.join(DIR, "profile");
 const STATE = path.join(DIR, "state.json");
 const LOG = path.join(DIR, "firefox.log");
-const PULSE_DIR = path.join(DIR, "pulse");
+// Not in .browser/: a socket's path must fit in 108 bytes, which a deep
+// checkout exceeds, and PulseAudio then starts without one and says nothing.
+// Not under TMPDIR either: `nix develop` deletes its own when it exits. Named
+// after the checkout, so two checkouts' tools keep their sinks apart.
+const PULSE_DIR = path.join(
+  process.env.XDG_RUNTIME_DIR ?? "/tmp",
+  `selfcontrol-pulse-${crypto.createHash("sha256").update(ROOT).digest("hex").slice(0, 8)}`,
+);
 const PULSE_SOCKET = path.join(PULSE_DIR, "native");
 // The title of the window `focus away` gives focus to, which is how xdotool finds it.
 const OUTSIDE = "selfcontrol-outside-firefox";
@@ -103,6 +111,10 @@ const PREFS = {
   "toolkit.telemetry.reportingpolicy.firstRun": false,
   // Nobody is there to click play.
   "media.autoplay.default": 0,
+  // Back skips a page nobody interacted with, and nobody interacts with one
+  // `open` loads: the blocked site, so Back from its block page would land a
+  // page before it. A user has clicked play or scrolled there.
+  "browser.navigation.requireUserInteraction": false,
   // The extension's console.log lines go to stdout, which `log` reads.
   "devtools.console.stdout.content": true,
   // Without these, the uninstall every shutdown implies would take the ledger
@@ -520,6 +532,7 @@ const commands = {
     for (const pid of [state.outsidePid, state.pulsePid, state.xvfbPid]) {
       if (pid && alive(pid)) process.kill(pid, "SIGTERM");
     }
+    fs.rmSync(PULSE_DIR, { recursive: true, force: true });
     fs.rmSync(STATE);
     console.log("stopped");
   },
@@ -595,10 +608,27 @@ const commands = {
     const file = path.resolve(name ?? path.join(DIR, "shots", `${new Date().toISOString().replace(/[:.]/g, "-")}.png`));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (args.includes("--page")) {
-      await withBrowser(async (b) => {
-        const { data } = await b.send("browsingContext.captureScreenshot", { context: await activeTab(b) });
-        fs.writeFileSync(file, Buffer.from(data, "base64"));
-      });
+      // From the browser window rather than BiDi's captureScreenshot, which
+      // refuses moz-extension pages ("privileged scope"): the block page and
+      // the options page are the ones worth a picture. The tab is the one
+      // activeTab() picks: the selected tab of the focused window, or of the first.
+      const png = await withBrowser(async (b) =>
+        evaluate(
+          b,
+          await chromeWindow(b),
+          `(async () => {
+            const win = ${WINDOWS}.find((w) => w === Services.focus.activeWindow) ?? ${WINDOWS}[0];
+            const bitmap = await win.gBrowser.selectedBrowser.browsingContext.currentWindowGlobal
+              .drawSnapshot(null, 1, "white");
+            const canvas = document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+            canvas.getContext("2d").drawImage(bitmap, 0, 0);
+            return canvas.toDataURL("image/png").split(",")[1];
+          })()`,
+        ),
+      );
+      fs.writeFileSync(file, Buffer.from(png, "base64"));
     } else {
       execFileSync("import", ["-window", "root", file], { env: { ...process.env, DISPLAY: state.display } });
     }

@@ -87,28 +87,60 @@
                 echo "created AVD $avd ($cfg)"
               '';
 
+              # The serial of the emulator running AVD $1, if one is. Another
+              # project's emulator may be up as well, so "an emulator" is not
+              # enough. Any state: one still booting is listed as offline.
+              avdSerial = ''
+                avd_serial() {
+                  for s in $(adb devices | sed -n 's/^\(emulator-[0-9]*\)\t.*/\1/p'); do
+                    if [ "$(adb -s "$s" emu avd name 2>/dev/null | head -1 | tr -d '\r')" = "$1" ]; then
+                      echo "$s"
+                      return
+                    fi
+                  done
+                }
+              '';
+
+              # Prints `booted: <serial>` on stdout, which tools/android.mjs reads;
+              # the rest goes to stderr.
               emu-start = pkgs.writeShellScriptBin "emu-start" ''
                 set -euo pipefail
+                ${avdSerial}
                 avd="''${1:-${avdName}}"
-                if adb devices | grep -q '^emulator-'; then
-                  echo "emulator already running"
+                serial="$(avd_serial "$avd")"
+                if [ -n "$serial" ]; then
+                  echo "$avd already running as $serial" >&2
                 else
+                  # The first free console port, so it can start beside another
+                  # emulator and its serial is known in advance.
+                  attached="$(adb devices)"
+                  port=5554
+                  while grep -q "^emulator-$port[[:space:]]" <<<"$attached"; do port=$((port + 2)); done
+                  serial="emulator-$port"
                   log="/tmp/emulator-$avd.log"
-                  setsid nohup emulator -avd "$avd" -no-window -no-audio -no-boot-anim \
+                  setsid nohup emulator -avd "$avd" -port "$port" -no-window -no-audio -no-boot-anim \
                     -gpu swangle_indirect -accel on >"$log" 2>&1 </dev/null &
-                  echo "starting $avd (log: $log)"
+                  echo "starting $avd as $serial (log: $log)" >&2
                 fi
-                timeout 600 adb wait-for-device
+                timeout 600 adb -s "$serial" wait-for-device
                 SECONDS=0
-                until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; do
+                until [ "$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; do
                   [ "$SECONDS" -gt 600 ] && { echo "boot timed out" >&2; exit 1; }
                   sleep 3
                 done
-                echo "booted: $(adb devices | grep '^emulator-')"
+                echo "booted: $serial"
               '';
 
               emu-stop = pkgs.writeShellScriptBin "emu-stop" ''
-                adb emu kill
+                set -euo pipefail
+                ${avdSerial}
+                avd="''${1:-${avdName}}"
+                serial="$(avd_serial "$avd")"
+                if [ -z "$serial" ]; then
+                  echo "$avd is not running"
+                else
+                  adb -s "$serial" emu kill
+                fi
               '';
 
               # Next to tools/browser.mjs's desktop screenshots, in the ignored .browser/.

@@ -27,7 +27,8 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
   For long or hands-off runs, and on the emulator, where YouTube's video does not play reliably
   under software rendering, a local page looping an audio tone is steadier: serve it from the
   host on `127.0.0.1` (on Android, `adb reverse` the port) and add `127.0.0.1` to the rule's
-  domains with `setLimits`. `localhost` is refused, because a domain needs a dot.
+  domains, its `match` list, with `setLimits`, e.g. `{ match: ["youtube.com", "127.0.0.1"] }`.
+  `localhost` is refused, because a domain needs a dot.
 - **Nothing attached** for anything about the lifecycle. An open console keeps the event page
   alive (DEVELOPMENT.md), so read it with `log` afterwards. Log lines are quoted below as the
   event page prints them.
@@ -37,8 +38,9 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
 1. **Play and pause.** Play a video → `▶ COUNTING youtube (audible)`. Pause → `■ stopped`, with
    the time credited.
 2. **Background playback.** Play, then switch to another tab → it keeps counting.
-3. **Hover previews never count.** On the YouTube home page, sweep the pointer over thumbnails
-   so the muted previews autoplay → nothing counts (DESIGN §3).
+3. **Hover previews never count.** On a YouTube search results page, sweep the pointer over
+   thumbnails so the muted previews autoplay → nothing counts (DESIGN §3). Signed out, the home
+   page shows no thumbnails at all.
 4. **One clock for two tabs.** Play two videos at once → one `▶ COUNTING`, `■ stopped` only once
    both have stopped, and `dumpUsage()` grows one second per second.
 5. **Muting stops the clock.** Mute the playing tab → `■ stopped`. This is the accepted loophole
@@ -62,7 +64,8 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
    (DESIGN §5).
 3. **Hands-off past a checkpoint.** With a 30-minute budget, play 7 minutes and touch nothing →
    the page suspends, the checkpoint alarm wakes it with `checkpoint: youtube +5:00`, and the
-   pause adds the rest. `dumpUsage()` shows the time from start to pause, about 7:02.
+   pause adds the rest. `dumpUsage()` shows the time from start to pause and about 3 s more,
+   about 7:04: Firefox clears `audible` some 3 s after a pause, and until then it counts.
 4. **The sleep clamp.** Play, let the page suspend, then freeze Firefox's process group
    (`SIGSTOP`, then `SIGCONT` 11 minutes later, standing in for a laptop suspend) → the stretch
    is credited at most `+7:30` (DESIGN §5).
@@ -70,8 +73,8 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
    gone, because Reload clears `storage.session`.
 6. **Firefox restarted** (`stop`, `start`) → usage survives, open intervals do not.
 7. **Writes stay rare.** Play ~6 minutes untouched → `log` shows one `flushed` line per
-   checkpoint and per transition, not one per second (DESIGN §6). `dumpStats()` only counts
-   since the event page last started.
+   checkpoint, not one per second (DESIGN §6). Transitions write too, without logging it.
+   `dumpStats()` counts every write, but only since the event page last started.
 8. **Size.** `dumpRaw()` → a few kilobytes per rule at most, history included (DESIGN §6, §13).
 
 ## Enforcement
@@ -84,9 +87,11 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    (DESIGN §7). Open the site in a new tab → blocked at once,
    `⛔ blocked re-opened youtube (tab N)`.
    Neither counts. Check it on a focus rule, since on desktop an audible one is redirected
-   before it makes a sound: going back in a minute or more after the block logs
-   `▷ spent, not counting` rather than `▶ COUNTING`, and the unlock time, on the block page and
-   in `dumpUsage()`, stays where it was (DESIGN §7).
+   before it makes a sound: going back in a minute or more after the block never logs
+   `▶ COUNTING`, and the unlock time, on the block page and in `dumpUsage()`, stays where it was
+   (DESIGN §7). With the event page awake, the observers sometimes see the site before the guard
+   redirects it and log `▷ spent, not counting`; when going back is what wakes a suspended page
+   (`terminate` first), the guard redirects before the observers start, and only `⛔` appears.
 3. **Close instead of block.** A rule with `onExceed: "close"` (the default Instagram rule) →
    the tab closes at the budget, and reopening it closes it again at once,
    `⛔ closed re-opened instagram (tab N)`. No tab opens in its place unless it was the last one,
@@ -202,9 +207,16 @@ as YouTube does. On Android both rules count while focused.
    in-page is blocked at once: `⛔ blocked re-opened <part>`.
 4. **A spent site leaves the part alone.** A Short playing in one tab, `/watch` in another; run
    the site out → `⛔ <site> spent — blocked 1 tab(s)`, the `/watch` one, and the Short keeps
-   counting toward its own rule. From that Short, moving to `/watch` in-page is blocked at once.
+   counting toward its own rule. On Android, where only the tab in front counts, the Short
+   counts from when it is brought to the front. From that Short, moving to `/watch` in-page is
+   blocked at once.
 5. **A subdomain.** A `music.youtube.com` focus rule saved after the `youtube.com` rule →
-   focusing `music.youtube.com` counts toward it, not toward YouTube.
+   focusing `music.youtube.com` counts toward it, not toward YouTube. On a profile that has not
+   answered YouTube's consent dialog, `music.youtube.com` redirects to `consent.youtube.com`,
+   which the `youtube.com` rule owns (#38). Locally instead: `site.test` and `music.site.test`
+   rules, the desktop pref `network.dns.localDomains` set to `site.test,music.site.test` (with
+   `chrome`, cleared afterwards) so both resolve to this machine, and the local page opened at
+   `http://music.site.test:<port>/`.
 6. **A deleted part hands its pages back.** Both rules spent, the part's block page open; delete
    the part's rule and Save → that page says `<part> is available again`, and its
    `Back to …/shorts/…` is blocked at once under the site's name: `⛔ blocked re-opened <site>`.
