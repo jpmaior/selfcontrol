@@ -658,7 +658,7 @@ test("late: a rule that ran out and came back unseen counts again from now", asy
 // --- ... with less left than the unlock credit (#53) -------------------------
 //
 // The late tests above start with exactly the credit left, on the boundary of
-// the hold (`remaining < credit`). With less, as on the shipped defaults (five
+// the hold (`remaining < credit`). With less, as on a new rule's defaults (five
 // minutes of budget, five of credit) after any earlier use, a reading taken
 // before the settle, by reconcile() itself or by the popup, the guard or the
 // alarm's sync, projected the open interval, saw the rule spent and wrote that
@@ -667,7 +667,7 @@ test("late: a rule that ran out and came back unseen counts again from now", asy
 // credited the whole interval, late time included.
 
 /**
- * The shipped defaults, strict: five minutes of budget, five of credit. Two
+ * A new rule's defaults, strict: five minutes of budget, five of credit. Two
  * watched from T0, a pause, then playing again from T0+3: it runs out at T0+6.
  */
 async function belowCredit(id) {

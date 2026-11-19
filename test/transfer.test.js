@@ -10,25 +10,55 @@ import {
   parseImport,
   serializeRules,
 } from "../extension/common/transfer.js";
-import { DEFAULT_RULES, defaultUnlockCreditSec, strip, withDefaults } from "../extension/common/rules.js";
+import { DEFAULT_PASSES, defaultUnlockCreditSec, strip, withDefaults } from "../extension/common/rules.js";
 
 const NOW = Date.UTC(2026, 8, 19, 10, 0);
 
+/** Two complete rules, one of each mode and action. */
+const RULES = [
+  {
+    id: "youtube",
+    label: "YouTube",
+    match: ["youtube.com"],
+    mode: "audible",
+    budgetSec: 5 * 60,
+    windowSec: 60 * 60,
+    onExceed: "block",
+    minUnlockCreditSec: 5 * 60,
+    dailyBudgetSec: null,
+    weeklyBudgetSec: null,
+    passes: { ...DEFAULT_PASSES },
+  },
+  {
+    id: "instagram",
+    label: "Instagram",
+    match: ["instagram.com"],
+    mode: "focus",
+    budgetSec: 5 * 60,
+    windowSec: 60 * 60,
+    onExceed: "close",
+    minUnlockCreditSec: 5 * 60,
+    dailyBudgetSec: null,
+    weeklyBudgetSec: null,
+    passes: { ...DEFAULT_PASSES },
+  },
+];
+
 test("serializeRules: a tagged, versioned envelope of strip-clean rules", () => {
-  const messy = DEFAULT_RULES.map((r) => ({ ...r, formJunk: true, label: ` ${r.label} ` }));
+  const messy = RULES.map((r) => ({ ...r, formJunk: true, label: ` ${r.label} ` }));
   const out = serializeRules(messy, NOW);
   assert.equal(out.format, "selfcontrol-rules");
   assert.equal(out.version, 2);
   assert.equal(out.exportedAt, "2026-09-19T10:00:00.000Z");
-  assert.deepEqual(out.rules, DEFAULT_RULES.map(strip));
+  assert.deepEqual(out.rules, RULES.map(strip));
   assert.equal("formJunk" in out.rules[0], false);
 });
 
 test("parseImport: a valid file round-trips", () => {
-  const text = JSON.stringify(serializeRules(DEFAULT_RULES, NOW));
+  const text = JSON.stringify(serializeRules(RULES, NOW));
   const result = parseImport(text);
   assert.equal(result.ok, true);
-  assert.deepEqual(result.rules, DEFAULT_RULES.map(withDefaults));
+  assert.deepEqual(result.rules, RULES.map(withDefaults));
 });
 
 test("parseImport: a version-1 file imports with the new fields defaulted", () => {
@@ -56,9 +86,9 @@ test("parseImport: a version-1 file imports with the new fields defaulted", () =
 });
 
 test("parseImport: a rule for part of a site imports beside the whole site", () => {
-  const shorts = { ...DEFAULT_RULES[0], id: "shorts", label: "Shorts", match: ["youtube.com/shorts"] };
-  const music = { ...DEFAULT_RULES[0], id: "music", label: "Music", match: ["music.youtube.com"] };
-  const result = parseImport(JSON.stringify(serializeRules([...DEFAULT_RULES, shorts, music], NOW)));
+  const shorts = { ...RULES[0], id: "shorts", label: "Shorts", match: ["youtube.com/shorts"] };
+  const music = { ...RULES[0], id: "music", label: "Music", match: ["music.youtube.com"] };
+  const result = parseImport(JSON.stringify(serializeRules([...RULES, shorts, music], NOW)));
   assert.equal(result.ok, true, result.error);
   assert.deepEqual(
     result.rules.map((r) => r.match),
@@ -83,7 +113,7 @@ test("parseImport: refuses what is not a rules file", () => {
 });
 
 test("parseImport: one invalid rule refuses the whole file and names it", () => {
-  const file = serializeRules(DEFAULT_RULES, NOW);
+  const file = serializeRules(RULES, NOW);
   file.rules[1] = { ...file.rules[1], budgetSec: -60 };
   const result = parseImport(JSON.stringify(file));
   assert.equal(result.ok, false);
@@ -93,7 +123,7 @@ test("parseImport: one invalid rule refuses the whole file and names it", () => 
 });
 
 test("parseImport: a rule that blocks outright imports, whatever its ignored limits hold", () => {
-  const file = serializeRules(DEFAULT_RULES, NOW);
+  const file = serializeRules(RULES, NOW);
   file.rules[1] = { ...file.rules[1], budgetSec: 0, windowSec: 0, minUnlockCreditSec: 600 };
   const result = parseImport(JSON.stringify(file));
   assert.equal(result.ok, true, result.error);
@@ -102,7 +132,7 @@ test("parseImport: a rule that blocks outright imports, whatever its ignored lim
 
 test("parseImport: values of the wrong type are refused, naming the rule and the field", () => {
   const withRule = (overrides) => {
-    const file = serializeRules(DEFAULT_RULES, NOW);
+    const file = serializeRules(RULES, NOW);
     file.rules[1] = { ...file.rules[1], ...overrides };
     return JSON.stringify(file);
   };
@@ -127,8 +157,8 @@ test("parseImport: values of the wrong type are refused, naming the rule and the
 test("parseImport: a rule without an unlock credit gets the new-rule default, not the drip-feed", () => {
   const file = serializeRules(
     [
-      { ...DEFAULT_RULES[0], budgetSec: 30 * 60 },
-      { ...DEFAULT_RULES[1], budgetSec: 2 * 60 },
+      { ...RULES[0], budgetSec: 30 * 60 },
+      { ...RULES[1], budgetSec: 2 * 60 },
     ],
     NOW,
   );
@@ -140,7 +170,7 @@ test("parseImport: a rule without an unlock credit gets the new-rule default, no
 });
 
 test("parseImport: a rolling window over 24 hours is refused", () => {
-  const file = serializeRules(DEFAULT_RULES, NOW);
+  const file = serializeRules(RULES, NOW);
   file.rules[0] = { ...file.rules[0], windowSec: 48 * 60 * 60 };
   const result = parseImport(JSON.stringify(file));
   assert.equal(result.ok, false);
@@ -148,19 +178,19 @@ test("parseImport: a rolling window over 24 hours is refused", () => {
 });
 
 test("parseImport: a rule that is not an object is refused", () => {
-  const file = { format: "selfcontrol-rules", version: 2, rules: [DEFAULT_RULES[0], 42] };
+  const file = { format: "selfcontrol-rules", version: 2, rules: [RULES[0], 42] };
   assert.equal(parseImport(JSON.stringify(file)).ok, false);
 });
 
 test("parseImport: duplicate ids are refused", () => {
-  const file = serializeRules([DEFAULT_RULES[0], { ...DEFAULT_RULES[1], id: "youtube", match: ["x.com"] }], NOW);
+  const file = serializeRules([RULES[0], { ...RULES[1], id: "youtube", match: ["x.com"] }], NOW);
   const result = parseImport(JSON.stringify(file));
   assert.equal(result.ok, false);
   assert.match(result.error, /youtube/);
 });
 
 test("parseImport: a rule without an id is refused, since ids key the usage", () => {
-  const file = serializeRules([{ ...DEFAULT_RULES[0], id: "" }], NOW);
+  const file = serializeRules([{ ...RULES[0], id: "" }], NOW);
   assert.equal(parseImport(JSON.stringify(file)).ok, false);
 });
 

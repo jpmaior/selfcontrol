@@ -34,15 +34,20 @@ only the extension's own console can reach them (RELEASE.md).
 | `dumpStats()` | write counters since the event page started (`localWrites`, …) |
 | `dumpRaw()` | everything in `storage.local` and `storage.session`, and its size |
 | `dumpPlatform()` | what this Firefox offers: window focus events, `tab.audible`, filters, … |
+| `addRule(fields)` | add a rule: the fields given over a new rule's defaults, its id from its label unless given; validated and saved as the options page does |
 | `setLimits(ruleId, patch)` | change a rule through the same validation and save path as the options page |
 | `resetUsage()` | delete every rule's usage and the open intervals; reload afterwards |
-| `resetRules()` | delete the settings; the defaults come back on the next reload |
+| `resetRules()` | delete every rule, with its usage, at once: what a first run starts with |
 
-`setLimits` is how a test gets a budget it can exhaust in seconds rather than an hour:
+A first run has no rules, so a test makes the ones it needs with `addRule`, and gets a budget it
+can exhaust in seconds rather than an hour with `setLimits`:
 
 ```js
+await addRule({ label: "YouTube", match: ["youtube.com"], mode: "audible" })   // id "youtube"
 await setLimits("youtube", { budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30 })
 ```
+
+Both return what they did, or the reasons the rule was refused.
 
 ## The event page lifecycle
 

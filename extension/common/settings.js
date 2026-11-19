@@ -4,7 +4,7 @@
 // counters (DESIGN.md §6). That separation is why a hot usage update can never
 // rewrite the configuration.
 
-import { DEFAULT_RULES, withDefaults } from "./rules.js";
+import { withDefaults } from "./rules.js";
 
 export const SETTINGS_KEY = "settings";
 
@@ -18,20 +18,14 @@ export const usageKey = (ruleId) => `usage:${ruleId}`;
 export const SETTINGS_VERSION = 2;
 
 /**
- * The current rule set, seeding storage with the defaults on first run so that
- * what the user sees in the options page is always what is actually stored.
+ * The current rule set, as stored. A first run has none: no `settings` key
+ * reads as an empty set, the same as one whose every rule was deleted, and
+ * nothing is written until the first save (DESIGN.md §24). Loading never
+ * rewrites what is stored, so an install keeps its rules and their ids.
  */
 export async function loadRules() {
   const stored = (await browser.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
-
-  // An empty array is a legitimate configuration — the user deleted every rule.
-  // Only a MISSING settings key means first run; checking length here would
-  // resurrect the defaults on the next event page start.
-  if (Array.isArray(stored?.rules)) return stored.rules.map(withDefaults);
-
-  const seeded = DEFAULT_RULES.map(withDefaults);
-  await saveRules(seeded);
-  return seeded;
+  return Array.isArray(stored?.rules) ? stored.rules.map(withDefaults) : [];
 }
 
 export async function saveRules(rules) {

@@ -39,6 +39,8 @@ const ACTION_ERROR_MS = 10_000;
 
 const listEl = document.getElementById("rules");
 const noteEl = document.getElementById("note");
+const emptyEl = document.getElementById("empty");
+const footEl = document.getElementById("foot");
 
 /** ruleId -> the elements of its row */
 const rows = new Map();
@@ -305,17 +307,22 @@ async function refresh() {
   }
   if (request !== requests) return;
 
-  if (statuses === undefined) {
+  if (!Array.isArray(statuses)) {
     // The tick goes on from the last reading meanwhile, as on the block page.
     readingNote = "Background script not responding.";
-  } else if (!Array.isArray(statuses) || statuses.length === 0) {
-    readingNote = "No rules configured.";
-    reading = null;
   } else {
     readingNote = null;
     const atMs = Date.now();
     reading = { statuses, atMs };
     nextZeroMs = firstZero(statuses, atMs);
+    // A rule deleted since the last reading takes its row with it, the last
+    // one too, which leaves the invitation to add one.
+    const ids = new Set(statuses.map((s) => s.id));
+    for (const [id, parts] of rows) {
+      if (ids.has(id)) continue;
+      parts.li.remove();
+      rows.delete(id);
+    }
   }
   tick();
 }
@@ -372,6 +379,10 @@ function tick() {
   if (reading) {
     for (const status of reading.statuses) render(projected(status, now - reading.atMs), now);
   }
+  // No rules: the invitation takes the place of the rows and of Edit rules.
+  const none = reading?.statuses.length === 0;
+  emptyEl.hidden = !none;
+  footEl.hidden = none;
 
   // An action's error goes once its time is up, whatever the refreshes do.
   if (actionError && now >= actionError.untilMs) actionError = null;
@@ -388,8 +399,29 @@ function openRules() {
   window.close();
 }
 
+/**
+ * The options page, on a new rule's form: `#add-<n>` asks it for one, once
+ * per <n> (options.js). An options tab already open is reused, as
+ * openOptionsPage() would, so edits there are not split across two tabs;
+ * changing only its hash does not reload it. Android has no windows API, and
+ * only one window.
+ */
+async function addRule() {
+  const page = browser.runtime.getURL("options/options.html");
+  const url = `${page}#add-${Date.now()}`;
+  const open = (await browser.tabs.query({})).find((tab) => tab.url?.startsWith(page));
+  if (open) {
+    await browser.tabs.update(open.id, { url, active: true });
+    await browser.windows?.update(open.windowId, { focused: true });
+  } else {
+    await browser.tabs.create({ url });
+  }
+  window.close();
+}
+
 document.getElementById("edit").addEventListener("click", openRules);
 document.getElementById("settings").addEventListener("click", openRules);
+document.getElementById("add").addEventListener("click", addRule);
 
 refresh();
 setInterval(tick, TICK_MS);

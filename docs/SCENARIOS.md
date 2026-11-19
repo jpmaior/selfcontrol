@@ -19,6 +19,13 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
 - **Desktop:** `nix develop .#browser`, then `node tools/browser.mjs start`.
   **Android:** `nix develop .#android`, then `node tools/android.mjs start`. Most scenarios apply
   to both; the sections say where one does not.
+- **The rules.** A first run has none (DESIGN §24), and the scenarios below name a `youtube`
+  rule that counts while playing and blocks, and an `instagram` rule that counts while focused
+  and closes the tab. Make them through `eval --bg` (desktop) or `eval` (Android):
+  `addRule({ label: "YouTube", match: ["youtube.com"], mode: "audible" })` and
+  `addRule({ label: "Instagram", match: ["instagram.com"], onExceed: "close" })`. Each gets a new
+  rule's defaults, five minutes an hour, and its id from its label; on a profile that already
+  has the site, `addRule` refuses, naming the rule that has it, and changes nothing.
 - **Short limits.** Real budgets take an hour, so shrink them first with `setLimits()` through
   `eval --bg` (desktop) or `eval` (Android), e.g.
   `setLimits("youtube", { budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30 })`, and start
@@ -32,6 +39,26 @@ belongs in `test/` instead. The *why* stays in DESIGN.md; a scenario only points
 - **Nothing attached** for anything about the lifecycle. An open console keeps the event page
   alive (DEVELOPMENT.md), so read it with `log` afterwards. Log lines are quoted below as the
   event page prints them.
+
+## First run
+
+1. **Nothing is limited.** On a fresh profile (`start --fresh` on desktop) → `ready on … — 0
+   rule(s)`, `browser.storage.local.get(null)` is `{}`, and nothing counts or blocks.
+2. **The popup invites.** Open it → `No rules yet`, a line on what a rule does and one `Add a
+   rule` button, with no `Edit rules` below; on Android it fills the sheet. Press the button →
+   the options page opens on a new, empty rule, its name field focused, and the address has no
+   `#add` left. With the options page already open, the same press brings that tab forward
+   with one more new rule, without reloading it (an expando set on its `window` survives), also
+   on Android, where one tap must add exactly one rule (DESIGN §24).
+3. **The options page invites.** With no rules → the detail pane says `No rules yet` with an
+   `Add a rule` button, which opens a new rule's form as the list's button does.
+4. **The first rule works.** From the invitation, name it, give it a local site and a 1-minute
+   budget, and Save → `rules updated — now 1`; sitting on the site blocks it at a minute.
+5. **The last rule goes.** With the popup open, `resetRules()` → its rows go and the invitation
+   comes back within a refresh; the log says `rule removed: <id> — usage discarded` for each.
+6. **An update keeps the rules.** On a profile with rules and usage from an earlier version,
+   including rules it seeded, `reload` from this one → `browser.storage.local.get(null)` is
+   identical before and after: the same rules, ids and usage.
 
 ## Counting while playing *(desktop; Android has no `tab.audible`)*
 
@@ -112,7 +139,7 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    navigation starts within a few hundred milliseconds of Back (`performance.timeOrigin` on the
    block page against `Date.now()` taken as Back is called), as before the handlers were queued
    (DESIGN §7, "One queue").
-3. **Close instead of block.** A rule with `onExceed: "close"` (the default Instagram rule) →
+3. **Close instead of block.** A rule with `onExceed: "close"` (the Instagram rule from Setup) →
    the tab closes at the budget, and reopening it closes it again at once,
    `⛔ closed re-opened instagram (tab N)`. No tab opens in its place unless it was the last one,
    in its window on desktop or in Firefox on Android: then one fresh tab replaces it
@@ -326,7 +353,7 @@ Serve a page on `127.0.0.1` and give the rule under test that domain with `setLi
    no `Incorrect argument types for tabs.onUpdated` (DESIGN §12).
 2. **What the platform offers.** `dumpPlatform()` → `tabs.onUpdated filters: false` and
    `tab.audible: false`; both `true` on desktop.
-3. **While playing counts while focused.** The default YouTube rule logs
+3. **While playing counts while focused.** The YouTube rule from Setup logs
    `▶ COUNTING youtube (focus)` on the active tab and blocks on time; the options page hides
    "Count time" and the popup says `counts while focused`. On desktop the choice is still there
    and the popup says `counts while playing`.
