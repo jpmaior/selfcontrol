@@ -248,6 +248,11 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    2 minutes and 24 hours, and the save bar says it needs fixing before the next save; Revert
    keeps saying so. `dumpUsage()` shows the rule still applied, and `settings` is unchanged until
    the window is fixed and saved (DESIGN §23).
+9. **The week control.** *Weeks start on*, under the rule list (below the rule's form on a
+   phone), shows Monday on an install that never chose. Pick another day → the save bar says
+   `Unsaved changes for Week start`, the caps hint names the night before it, and Revert brings
+   Monday back; Save → `settings.week` holds it. On Android the select opens the system picker,
+   and the same Save applies it (DESIGN §14). The carry it makes is Caps item 11.
 
 ## Caps, lock in and passes
 
@@ -256,8 +261,8 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 2. **Removing it lifts the block.** Clear the daily cap in the options page → the block lifts at
    once.
 3. **Weekly cap.** Weekly 60 s and daily 120 s, play 1 minute → `done for the week`, unlocking
-   next Monday at 00:00. The countdown, on the block page and in the popup, is in days from a
-   day on: `3d 18:35:52`, not `90:35:52`.
+   at 00:00 on the next day the week starts, Monday unless chosen. The countdown, on the block
+   page and in the popup, is in days from a day on: `3d 18:35:52`, not `90:35:52`.
 4. **Lock in while playing.** Popup → Lock in → `Blocks YouTube until HH:MM. Confirm`; confirm →
    the tab is blocked at once and the block page counts down to that time.
 5. **Lock in while idle.** With 3 minutes left → `dumpRaw()` shows 180000 more ms in the current
@@ -277,6 +282,20 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    `🔒 locked in`, no `spent 0:00`. The same with Use a pass, using the pass by message first →
    `That pass is not available right now.` With `browser.runtime.sendMessage` made to reject for
    the action → `Could not lock in.`, and no unhandled rejection (DESIGN §16).
+10. **The day the week starts.** With a weekly cap of an hour and an hour of use seeded in
+    `usage:<id>`'s `d` on the last Saturday, and `settings.week` written as `{ startDay: 6, carry:
+    null }` (a choice made in an earlier week) → `done for the week`, unlocking at the coming
+    Saturday 00:00 on the block page, in the popup and in `rule:<id>`'s alarm. A pass use seeded
+    on that Saturday leaves `0` passes this week, and `1` once the week is written to start on
+    Sunday or Monday (DESIGN §14).
+11. **Changing it mid-week gives nothing back.** Monday start, an hour of use and a pass seeded
+    on this Monday, weekly cap an hour, the block page open. In the options page choose a day
+    after today → before Save, `Once saved: this week began on <Monday> and runs until <that day
+    next week>`, and the save bar names `Week start`; Save → `weeks now start on <day>`, the block
+    page still blocked and counting down to that later day, no pass offered, and
+    `settings.week.carry` from this Monday to then. Written by hand without the carry, the same
+    state reopens the site and offers the pass: what the carry prevents. Choose Monday again and
+    Save → the carry goes, and the unlock is back at next Monday, still blocked.
 
 ## Part of a site
 
@@ -346,6 +365,9 @@ Serve a page on `127.0.0.1` and give the rule under test that domain with `setLi
 3. **No cool-down in the file.** Remove `minUnlockCreditSec` from a rule in an exported file and
    import it → the rule's cool-down is 5 minutes, or its budget when that is less, not 0
    (DESIGN §8).
+4. **The week's start day.** An export carries `"weekStart"`. Importing a file with another day
+   → the summary ends `Weeks will start on <day>.`, and after confirming, the options page shows
+   it with its carry line (DESIGN §20). A file without `weekStart` leaves the setting as it was.
 
 ## Firefox for Android only
 

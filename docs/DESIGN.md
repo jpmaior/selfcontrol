@@ -363,7 +363,7 @@ Sync is for settings only, and only if cross-device settings sync is ever wanted
 mean every counter update also rewrites the settings.
 
 ```
-settings          → { version, rules: [...] }        // cold: written when a rule is edited
+settings          → { version, rules: [...], week }  // cold: written when a rule or the week is edited
 usage:youtube     → { b, p, d, pass, passUses, blockedUntil }   // hot: flushed on transitions + checkpoints
 usage:instagram   → { ... }
 ```
@@ -723,18 +723,18 @@ background/ (event page — the only stateful component)
 common/ (shared by the background and the UI pages)
   ├─ accountant.js  pure: bucket commit / fold / rolling sum / time-until-credit
   ├─ rules.js       pure: rule shape, URL matching, pattern parsing, validation, form edits
-  ├─ calendar.js    pure: local days and weeks, DST-safe
+  ├─ calendar.js    pure: local days and weeks, DST-safe, and changing the week's start (§14)
   ├─ policy.js      pure: every cap, the hold and passes combined into one decision (§14),
   │                 and how much of an interval counts (§7)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
   ├─ tabs.js        pure: whether closing a tab, or an update, needs a fresh one (§12)
   ├─ blockpage.js   pure: the block page's Go back (§19) and which limit it describes (§22)
-  ├─ settings.js    the `settings` key: load, save, and watch for edits
+  ├─ settings.js    the `settings` key, rules and week: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
   ├─ format.js      durations and times, how a block is worded, bold runs of text
   └─ theme.css      colours, pills, captions, buttons: shared by every page
 
-options/   edit rules, history, export and import
+options/   edit rules, the week's start day, history, export and import
 popup/     per rule: used / budget, state, lock in, passes
 blocked/   message + live countdown + the return link + Go back
 ```
@@ -1027,8 +1027,8 @@ That is what the words mean to the person who typed them, and it makes the unloc
 trivial: the start of the next period. A rolling 24-hour or 7-day window was considered and
 rejected. It would need a week of minute buckets (up to ~200KB rewritten on every flush),
 and it would hand the block page an unlock time nobody can predict. For the same reason the
-rolling window itself stops at 24 hours (§5). The week starts on
-Monday; not configurable in this round.
+rolling window itself stops at 24 hours (§5). The week starts on the day the user chose,
+Monday unless they chose another (below).
 
 A week's countdown runs for days, so from a day on it is shown with the days first,
 `3d 18:35:52`, rather than `90:35:52` (`countdown()` in `format.js`). Amounts of time, such as a
@@ -1037,6 +1037,57 @@ weekly budget, stay in hours.
 Because a calendar cap returns whole at the boundary, the drip-feed of §8 cannot happen to
 it, so `minUnlockCreditSec` applies to the rolling cap only and its clamp stays in
 `accountant.unlockAt()`.
+
+### The day the week starts
+
+Decided 2026-11-20 (#60). One start day for every rule, in the cold `settings` key beside the
+rules: `week: { startDay, carry }`, the day as `Date.getDay()` numbers it (0 Sunday … 6
+Saturday). Global rather than per rule, because a week is something the user lives in, not
+something a site has, and "this week" in the popup and on the block page should mean one thing.
+An install that never chose has no `week` and reads as Monday (`normalizeWeek()`), so nothing
+changes for anyone who does not touch it; a malformed value also reads as Monday, and like a
+rule it is not rewritten on load. The default is not taken from the browser's locale: Firefox
+offers no week info to read it from, a locale guess would move the weekly caps of every
+existing install on update, and a setting whose default depends on where the browser came from
+is one more thing to explain.
+
+The pure modules take the week as an argument (`evaluate(…, { week })`, `fold(…, week)`,
+`passesLeft(…, week)`), and `weekOf(ms, week)` in `calendar.js` turns it into the week that
+contains an instant. The store holds the week the settings last gave, set on every start before
+any handler runs and on every settings change, the way it holds the ledgers; a settings change
+closes the open intervals under the old week before taking the new one. The options page
+saves it with the rules, behind the same Save and Revert.
+
+**A change never hands back a weekly budget or a pass.** Moving the start day mid-week moves the
+boundary under the week in progress. Taken naively, a change on Thursday from Monday to
+Wednesday starts a week on Wednesday, after Monday's use: the weekly cap and the passes come
+back whole, for the price of a click. A change to an earlier day the other way would end the
+week sooner than seven days after it began. So `changeWeekStart()` keeps the week in progress
+as it is (the `carry`, from its start to its end) and ends it only when the new start day comes
+round at least seven days after it began, and after now. Thursday's change to Wednesday makes
+that week run from Monday to the Wednesday after next, nine days on one budget; from there the
+weeks start on Wednesday. Three things follow, pinned by a test over every pair of days:
+
+- the week in progress keeps its start, so nothing used in it is forgotten;
+- no week is shorter than seven days, so no budget comes back sooner than it would have;
+- changing back within the seven days costs nothing: the carry is then the plain week and is
+  dropped, which is what makes a mis-click harmless.
+
+The cost is one long week, up to thirteen days (Monday to Sunday on a Monday), once per change.
+The simpler rules were worse: applying the change at the next old boundary still leaves a short
+first week, with a whole budget, and splitting the budget across it would be arithmetic nobody
+can predict. The options page says what a change will do before Save, `Once saved: this week
+began on Mon, Nov 16 and runs until Fri, Nov 27`, and the same line stays up while a carried
+week lasts. A carry is an instant, so a second change during one carries the same start again.
+An import with a `weekStart` goes through the same change (§20).
+
+The popup and the block page need nothing for it: they count down to `unlockAtMs`, which is the
+carried week's end. `wallClock()` adds the date to an instant more than a week from today, so a
+lock-in during a long week reads `until Sun 29 Nov 00:00`, not a Sunday that comes first.
+
+Pass uses are pruned before the week's start (`fold()`), which a carry only moves earlier, so a
+change cannot prune a use still in the week. The folded days in `usage.d` do not depend on the
+week at all: they are local days, and a week is a range of them.
 
 ### One decision: `policy.evaluate()`
 
@@ -1166,8 +1217,8 @@ passes: { perWeek: 0, durationSec: 3600, countsTowardCaps: true }   // perWeek 0
 
 Every other path that loosens a rule (editing it, importing a rule set) is a change to
 the configuration. A pass is the one thing that opens a blocked site *now*, and it is
-allowed because it is rationed: `perWeek` of them, counted over the same Monday-start
-week as the weekly cap, and each one single-use. `passUses` in the ledger holds the start
+allowed because it is rationed: `perWeek` of them, counted over the same week as the weekly
+cap, starting on the chosen day (§14), and each one single-use. `passUses` in the ledger holds the start
 instants of this week's uses; `fold()` prunes last week's.
 
 ### Pass time always goes into the rolling window
@@ -1321,8 +1372,15 @@ A backup, and the only practical way to carry a rule set to Android. The file is
 envelope around strip-clean rules:
 
 ```json
-{ "format": "selfcontrol-rules", "version": 2, "exportedAt": "…", "rules": [ … ] }
+{ "format": "selfcontrol-rules", "version": 2, "exportedAt": "…", "weekStart": 1, "rules": [ … ] }
 ```
+
+`weekStart` is the day the week starts (§14), so a rule set carried to Android brings its weeks
+with it. A file from before it existed has none, and importing it leaves the setting alone
+rather than resetting it to Monday: the file says nothing about it. One that is not a day from 0
+to 6 refuses the file. A file that changes it goes through `changeWeekStart()` like the options
+page does, so an import cannot give a weekly budget back either, and the confirm step says
+`Weeks will start on Sunday.`
 
 **Export writes what is saved, not the drafts.** An export that silently carried
 half-typed edits would be a surprise on the other end.
