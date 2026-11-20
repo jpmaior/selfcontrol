@@ -195,7 +195,11 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
 2. **Paused.** Pause → the row reads `counts while playing` and the numbers hold.
 3. **Blocked.** Spend a budget → the row turns orange, reads `done for now` (or `done for today`,
    `done for the week`), as the block page's headline does, and counts down `unlocks in …` in
-   step with it.
+   step with it. With the block page in one window and the popup's tab (`open popup`) in another,
+   leave a recorder in each, sampling its countdown every 50 ms → both change within a few tens of
+   ms after each whole second before the unlock instant (`until=` in the block page's URL), never
+   a second apart, and at the unlock itself the block page says `available again` and the
+   popup's row leaves `unlocks in` for the time left (DESIGN §19, "On the second").
 4. **Width.** On desktop nothing overflows or scrolls sideways, including while a `… Confirm`
    step is armed and with a long rule label. On Android it opens as a full-screen sheet.
 

@@ -30,6 +30,25 @@ export function countdown(ms) {
 }
 
 /**
+ * How long after `nowMs` a countdown() to one of `deadlinesMs` next shows a
+ * different number, so a page can redraw right then, rather than once a second
+ * from whenever it loaded (DESIGN.md §19, "On the second"). Rounding up, it
+ * changes each time a deadline is a whole number of seconds away, the last time
+ * at the deadline itself, to 0:00. The soonest such step, but no later than
+ * `maxMs`; null when no deadline is ahead and there is no cap.
+ */
+export function nextCountdownStep(nowMs, deadlinesMs, maxMs = null) {
+  let next = maxMs;
+  for (const at of deadlinesMs) {
+    const left = at - nowMs;
+    if (!(left > 0)) continue;
+    const step = left % 1000 || 1000;
+    if (next === null || step < next) next = step;
+  }
+  return next;
+}
+
+/**
  * "0", "40s", "30m", "1h", "1h30": short, for a scale, a chip or a legend.
  * Not clock(), whose "14:00" after a date reads as 2 pm (#74). Whole minutes
  * from a minute on; below that seconds, so a day that was used, or a budget
