@@ -234,8 +234,16 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    A budget equal to the window is refused with the reason shown, and so are a window under 2
    or over 1440 minutes and a pattern another rule already has, naming that rule.
 6. **History.** Once buckets have folded (a short window helps) → the rule's history shows
-   today's bar and the 7- and 30-day totals; pass time is a blue segment on top of the used
-   time, and the legend adds `On a pass`.
+   this week's row with today's column underlined, and the 7- and 90-day totals; pass time is a
+   blue segment on top of the used time, and the legend adds `On a pass`.
+   **Ninety days:** write 90 days of `d` into a rule with a daily cap, as DESIGN §13 shows it,
+   with `browser.storage.local.set` and `terminate` → a row per week from the oldest kept day,
+   the weekdays in the order the week starts, the daily cap a dashed line across each row, and
+   nothing wider than the page at 360px. Hovering, clicking or tapping a day, or the arrow keys
+   from it, puts its figures and its week's total in the readout, which stays on screen while
+   the calendar scrolls; Tab enters and leaves the calendar in one step. Choosing another start
+   day regroups the rows before Save, and Revert puts them back. A rule used on a few days this
+   week is one row; one never used says `Nothing yet` (DESIGN §13).
 7. **Seconds the form cannot show.** `setLimits` one rule to a 90 s budget, a 20 s cool-down
    and a 90 s pass, and another to a 20 s budget with a 20 s cool-down; open the options page,
    change only each rule's name, and Save → `dumpRaw()` has every value as it was, not rounded
@@ -395,7 +403,8 @@ Serve a page on `127.0.0.1` and give the rule under test that domain with `setLi
    late"). A freeze has been seen to drop web-ext's connection and its `adb reverse`, though
    not on every run: if `status` says web-ext is gone, re-run `start` and the `adb reverse`.
 6. **Phone-sized pages.** At 360 dp the block page fits with its return link, and the options
-   page stacks with Save pinned to the bottom and draws the history chart.
+   page stacks with Save pinned to the bottom and draws the history calendar; tapping a day in
+   an old row puts its figures in the readout above, still on screen.
 7. **Closing leaves no blank tab, unless it was the only tab.** With another tab open, a
    `close` rule's tab closes at the budget and again on reopening, and no blank tab appears:
    the tab count drops by one each time. With the site as the only tab, closing it leaves

@@ -729,6 +729,7 @@ common/ (shared by the background and the UI pages)
   ├─ transfer.js    pure: the export file, and checking an import before it applies (§20)
   ├─ tabs.js        pure: whether closing a tab, or an update, needs a fresh one (§12)
   ├─ blockpage.js   pure: the block page's Go back (§19) and which limit it describes (§22)
+  ├─ history.js     pure: the kept days as weeks of seven, for the history view (§13)
   ├─ settings.js    the `settings` key, rules and week: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
   ├─ format.js      durations and times, how a block is worded, bold runs of text
@@ -740,7 +741,7 @@ blocked/   message + live countdown + the return link + Go back
 ```
 
 **The pure modules carry the tricky logic** (`accountant`, `rules`, `calendar`, `policy`,
-`transfer`, `tabs`, `blockpage`), with no `browser.*` and no `Date.now()` — time is always an
+`transfer`, `tabs`, `blockpage`, `history`), with no `browser.*` and no `Date.now()` — time is always an
 argument. That is what lets `node --test` cover the arithmetic, every decision about a rule and
 the whole validation story without a browser.
 
@@ -1009,6 +1010,45 @@ each is a few kilobytes, well inside the ledger's budget (§6).
 
 `normalizeUsage()` fills in the members a ledger stored by an older build lacks, so the
 0.1.x ledgers load unchanged and start folding from their next settle.
+
+### The history view shows every kept day, a week to a row
+
+Decided 2026-11-20 (#61). The options page drew 30 of the 90 kept days as one row of columns. Ninety
+columns in a row would be three pixels each on a phone, too thin to tell apart or to tap, and a
+chart that scrolls sideways hides most of what it holds. So the days are a calendar instead: one
+row per week, starting on the chosen day (§14), newest on top, each day a small column of used
+time under pass time. Seven columns fit 360px, every column lines up with the same weekday above
+and below it, and a week is read across a row. `historyWeeks()` in `history.js` shapes the rows
+from `usedByDay()`, pure and tested.
+
+- **One scale for every day**, the busiest day or the daily cap, whichever is higher, so heights
+  compare across weeks. A daily cap is a dashed line across each row, and a day that met it says
+  so in its figures. The legend names the busiest day, which fixes the scale for a rule with no
+  daily cap.
+- **Each row's header has the week's total**, as a figure and as a bar against the busiest week,
+  so the trend reads down one column.
+- **Rows start at the first week with any use**, not ninety days back, so a new rule is a row or
+  two rather than a page of empty ones. A kept day with nothing in it is a zero, drawn as a stub
+  on the baseline; a day older than what is kept, or still to come, is blank.
+- **Exact figures are in a readout above the calendar**: the day under the pointer, or the one
+  picked by a click, a tap or the keyboard, and its week's total. It sticks under the page's
+  header, so a day tapped in the oldest row on a phone still has its figures on screen. The
+  calendar is an ARIA grid with one tab stop: the arrows move a day sideways and a week up or
+  down, and each day carries its figures as its label.
+- **The row is always seven days.** A carried week (§14) is not followed: it would make one row
+  up to thirteen days long, and the folded days do not depend on the week anyway. The rows and
+  the cap line follow the draft, so changing the start day or a cap redraws them before Save.
+
+What the ledger cannot say, the view does not claim. "Met the daily cap" is measured against the
+rule's cap now, which may not be the cap it had that day. A lock-in (§16) is spent into an
+ordinary bucket, so it shows as used time, not as its own segment, and nothing records when a
+rolling cap ran out, so only the calendar caps can be marked as met. Pass time is its own segment
+because `d[day].pass` keeps it apart (§17).
+
+Rejected: a 30 / 90 day toggle over the old chart (the 90-day setting has the same three-pixel
+columns), a colour-intensity heatmap (it gives up the comparison against the cap, and a value
+read from a shade is a guess), and weekly bars with a drill-down for days (the days are what the
+cap is about, and they would be one tap away rather than in view).
 
 ---
 

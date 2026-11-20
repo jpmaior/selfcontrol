@@ -19,14 +19,12 @@ import {
   validateRule,
 } from "../common/rules.js";
 import { loadSettings, saveSettings, usageKey } from "../common/settings.js";
-import { normalizeUsage, usedByDay } from "../common/accountant.js";
+import { HISTORY_DAYS, normalizeUsage, usedByDay } from "../common/accountant.js";
 import { DEFAULT_WEEK, addDays, changeWeekStart, dayKey, startOfDay, weekOf } from "../common/calendar.js";
+import { historyWeeks } from "../common/history.js";
 import { WEEKDAYS, clock, strong } from "../common/format.js";
 import { describeImport, parseImport, serializeRules } from "../common/transfer.js";
 import { reportsAudible } from "../common/platform.js";
-
-/** Days drawn in the history strip; the ledger keeps more (HISTORY_DAYS). */
-const HISTORY_SHOWN = 30;
 
 const listEl = document.getElementById("rule-list");
 const countEl = document.getElementById("rule-count");
@@ -127,6 +125,9 @@ function fillOptions(select, items, selectedValue) {
   }
 }
 
+/** The fields the history view draws from: the caps, and whether pass time counts toward them. */
+const HISTORY_FIELDS = new Set(["budgetMin", "dailyMin", "weeklyMin", "passCounts"]);
+
 function buildForm(draft) {
   const root = templateEl.content.firstElementChild.cloneNode(true);
   const field = (name) => root.querySelector(`[data-field="${name}"]`);
@@ -191,6 +192,8 @@ function buildForm(draft) {
       field("unlockMin").value = toMin(draft.minUnlockCreditSec);
     }
     showOutright(root, draft);
+    // The history's cap line and "cap reached" follow the caps as they are typed.
+    if (HISTORY_FIELDS.has(name)) renderHistory(root, draft);
     if (validating) validateAll();
     message = null;
     renderList();
@@ -282,6 +285,8 @@ weekStartEl.addEventListener("change", () => {
   weekDraft = Number(weekStartEl.value);
   message = null;
   showWeek();
+  // The history's rows follow the start day being chosen.
+  if (selected) renderHistory(detailEl, selected);
   updateSaveBar();
 });
 
@@ -379,19 +384,10 @@ function renderTotals(el, days) {
   const sep = document.createElement("span");
   sep.className = "sep";
   sep.textContent = "·";
-  el.replaceChildren(total("7 days", days.slice(-7)), sep, total(`${HISTORY_SHOWN} days`, days));
+  el.replaceChildren(total("7 days", days.slice(-7)), sep, total(`${HISTORY_DAYS} days`, days));
 }
 
-/** Axis steps, in minutes: the smallest one at or above the busiest day. */
-const AXIS_STEPS_MIN = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440];
-
-function axisMaxMs(peakMs) {
-  const peakMin = Math.ceil(peakMs / 60_000);
-  const step = AXIS_STEPS_MIN.find((m) => m >= peakMin) ?? Math.ceil(peakMin / 60) * 60;
-  return step * 60_000;
-}
-
-/** "0", "30m", "1h", "1h30": short, for an axis or a chip. Values are whole minutes. */
+/** "0", "30m", "1h", "1h30": short, for a scale or a chip. Values are whole minutes. */
 function shortDuration(ms) {
   const min = Math.round(ms / 60_000);
   if (min === 0) return "0";
@@ -401,133 +397,267 @@ function shortDuration(ms) {
   return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`;
 }
 
-function dayLabel(day, index) {
-  if (index === HISTORY_SHOWN - 1) return "Today";
-  if (index === HISTORY_SHOWN - 2) return "Yesterday";
+const capMs = (sec) => (Number.isFinite(sec) && sec > 0 ? sec * 1000 : null);
+
+function dayLabel(day, today) {
+  if (day.at === today) return "Today";
+  if (day.at === addDays(today, -1)) return "Yesterday";
   return new Date(day.at).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 }
 
-function dayText(day, index) {
-  const parts = [`${dayLabel(day, index)}: ${clock(day.used)} used`];
+function dayText(day, today) {
+  const label = dayLabel(day, today);
+  if (!day.inRange) return `${label}: ${day.at > today ? "still to come" : `older than ${HISTORY_DAYS} days`}`;
+  if (day.used === 0 && day.pass === 0) return `${label}: nothing`;
+  const parts = [`${label}: ${clock(day.used)} used`];
   if (day.pass > 0) parts.push(`${clock(day.pass)} on a pass`);
-  if (day.used === 0 && day.pass === 0) return `${dayLabel(day, index)}: nothing`;
+  if (day.reached) parts.push("daily cap reached");
   return parts.join(", ");
 }
 
+/** Rows are newest first: "This week", "Last week", then the start date. */
+function weekLabel(week, index, long = false) {
+  if (index === 0) return "This week";
+  if (index === 1) return "Last week";
+  const date = new Date(week.startMs).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return long ? `Week of ${date}` : date;
+}
+
+function weekText(week, index) {
+  const reached = week.reached ? ", weekly cap reached" : "";
+  return `${weekLabel(week, index, true)}: ${clock(week.used + week.pass)}${reached}`;
+}
+
+/** The day picked by a click, a tap or the keyboard, kept across a re-render of the same rule. */
+let pickedDay = null;
+let pickedFor = null;
+
 /**
- * A 30-day chart of stacked columns, used time under pass time, drawn in
- * plain CSS: a time axis with hairline gridlines on the left, dates along the
- * bottom, and a readout in the card's heading that names the day under the
- * pointer (or the focused column) with its exact time. The two series carry a
- * legend so identity never rests on colour alone.
+ * The kept days (HISTORY_DAYS) as a calendar: one row per week, newest on
+ * top, starting on the day the week starts, from the first week with any use.
+ * Each day is a small column of used time under pass time, against the daily
+ * cap's line when the rule has one, all on one scale; the row's header gives
+ * the week's total, with a bar to read the weeks against each other. Ninety
+ * columns side by side would be three pixels each on a phone (DESIGN.md §13).
+ *
+ * Exact figures are in the readout above the calendar, for the day under the
+ * pointer, or the one picked by a click, a tap or the arrow keys: the
+ * calendar is an ARIA grid with one tab stop, and every day carries its
+ * figures as its label.
  */
 function renderHistory(root, draft) {
   const body = root.querySelector('[data-role="history-body"]');
   const totalsEl = root.querySelector('[data-role="history-totals"]');
   const readout = root.querySelector('[data-role="readout"]');
   const byDay = draft.id ? history.get(draft.id) : null;
-
-  const today = startOfDay(Date.now());
-  const days = [];
-  for (let i = HISTORY_SHOWN - 1; i >= 0; i--) {
-    const at = addDays(today, -i);
-    const key = dayKey(at);
-    days.push({ key, at, ...(byDay?.[key] ?? { used: 0, pass: 0 }) });
+  if (pickedFor !== draft) {
+    pickedFor = draft;
+    pickedDay = null;
   }
 
-  const peak = Math.max(...days.map((day) => day.used + day.pass));
-  if (!(peak > 0)) {
+  const now = Date.now();
+  const today = startOfDay(now);
+  // A rule blocked outright has no time left to limit (DESIGN.md §22).
+  const dailyCap = blocksOutright(draft) ? null : capMs(draft.dailyBudgetSec);
+  const weeks = byDay
+    ? historyWeeks(byDay, now, {
+        startDay: weekDraft,
+        dailyBudgetMs: dailyCap,
+        weeklyBudgetMs: blocksOutright(draft) ? null : capMs(draft.weeklyBudgetSec),
+        passCounts: draft.passes.countsTowardCaps,
+      })
+    : [];
+
+  if (weeks.length === 0) {
+    totalsEl.replaceChildren();
+    readout.textContent = "";
     body.replaceChildren(note(draft.id ? "Nothing yet." : "History starts once this rule is saved."));
     return;
   }
 
+  const days = weeks.flatMap((week) => week.days).filter((day) => day.inRange);
   renderTotals(totalsEl, days);
-  const maxMs = axisMaxMs(peak);
+  // One scale for every day, so heights compare across weeks: the busiest day
+  // or the daily cap, whichever is higher, fills a cell.
+  const busiest = days.reduce((top, day) => (day.used + day.pass > top.used + top.pass ? day : top));
+  const maxMs = Math.max(busiest.used + busiest.pass, dailyCap ?? 0);
+  const weekMaxMs = Math.max(...weeks.map((week) => week.used + week.pass));
+  const newestFirst = [...weeks].reverse();
 
-  // The readout shows today until a column is hovered or focused.
-  const showDay = (index) => {
-    readout.textContent = dayText(days[index], index);
+  const weekOfDay = new Map();
+  for (const [index, week] of newestFirst.entries()) {
+    for (const day of week.days) weekOfDay.set(day.key, [week, index]);
+  }
+  if (!days.some((day) => day.key === pickedDay)) pickedDay = null;
+
+  let hovered = null;
+  const showDay = () => {
+    const key = hovered ?? pickedDay ?? days.at(-1).key;
+    const day = days.find((d) => d.key === key);
+    const [week, index] = weekOfDay.get(key);
+    readout.textContent = `${dayText(day, today)} · ${weekText(week, index)}`;
   };
-  showDay(days.length - 1);
 
-  const plot = document.createElement("div");
-  plot.className = "plot";
+  const grid = document.createElement("div");
+  grid.className = "cal";
+  grid.setAttribute("role", "grid");
+  grid.setAttribute("aria-label", `Daily use by week, the last ${HISTORY_DAYS} days`);
+  grid.setAttribute("aria-readonly", "true");
 
-  const yAxis = document.createElement("div");
-  yAxis.className = "y-axis";
-  const area = document.createElement("div");
-  area.className = "area";
-  for (const fraction of [1, 0.5, 0]) {
+  const head = document.createElement("div");
+  head.className = "cal-row cal-head";
+  head.setAttribute("role", "row");
+  const corner = document.createElement("span");
+  corner.setAttribute("role", "columnheader");
+  corner.textContent = "Week";
+  head.append(corner);
+  for (let i = 0; i < 7; i++) {
+    const name = document.createElement("span");
+    name.setAttribute("role", "columnheader");
+    const weekdayName = WEEKDAYS[(weekDraft + i) % 7];
+    name.textContent = weekdayName.slice(0, 3);
+    name.title = weekdayName;
+    head.append(name);
+  }
+  grid.append(head);
+
+  const cells = new Map();
+  for (const [index, week] of newestFirst.entries()) {
+    const row = document.createElement("div");
+    row.className = "cal-row";
+    row.setAttribute("role", "row");
+
+    const header = document.createElement("div");
+    header.className = "wk";
+    header.setAttribute("role", "rowheader");
+    header.setAttribute("aria-label", weekText(week, index));
     const label = document.createElement("span");
-    label.style.bottom = `${fraction * 100}%`;
-    label.textContent = shortDuration(maxMs * fraction);
-    yAxis.append(label);
-    if (fraction > 0) {
-      const line = document.createElement("div");
-      line.className = "gridline";
-      line.style.bottom = `${fraction * 100}%`;
-      area.append(line);
+    label.className = "wk-label";
+    label.textContent = weekLabel(week, index);
+    const total = document.createElement("span");
+    total.className = "wk-total";
+    total.textContent = shortDuration(week.used + week.pass);
+    const bar = document.createElement("span");
+    bar.className = "wk-bar";
+    for (const kind of ["used", "pass"]) {
+      if (week[kind] === 0) continue;
+      const part = document.createElement("i");
+      part.className = kind;
+      part.style.width = `${(week[kind] / weekMaxMs) * 100}%`;
+      bar.append(part);
     }
+    header.append(label, total, bar);
+    row.append(header);
+
+    for (const day of week.days) {
+      const cell = document.createElement("div");
+      cell.className = "day";
+      cell.setAttribute("role", "gridcell");
+      cell.setAttribute("aria-label", dayText(day, today));
+      row.append(cell);
+      if (!day.inRange) {
+        cell.classList.add("out");
+        continue;
+      }
+      cell.tabIndex = -1;
+      cell.dataset.key = day.key;
+      cell.title = dayText(day, today);
+      cell.classList.toggle("today", day.at === today);
+      cell.classList.toggle("zero", day.used + day.pass === 0);
+      cells.set(day.key, cell);
+
+      const column = document.createElement("div");
+      column.className = "col";
+      // Only non-empty segments are drawn, so the gap between them never
+      // shows on its own, and the top-most one carries the rounded data-end.
+      const segments = [
+        ["pass", day.pass],
+        ["used", day.used],
+      ]
+        .filter(([, ms]) => ms > 0)
+        .map(([kind, ms]) => {
+          const seg = document.createElement("div");
+          seg.className = `seg ${kind}`;
+          seg.style.height = `${(ms / maxMs) * 100}%`;
+          return seg;
+        });
+      segments[0]?.classList.add("top");
+      column.append(...segments);
+      if (dailyCap !== null) {
+        const line = document.createElement("div");
+        line.className = "cap";
+        line.style.bottom = `${(dailyCap / maxMs) * 100}%`;
+        column.append(line);
+      }
+      cell.append(column);
+    }
+    grid.append(row);
   }
 
-  const strip = document.createElement("div");
-  strip.className = "bars";
-  strip.setAttribute("role", "group");
-  strip.setAttribute("aria-label", `Daily usage over the last ${HISTORY_SHOWN} days`);
-
-  const xAxis = document.createElement("div");
-  xAxis.className = "x-axis";
-
-  days.forEach((day, index) => {
-    const column = document.createElement("div");
-    column.className = "bar";
-    column.tabIndex = 0;
-    column.setAttribute("aria-label", dayText(day, index));
-    column.title = dayText(day, index);
-    column.addEventListener("mouseenter", () => showDay(index));
-    column.addEventListener("focus", () => showDay(index));
-    column.addEventListener("mouseleave", () => showDay(days.length - 1));
-    column.addEventListener("blur", () => showDay(days.length - 1));
-
-    // Only non-empty segments are drawn, so the gap between them never shows
-    // on its own, and the top-most one carries the rounded data-end.
-    const segments = [
-      ["pass", day.pass],
-      ["used", day.used],
-    ]
-      .filter(([, ms]) => ms > 0)
-      .map(([kind, ms]) => {
-        const seg = document.createElement("div");
-        seg.className = `seg ${kind}`;
-        seg.style.height = `${(ms / maxMs) * 100}%`;
-        return seg;
-      });
-    segments[0]?.classList.add("top");
-    column.append(...segments);
-    strip.append(column);
-
-    // A date under every seventh column, counted back from today so "Today"
-    // is always labelled.
-    const tick = document.createElement("span");
-    tick.className = "tick";
-    if ((days.length - 1 - index) % 7 === 0) {
-      tick.textContent =
-        index === days.length - 1
-          ? "Today"
-          : new Date(day.at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-    }
-    xAxis.append(tick);
+  // One tab stop: the picked day, or today. The arrows move a day sideways
+  // and a week up (newer) or down (older); Home and End go to the first and
+  // last kept day of the row.
+  const pick = (key, focus) => {
+    for (const cell of cells.values()) cell.tabIndex = -1;
+    cells.get(key).tabIndex = 0;
+    if (focus) cells.get(key).focus();
+  };
+  const choose = (key) => {
+    pickedDay = key;
+    for (const [k, cell] of cells) cell.classList.toggle("picked", k === key);
+    pick(key, false);
+    showDay();
+  };
+  const order = days.map((day) => day.key);
+  // A click or a tap focuses the day too; it is listened to as well so that
+  // picking never depends on the focus event arriving.
+  for (const type of ["focusin", "click"]) {
+    grid.addEventListener(type, (event) => {
+      const key = event.target.closest?.(".day")?.dataset.key;
+      if (key && key !== pickedDay) choose(key);
+    });
+  }
+  grid.addEventListener("keydown", (event) => {
+    const key = event.target.dataset?.key;
+    if (!key) return;
+    const at = order.indexOf(key);
+    const rowKeys = weekOfDay.get(key)[0].days.filter((day) => day.inRange).map((day) => day.key);
+    const target = {
+      ArrowLeft: order[at - 1],
+      ArrowRight: order[at + 1],
+      ArrowUp: order[Math.min(order.length - 1, at + 7)],
+      ArrowDown: order[Math.max(0, at - 7)],
+      Home: rowKeys[0],
+      End: rowKeys.at(-1),
+    }[event.key];
+    if (event.key in { ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1, Home: 1, End: 1 }) event.preventDefault();
+    if (target && target !== key) pick(target, true);
   });
-
-  area.append(strip);
-  plot.append(yAxis, area, document.createElement("div"), xAxis);
+  grid.addEventListener("mouseover", (event) => {
+    const key = event.target.closest?.(".day")?.dataset.key ?? null;
+    if (key === hovered) return;
+    hovered = key;
+    showDay();
+  });
+  grid.addEventListener("mouseleave", () => {
+    hovered = null;
+    showDay();
+  });
 
   const legend = document.createElement("div");
   legend.className = "legend";
   legend.append(swatch("used", "Used"));
   if (sum(days, "pass") > 0) legend.append(swatch("pass", "On a pass"));
+  if (dailyCap !== null) legend.append(swatch("daily-cap", `Daily cap, ${shortDuration(dailyCap)}`));
+  const peak = document.createElement("span");
+  peak.className = "legend-peak";
+  peak.textContent = `Busiest: ${dayLabel(busiest, today)}, ${clock(busiest.used + busiest.pass)}`;
+  legend.append(peak);
 
-  body.replaceChildren(plot, legend);
+  body.replaceChildren(grid, legend);
+  if (pickedDay) choose(pickedDay);
+  else pick(order.at(-1), false);
+  showDay();
 }
 
 function swatch(kind, text) {

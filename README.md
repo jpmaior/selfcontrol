@@ -60,6 +60,9 @@ hour beside 30 for the rest of YouTube. Each keeps its own budget: when YouTube 
 stay open until theirs does. Shorts played from the home page's Shorts shelf count as YouTube,
 since they are not on `/shorts`.
 
+Each rule's page also shows its last 90 days of use, a week to a row, against its daily cap;
+tap or hover over a day for its exact figures.
+
 The one setting worth explaining is **"stay blocked until this much is free again"**. On a
 rolling window, a spent budget starts returning one minute at a time, which would let you back in
 for a minute, then block you, then let you back in. Setting this to 5 minutes means you come back
