@@ -55,6 +55,7 @@ const {
   loadNew,
   lockInRule,
   reconcile,
+  setWeek,
   settled,
   startCounting,
   status,
@@ -859,4 +860,41 @@ test("sweep: nothing to remove writes nothing", async () => {
     local.remove = remove;
   }
   assert.equal(removes, 0);
+});
+
+// --- the week's start day (DESIGN.md §14) ---------------------------------
+
+test("week: the caps, the week's totals and the passes follow the week it is given", async () => {
+  const { DEFAULT_WEEK } = await import("../extension/common/calendar.js");
+  const r = {
+    ...rule("week-sunday"),
+    weeklyBudgetSec: 5 * 60,
+    passes: { perWeek: 1, durationSec: 10 * 60, countsTowardCaps: true },
+  };
+  await load([r]);
+  const saturday = new Date(2026, 8, 19, 10).getTime();
+  const sundayMidnight = new Date(2026, 8, 20).getTime();
+  const sunday = new Date(2026, 8, 20, 9).getTime();
+
+  setWeek({ startDay: 0, carry: null });
+  try {
+    assert.equal(usePassOnRule(r, saturday), true);
+    startCounting(r, saturday);
+    stopCounting(r, saturday + 5 * MIN);
+    const spentNow = status(r, saturday + 5 * MIN);
+    assert.equal(spentNow.reason, "weekly");
+    assert.equal(spentNow.unlockAtMs, sundayMidnight, "back at Sunday midnight");
+    assert.equal(spentNow.week.passMs, 5 * MIN);
+    assert.equal(spentNow.pass.leftThisWeek, 0);
+
+    const next = status(r, sunday);
+    assert.equal(next.exhausted, false);
+    assert.equal(next.week.usedMs + next.week.passMs, 0, "a new week");
+    assert.equal(next.pass.leftThisWeek, 1);
+  } finally {
+    setWeek(DEFAULT_WEEK);
+  }
+  const monday = status(r, sunday);
+  assert.equal(monday.exhausted, true, "the Monday week still has Saturday");
+  assert.equal(monday.unlockAtMs, new Date(2026, 8, 21).getTime());
 });

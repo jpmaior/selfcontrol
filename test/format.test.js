@@ -40,3 +40,11 @@ test("wallClock: today is a time, another day carries the weekday", () => {
   assert.equal(wallClock(new Date(2026, 8, 14, 0, 0).getTime(), now), "00:00");
   assert.equal(wallClock(new Date(2026, 8, 15, 0, 0).getTime(), now), "Tue 00:00", "midnight is tomorrow");
 });
+
+test("wallClock: past a week from today, the date as well, so a carried week's end is not read as this one", () => {
+  // A change of the week's start day can carry the week in progress up to
+  // thirteen days (DESIGN.md §14): "Sun 00:00" would read as the coming Sunday.
+  const now = new Date(2026, 8, 17, 15, 30).getTime(); // Thursday
+  assert.equal(wallClock(new Date(2026, 8, 24, 0, 0).getTime(), now), "Thu 00:00", "a week from today: the name will do");
+  assert.equal(wallClock(new Date(2026, 8, 27, 0, 0).getTime(), now), "Sun 27 Sep 00:00");
+});

@@ -17,10 +17,11 @@ import {
   creditAvailableAt,
   startPass,
 } from "../extension/common/accountant.js";
-import { startOfNextDay, startOfNextWeek } from "../extension/common/calendar.js";
+import { DEFAULT_WEEK, changeWeekStart, startOfNextDay, startOfNextWeek } from "../extension/common/calendar.js";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
 
 /** 10:00 local on Saturday 2026-09-19; Lisbon is UTC+1, so bucket-aligned. */
 const T0 = new Date(2026, 8, 19, 10, 0).getTime();
@@ -627,4 +628,86 @@ test("creditInUse: a rule spent from the start was changed under the interval, w
     ranOutAtMs: null,
   });
   assert.deepEqual(creditInUse(outright(), createUsage(), T0, T0 + 2 * MIN), { creditedMs: 2 * MIN, ranOutAtMs: null });
+});
+
+// --- the week's start day (DESIGN.md §14) ---------------------------------
+
+const SUNDAY_WEEK = { startDay: 0, carry: null };
+const SATURDAY_WEEK = { startDay: 6, carry: null };
+
+test("evaluate: with a Sunday start, a weekly cap spent on Saturday unlocks at Sunday midnight", () => {
+  // T0 is Saturday 10:00.
+  const r = rule({ weeklyBudgetSec: 5 * 60 });
+  const now = T0 + 5 * MIN;
+  const e = evaluate(r, spent(5 * MIN), now, { week: SUNDAY_WEEK });
+  assert.equal(e.exhausted, true);
+  assert.equal(e.reason, "weekly");
+  assert.equal(e.unlockAtMs, new Date(2026, 8, 20).getTime());
+  assert.equal(new Date(e.unlockAtMs).getDay(), 0, "a Sunday");
+
+  const sunday = evaluate(r, spent(5 * MIN), new Date(2026, 8, 20, 9).getTime(), { week: SUNDAY_WEEK });
+  assert.equal(sunday.caps.weekly.usedMs, 0, "Saturday is last week's");
+  assert.equal(sunday.caps.weekly.exhausted, false);
+});
+
+test("evaluate: with a Saturday start, Friday's use is last week's on Saturday", () => {
+  const r = rule({ weeklyBudgetSec: 5 * 60 });
+  const friday = T0 - DAY;
+  const usage = spent(5 * MIN, friday);
+  const onFriday = evaluate(r, usage, friday + 5 * MIN, { week: SATURDAY_WEEK });
+  assert.equal(onFriday.reason, "weekly");
+  assert.equal(onFriday.unlockAtMs, new Date(2026, 8, 19).getTime(), "Saturday midnight");
+  assert.equal(evaluate(r, usage, T0, { week: SATURDAY_WEEK }).caps.weekly.usedMs, 0);
+  assert.equal(evaluate(r, usage, T0).caps.weekly.usedMs, 5 * MIN, "the Monday week still has it");
+});
+
+test("canUsePass: the allowance is per week of the chosen start day", () => {
+  const r = withPasses({}, { perWeek: 1 });
+  const u = spent(20 * MIN);
+  u.passUses = [T0 - DAY]; // Friday
+  assert.equal(canUsePass(r, u, T0 + 20 * MIN), false, "same Monday week");
+  assert.equal(canUsePass(r, u, T0 + 20 * MIN, { week: SATURDAY_WEEK }), true, "a new Saturday week");
+  assert.equal(evaluate(r, u, T0 + 20 * MIN, { week: SATURDAY_WEEK }).pass.leftThisWeek, 1);
+});
+
+test("a change of start day mid-week gives back no weekly budget and no passes", () => {
+  // Spent on Monday the 14th, the weekly cap and the one pass. On Thursday the
+  // 17th the week is changed to start on Wednesday: the Wednesday week that
+  // contains Thursday began on the 16th, after Monday's use, and would hand
+  // all of it back.
+  const r = rule({ weeklyBudgetSec: 30 * 60, passes: { perWeek: 1, durationSec: 30 * 60, countsTowardCaps: true } });
+  const monday = new Date(2026, 8, 14, 10).getTime();
+  const u = spent(30 * MIN, monday);
+  u.passUses = [monday];
+  const thursday = new Date(2026, 8, 17, 15).getTime();
+
+  assert.equal(evaluate(r, u, thursday, { week: { startDay: 3, carry: null } }).exhausted, false, "the loophole");
+
+  const week = changeWeekStart(DEFAULT_WEEK, 3, thursday);
+  const e = evaluate(r, u, thursday, { week });
+  assert.equal(e.exhausted, true);
+  assert.equal(e.reason, "weekly");
+  assert.equal(e.unlockAtMs, new Date(2026, 8, 23).getTime(), "the Wednesday after next, not Monday");
+  assert.equal(e.pass.leftThisWeek, 0);
+
+  // Past the Monday the old week would have ended on, still the same week.
+  const tuesday = new Date(2026, 8, 22, 12).getTime();
+  assert.equal(evaluate(r, u, tuesday, { week }).exhausted, true);
+  assert.equal(canUsePass(r, u, tuesday, { week }), false);
+
+  // From that Wednesday, weeks start on Wednesday.
+  const wednesday = new Date(2026, 8, 23, 0).getTime();
+  const fresh = evaluate(r, u, wednesday, { week });
+  assert.equal(fresh.exhausted, false);
+  assert.equal(fresh.pass.leftThisWeek, 1);
+});
+
+test("creditInUse: runs out on the chosen week's cap", () => {
+  // Saturday with a Saturday start: last Friday's use does not count, so a
+  // five-minute weekly cap lets five minutes through on Saturday.
+  const r = rule({ weeklyBudgetSec: 5 * 60 });
+  const u = spent(5 * MIN, T0 - DAY);
+  const result = creditInUse(r, u, T0, T0 + 10 * MIN, { week: SATURDAY_WEEK });
+  assert.equal(result.creditedMs, 5 * MIN);
+  assert.equal(result.ranOutAtMs, T0 + 5 * MIN);
 });

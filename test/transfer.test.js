@@ -234,3 +234,51 @@ test("describeImport: one incoming rule replaces, in the singular", () => {
   );
   assert.equal(describeImport([], [{ id: "reddit" }]), "1 rule replaces your 0 rules. reddit: new.");
 });
+
+// --- the week's start day (DESIGN.md §14, §20) -----------------------------
+
+test("serializeRules: carries the day the week starts, Monday unless given", () => {
+  assert.equal(serializeRules(RULES, NOW).weekStart, 1);
+  assert.equal(serializeRules(RULES, NOW, 0).weekStart, 0);
+});
+
+test("parseImport: the week's start day comes through", () => {
+  const result = parseImport(JSON.stringify(serializeRules(RULES, NOW, 6)));
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.weekStart, 6);
+});
+
+test("parseImport: a file without a week start leaves the current one alone", () => {
+  const file = serializeRules(RULES, NOW);
+  delete file.weekStart;
+  const result = parseImport(JSON.stringify(file));
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.weekStart, null, "null: keep what is set");
+});
+
+test("parseImport: a week start that is not a day refuses the file", () => {
+  for (const bad of [7, -1, 1.5, "1", "sunday", null]) {
+    const file = { ...serializeRules(RULES, NOW), weekStart: bad };
+    const result = parseImport(JSON.stringify(file));
+    assert.equal(result.ok, false, JSON.stringify(bad));
+    assert.match(result.error, /week/i, JSON.stringify(bad));
+  }
+});
+
+test("describeImport: says when the week will start on another day", () => {
+  const rules = [{ id: "youtube" }];
+  assert.equal(
+    describeImport(rules, rules, { weekStart: 0, currentWeekStart: 1 }),
+    "1 rule replaces your 1 rule. youtube keeps its history. Weeks will start on Sunday.",
+  );
+  assert.equal(
+    describeImport(rules, rules, { weekStart: 1, currentWeekStart: 1 }),
+    "1 rule replaces your 1 rule. youtube keeps its history.",
+    "the same day is not news",
+  );
+  assert.equal(
+    describeImport(rules, rules, { weekStart: null, currentWeekStart: 1 }),
+    "1 rule replaces your 1 rule. youtube keeps its history.",
+    "a file without one changes nothing",
+  );
+});

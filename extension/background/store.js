@@ -22,7 +22,7 @@ import {
   usedInPeriod,
   windowOf,
 } from "../common/accountant.js";
-import { startOfDay, startOfWeek } from "../common/calendar.js";
+import { DEFAULT_WEEK, startOfDay, weekOf } from "../common/calendar.js";
 import { canUsePass, creditInUse, evaluate, holdAfter, lockInAmount, lockInPreview } from "../common/policy.js";
 import { log, warn } from "./log.js";
 import { clock } from "../common/format.js";
@@ -46,6 +46,18 @@ const openSince = new Map();
 
 /** Rules whose ledger has changed since the last flush. */
 const dirty = new Set();
+
+/**
+ * The week setting (calendar.js, DESIGN.md §14), as the settings last said:
+ * derived like the ledgers, so set again on every start before any handler
+ * runs, and on every settings change.
+ */
+let week = DEFAULT_WEEK;
+
+/** Use `next` as the week from here on. */
+export function setWeek(next) {
+  week = next;
+}
 
 /** Writes since the event page started, for dumpStats(): they should be rare (DESIGN.md §6). */
 export const stats = { localWrites: 0, sessionWrites: 0, keysWritten: 0 };
@@ -215,7 +227,7 @@ export function checkpointRule(rule, nowMs) {
   if (since === undefined) return 0;
 
   const { creditedMs, ranOutAtMs } = settle(rule, since, nowMs);
-  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs).exhausted) {
+  if (ranOutAtMs !== null && evaluate(rule, ledgerFor(rule.id), nowMs, { week }).exhausted) {
     clearOpen(rule.id);
     recordHold(rule, nowMs);
   } else setOpen(rule.id, nowMs);
@@ -231,10 +243,10 @@ export function checkpointRule(rule, nowMs) {
 export function lockInRule(rule, nowMs) {
   stopCounting(rule, nowMs);
   const usage = ledgerFor(rule.id);
-  const amount = lockInAmount(rule, usage, nowMs);
+  const amount = lockInAmount(rule, usage, nowMs, { week });
   if (amount > 0 || passActive(usage, nowMs)) {
     lockIn(usage, nowMs, amount); // ends the pass too, if one is active
-    fold(usage, nowMs, rule.windowSec * 1000);
+    fold(usage, nowMs, rule.windowSec * 1000, week);
     dirty.add(rule.id);
   }
   recordHold(rule, nowMs);
@@ -249,7 +261,7 @@ export function lockInRule(rule, nowMs) {
 export function usePassOnRule(rule, nowMs) {
   checkpointRule(rule, nowMs);
   const usage = ledgerFor(rule.id);
-  if (!canUsePass(rule, usage, nowMs)) return false;
+  if (!canUsePass(rule, usage, nowMs, { week })) return false;
   startPass(usage, rule, nowMs);
   dirty.add(rule.id);
   return true;
@@ -258,14 +270,14 @@ export function usePassOnRule(rule, nowMs) {
 /** Credit an interval of use to the ledger: `{ creditedMs, ranOutAtMs }`. */
 function settle(rule, fromMs, toMs) {
   const usage = ledgerFor(rule.id);
-  const result = creditInUse(rule, usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS });
+  const result = creditInUse(rule, usage, fromMs, toMs, { maxChunkMs: MAX_CHUNK_MS, week });
   // Only a bug in policy.evaluate() gets here, and the rule is then charged as
   // if it never ran out, with no hold. Here and not in projection(), which
   // every reading takes: the settle that follows says it once.
   if (result.stoppedAtLimit) {
     warn(`${rule.id}: gave up crediting at the step limit, +${clock(result.creditedMs)} of ${clock(toMs - fromMs)}`);
   }
-  fold(usage, toMs, rule.windowSec * 1000);
+  fold(usage, toMs, rule.windowSec * 1000, week);
   dirty.add(rule.id);
   return result;
 }
@@ -298,7 +310,7 @@ function recordHold(rule, nowMs) {
   // recorded is kept, so setting the budget to zero and back mid-block does not
   // lift it (DESIGN.md §22).
   const usage = ledgerFor(rule.id);
-  const next = holdAfter(evaluate(rule, usage, nowMs));
+  const next = holdAfter(evaluate(rule, usage, nowMs, { week }));
   if (next === undefined || usage.blockedUntil === next) return;
   usage.blockedUntil = next;
   dirty.add(rule.id);
@@ -398,11 +410,11 @@ function projection(rule, nowMs) {
   const since = openSince.get(rule.id);
   if (since === undefined) return { usage, ranOutAtMs: null };
   const copy = { ...usage, b: { ...usage.b }, p: { ...usage.p } };
-  const { ranOutAtMs } = creditInUse(rule, copy, since, nowMs, { maxChunkMs: MAX_CHUNK_MS });
+  const { ranOutAtMs } = creditInUse(rule, copy, since, nowMs, { maxChunkMs: MAX_CHUNK_MS, week });
   return { usage: copy, ranOutAtMs };
 }
 
-/** Used and pass time since a local period start, for the popup. */
+/** Used and pass time since a local day or week start, for the popup. */
 function period(usage, startMs) {
   const all = usedInPeriod(usage, startMs);
   const used = usedInPeriod(usage, startMs, { includePass: false });
@@ -418,7 +430,7 @@ function period(usage, startMs) {
 export function decide(rule, nowMs) {
   const { usage } = projection(rule, nowMs);
   const counting = openSince.has(rule.id);
-  return { counting, ...evaluate(rule, usage, nowMs, { counting }) };
+  return { counting, ...evaluate(rule, usage, nowMs, { counting, week }) };
 }
 
 /**
@@ -430,7 +442,7 @@ export function decide(rule, nowMs) {
 export function status(rule, nowMs) {
   const { usage } = projection(rule, nowMs);
   const counting = openSince.has(rule.id);
-  const decision = evaluate(rule, usage, nowMs, { counting });
+  const decision = evaluate(rule, usage, nowMs, { counting, week });
 
   return {
     id: rule.id,
@@ -441,15 +453,15 @@ export function status(rule, nowMs) {
     usedMs: decision.caps.rolling?.usedMs ?? 0,
     budgetMs: decision.caps.rolling?.budgetMs ?? 0,
     windowMs: windowOf(rule).windowMs,
-    lockIn: lockInPreview(rule, usage, nowMs),
-    passOffer: canUsePass(rule, usage, nowMs)
-      ? { left: passesLeft(rule, usage, nowMs), durationMs: rule.passes.durationSec * 1000 }
+    lockIn: lockInPreview(rule, usage, nowMs, { week }),
+    passOffer: canUsePass(rule, usage, nowMs, { week })
+      ? { left: passesLeft(rule, usage, nowMs, week), durationMs: rule.passes.durationSec * 1000 }
       : null,
     // Whether pass time goes toward the calendar caps, so the popup can count them between readings.
     passCountsTowardCaps: rule.passes?.countsTowardCaps ?? true,
     ...decision,
     today: period(usage, startOfDay(nowMs)),
-    week: period(usage, startOfWeek(nowMs)),
+    week: period(usage, weekOf(nowMs, week).startMs),
   };
 }
 

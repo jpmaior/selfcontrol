@@ -45,6 +45,11 @@ Each rule takes a name, some domains, a counting mode, a budget, a window of 2 m
 hours, and what to do when the budget is spent. Edits apply immediately — no restart. For more
 than a day, use the daily and weekly caps.
 
+Weeks start on Monday, for every weekly cap and the weekly passes; **Weeks start on** in the
+options page picks another day. A change never cuts the week in progress short: it runs on until
+the new day comes round at least seven days after it began, so changing it never gives back a
+weekly budget or a pass.
+
 A budget of `0` blocks a site outright: it is blocked (or its tabs closed) the moment it is
 opened, until you raise the budget again. The rule's other limits are greyed out while it is `0`,
 and come back as they were.
