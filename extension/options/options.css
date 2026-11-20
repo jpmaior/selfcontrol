@@ -792,11 +792,29 @@ input::placeholder {
   text-transform: uppercase;
 }
 
+/* The exact figures for the day under the pointer or the one picked. Pinned
+   under the page's header while the calendar scrolls past, so on a phone the
+   day tapped in the oldest row still has its figures on screen. */
 .readout {
-  margin-top: 0.1rem;
+  position: sticky;
+  top: 3.75rem;
+  z-index: 1;
+  margin-block: -0.4rem;
+  padding-block: 0.4rem;
+  background: var(--card);
   font-size: 0.8rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.readout:empty {
+  display: none;
+}
+
+@media (max-height: 30rem) {
+  .readout {
+    top: 0;
+  }
 }
 
 .history-totals {
@@ -817,95 +835,145 @@ input::placeholder {
   color: var(--muted);
 }
 
-/* Time axis on the left, dates along the bottom, hairline gridlines behind
-   the columns. The axes are recessive: the data is the only loud thing. */
-.plot {
+/* A calendar of weeks, newest on top: the week's header, then its seven days,
+   each a small column on one shared scale, sitting on the row's baseline.
+   Seven columns fit a phone; ninety side by side would not (DESIGN.md §13).
+   The axes are recessive: the data is the only loud thing. */
+.cal {
   display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 0.5rem;
-  row-gap: 0.4rem;
-  padding-top: 0.5rem;
-}
-
-.y-axis,
-.area {
-  position: relative;
-  height: 8rem;
+  max-width: 44rem;
+  --day-h: 2.25rem;
 }
 
 @container (min-width: 36rem) {
-  .y-axis,
-  .area {
-    height: 10rem;
+  .cal {
+    --day-h: 3rem;
   }
 }
 
-.y-axis {
-  min-width: 2.2rem;
-  font-size: 0.7rem;
-  color: var(--faint);
-  font-variant-numeric: tabular-nums;
-}
-
-.y-axis span {
-  position: absolute;
-  right: 0;
-  transform: translateY(50%);
-  line-height: 1;
-}
-
-.area {
+.cal-row {
+  display: grid;
+  grid-template-columns: 4.6rem repeat(7, minmax(0, 1fr));
+  column-gap: 3px;
+  align-items: end;
+  padding-top: 3px;
   border-bottom: 1px solid var(--line);
 }
 
-.gridline {
+.cal-head {
+  padding-bottom: 0.25rem;
+  border-bottom-color: var(--line-soft);
+  font-size: 0.68rem;
+  color: var(--faint);
+  text-align: center;
+}
+
+.cal-head > :first-child {
+  text-align: left;
+}
+
+.wk {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  height: var(--day-h);
+  padding-right: 0.4rem;
+  line-height: 1.15;
+}
+
+.wk-label {
+  overflow: hidden;
+  font-size: 0.68rem;
+  color: var(--faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wk-total {
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The week's total as a bar, scaled to the busiest week shown, so the weeks
+   read against each other down the column. */
+.wk-bar {
+  display: flex;
+  gap: 1px;
+  height: 3px;
+  margin-top: 3px;
+}
+
+.wk-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.wk-bar .used {
+  background: var(--bar-used);
+}
+
+.wk-bar .pass {
+  background: var(--bar-pass);
+}
+
+/* The whole cell is the hit target, not just the painted part. */
+.day {
+  position: relative;
+  height: var(--day-h);
+  border-radius: 4px 4px 0 0;
+}
+
+.day:not(.out) {
+  cursor: pointer;
+}
+
+.day:hover,
+.day.picked {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+
+.day:focus {
+  outline: none;
+}
+
+.day:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+/* Today is underlined in ink, over the baseline. Not an inset box-shadow:
+   at a fractional left edge Firefox leaks it up the side as a hairline. */
+.day.today::after {
+  content: "";
   position: absolute;
   left: 0;
   right: 0;
-  border-top: 1px solid var(--line-soft);
+  bottom: -1px;
+  height: 2px;
+  background: var(--ink);
 }
 
-/* Thirty equal columns spread over the whole width; each is the hit target,
-   and the bar inside it is capped in width so the leftover is air. Segments
-   are separated by a gap in the card colour rather than a stroke, and the top
-   one carries the rounded data-end. The date row below uses the same columns
-   so its labels line up. */
-.bars,
-.x-axis {
-  display: flex;
-  gap: 2px;
-}
-
-.bars {
-  position: absolute;
-  inset: 0;
-}
-
-.bar,
-.tick {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.bar {
+/* Segments are separated by a gap in the card colour rather than a stroke,
+   and the top one carries the rounded data-end. */
+.col {
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   align-items: center;
   gap: 2px;
-  border-radius: 3px;
+  height: 100%;
 }
 
-/* The whole column is the hit target, not just the painted part. */
-.bar:hover,
-.bar:focus-visible {
-  background: color-mix(in srgb, var(--muted) 12%, transparent);
-  outline: none;
-}
-
+/* A minute against a cap of an hour would round to nothing: any use at all
+   stays visible, and apart from the zero stub by its colour. */
 .seg {
   flex: 0 0 auto;
-  width: min(100%, 1.6rem);
+  width: min(100% - 4px, 1.4rem);
+  min-height: 2px;
 }
 
 .seg.used {
@@ -920,26 +988,35 @@ input::placeholder {
   border-radius: 3px 3px 0 0;
 }
 
-/* A label is wider than its column: centred under it, except the last, which
-   ends at the plot's edge so it cannot push a phone's page sideways. */
-.tick {
-  display: flex;
-  justify-content: center;
-  font-size: 0.7rem;
-  line-height: 1.2;
-  color: var(--faint);
-  white-space: nowrap;
+/* A kept day with nothing in it is a zero, drawn as a stub on the baseline;
+   a day out of range (still to come, or older than what is kept) is blank. */
+.day.zero .col::after {
+  content: "";
+  width: min(100% - 4px, 1.4rem);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line);
 }
 
-.tick:last-child {
-  justify-content: flex-end;
-  font-weight: 600;
-  color: var(--ink);
+/* The daily cap, one dashed line across the row: it runs into the gaps
+   between days so that it reads as a line rather than as seven dashes. */
+.col .cap {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  border-top: 1.5px dashed var(--muted);
+  pointer-events: none;
+}
+
+/* …but not past the row's ends, where it would show beside the readout. */
+.day:last-child .cap {
+  right: 0;
 }
 
 .legend {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
   margin-top: 0.75rem;
   font-size: 0.75rem;
   color: var(--muted);
@@ -961,4 +1038,17 @@ input::placeholder {
 
 .legend-item.pass::before {
   background: var(--bar-pass);
+}
+
+.legend-item.daily-cap::before {
+  width: 0.9rem;
+  height: 0;
+  border-top: 1.5px dashed var(--muted);
+  border-radius: 0;
+  vertical-align: 0.25em;
+}
+
+.legend-peak {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
 }
