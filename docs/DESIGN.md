@@ -1026,7 +1026,9 @@ from `usedByDay()`, pure and tested.
 - **One scale for every day**, the busiest day or the daily cap, whichever is higher, so heights
   compare across weeks. A daily cap is a dashed line across each row, and a day that met it says
   so in its figures. The legend names the busiest day, which fixes the scale for a rule with no
-  daily cap.
+  daily cap. Its total, like a row's, is a short duration (`14m`, `1h41`, and `40s` under a
+  minute, so a day with any use never reads `0`), not `clock()`'s `14:00`, which after a date
+  reads as 2 pm (#74).
 - **Each row's header has the week's total**, as a figure and as a bar against the busiest week,
   so the trend reads down one column.
 - **Rows start at the first week with any use**, not ninety days back, so a new rule is a row or

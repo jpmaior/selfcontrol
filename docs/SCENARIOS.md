@@ -239,7 +239,9 @@ With `budgetSec: 30, windowSec: 120, minUnlockCreditSec: 30` on the rule under t
    **Ninety days:** write 90 days of `d` into a rule with a daily cap, as DESIGN §13 shows it,
    with `browser.storage.local.set` and `terminate` → a row per week from the oldest kept day,
    the weekdays in the order the week starts, the daily cap a dashed line across each row, and
-   nothing wider than the page at 360px. Hovering, clicking or tapping a day, or the arrow keys
+   nothing wider than the page at 360px. The legend's busiest day and each row's total are
+   durations, `14m` or `1h41`, never `14:00` or `1:41:00`; a rule whose busiest day was 40 s says
+   `40s`, not `0` or `1m`. Hovering, clicking or tapping a day, or the arrow keys
    from it, puts its figures and its week's total in the readout, which stays on screen while
    the calendar scrolls; Tab enters and leaves the calendar in one step. Choosing another start
    day regroups the rows before Save, and Revert puts them back. A rule used on a few days this

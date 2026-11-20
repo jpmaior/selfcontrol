@@ -6,7 +6,7 @@ process.env.TZ = "Europe/Lisbon";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clock, countdown, wallClock } from "../extension/common/format.js";
+import { clock, countdown, shortDuration, wallClock } from "../extension/common/format.js";
 
 test("clock: mm:ss, then h:mm:ss", () => {
   assert.equal(clock(0), "0:00");
@@ -31,6 +31,27 @@ test("countdown: a day or more is counted in days, not in hundreds of hours", ()
 
 test("clock: an amount of time keeps its hours", () => {
   assert.equal(clock(30 * 3_600_000), "30:00:00", "a weekly budget reads as hours");
+});
+
+test("shortDuration: minutes and hours, never read as a time of day", () => {
+  // The history legend puts it after a date: "Mon, Aug 31, 14:00" read as 2 pm (#74).
+  const M = 60_000;
+  assert.equal(shortDuration(14 * M), "14m");
+  assert.equal(shortDuration(60 * M), "1h");
+  assert.equal(shortDuration(101 * M), "1h41");
+  assert.equal(shortDuration(65 * M), "1h05");
+  assert.equal(shortDuration(14 * M + 29_000), "14m", "to the nearest minute");
+  assert.equal(shortDuration(30 * 60 * M), "30h", "a weekly figure keeps its hours");
+  assert.equal(shortDuration(0), "0");
+});
+
+test("shortDuration: under a minute is in seconds, so a day that was used never reads 0", () => {
+  assert.equal(shortDuration(40_000), "40s", "a busiest day of 40 s");
+  assert.equal(shortDuration(20_000), "20s", "a 20 s budget, which the form cannot show");
+  assert.equal(shortDuration(59_400), "59s");
+  assert.equal(shortDuration(59_600), "1m", "rounds up into the minutes");
+  assert.equal(shortDuration(300), "1s", "a few hundred milliseconds still count");
+  assert.equal(shortDuration(-5), "0", "never negative");
 });
 
 test("wallClock: today is a time, another day carries the weekday", () => {
