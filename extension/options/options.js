@@ -1,9 +1,10 @@
-// Options page: add, edit and delete rules.
+// Options page: add, edit and delete rules, and choose the day the week starts.
 //
 // Master/detail: the rule list, and one rule's form at a time. Edits live in a
 // local draft array and are only written on Save, so a half-typed domain never
 // reaches the background. Saving writes the `settings` key; the background is
-// watching it and re-arms itself without a reload.
+// watching it and re-arms itself without a reload. The week's start day is a
+// draft too, saved with the rules.
 
 import {
   MODES,
@@ -17,10 +18,10 @@ import {
   strip,
   validateRule,
 } from "../common/rules.js";
-import { loadRules, saveRules, usageKey } from "../common/settings.js";
+import { loadSettings, saveSettings, usageKey } from "../common/settings.js";
 import { normalizeUsage, usedByDay } from "../common/accountant.js";
-import { addDays, dayKey, startOfDay } from "../common/calendar.js";
-import { clock, strong } from "../common/format.js";
+import { DEFAULT_WEEK, addDays, changeWeekStart, dayKey, startOfDay, weekOf } from "../common/calendar.js";
+import { WEEKDAYS, clock, strong } from "../common/format.js";
 import { describeImport, parseImport, serializeRules } from "../common/transfer.js";
 import { reportsAudible } from "../common/platform.js";
 
@@ -35,6 +36,8 @@ const templateEl = document.getElementById("rule-template");
 const emptyTemplateEl = document.getElementById("empty-template");
 const statusEl = document.getElementById("status");
 const revertEl = document.getElementById("revert");
+const weekStartEl = document.getElementById("week-start");
+const weekCarryEl = document.getElementById("week-carry");
 
 /** Whether "Count time" is a real choice here; not on Firefox for Android. */
 const AUDIBLE = await reportsAudible();
@@ -54,6 +57,15 @@ let selected = null;
  */
 let saved = [];
 let savedJson = new Map();
+
+/**
+ * The week setting as last loaded or saved, and the start day the select
+ * shows. Saved with the rules, through changeWeekStart() (DESIGN.md §14).
+ */
+let savedWeek = DEFAULT_WEEK;
+let weekDraft = DEFAULT_WEEK.startDay;
+
+const weekEdited = () => weekDraft !== savedWeek.startDay;
 
 /** draft -> its problems at the last validation. */
 let errors = new Map();
@@ -162,6 +174,7 @@ function buildForm(draft) {
   if (!AUDIBLE) field("match").closest("section").querySelector(".section-title").textContent = "1. Domains";
   fillOptions(field("onExceed"), ON_EXCEED, draft.onExceed);
   showOutright(root, draft);
+  showWeekEnd(root);
 
   // Write back only the field that was edited (formEdit()): reading every
   // field back would round each value to the whole minutes it is shown in.
@@ -230,6 +243,48 @@ function showOutright(root, draft) {
   );
 }
 
+// --- the week ------------------------------------------------------------
+
+/** "a week on Sunday night": the night before the start day. */
+function showWeekEnd(root) {
+  const el = root.querySelector('[data-role="week-end"]');
+  if (el) el.textContent = WEEKDAYS[(weekDraft + 6) % 7];
+}
+
+const shortDate = (ms) => new Date(ms).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+
+/**
+ * The select, and when the week in progress runs longer than seven days, say
+ * so: before Save, what saving would do, and after it, while it lasts.
+ */
+function showWeek() {
+  weekStartEl.value = String(weekDraft);
+  showWeekEnd(detailEl);
+  const now = Date.now();
+  const week = weekEdited() ? changeWeekStart(savedWeek, weekDraft, now) : savedWeek;
+  const { startMs, endMs } = weekOf(now, week);
+  const carried = week.carry !== null && week.carry.until === endMs;
+  weekCarryEl.hidden = !carried;
+  if (!carried) return;
+  const what = `This week began on ${shortDate(startMs)} and runs until ${shortDate(endMs)}, when weeks start on ${WEEKDAYS[week.startDay]}.`;
+  weekCarryEl.textContent = weekEdited() ? `Once saved: ${what[0].toLowerCase()}${what.slice(1)}` : what;
+}
+
+// Monday first, as the default.
+for (const day of [1, 2, 3, 4, 5, 6, 0]) {
+  const option = document.createElement("option");
+  option.value = String(day);
+  option.textContent = WEEKDAYS[day];
+  weekStartEl.append(option);
+}
+
+weekStartEl.addEventListener("change", () => {
+  weekDraft = Number(weekStartEl.value);
+  message = null;
+  showWeek();
+  updateSaveBar();
+});
+
 // --- the list ------------------------------------------------------------
 
 /** "5m / 1h window": the rolling cap, the one every rule has. */
@@ -285,6 +340,7 @@ function renderDetail() {
 function render() {
   renderList();
   renderDetail();
+  showWeek();
   updateSaveBar();
 }
 
@@ -518,6 +574,7 @@ function updateSaveBar() {
   const names = [
     ...drafts.filter(isEdited).map((d) => nameOf(d) || "Untitled rule"),
     ...removedRules().map((rule) => `${nameOf(rule) || rule.id} (deleted)`),
+    ...(weekEdited() ? ["Week start"] : []),
   ];
   revertEl.disabled = names.length === 0;
 
@@ -589,8 +646,10 @@ async function save() {
   }
 
   const rules = drafts.map(strip);
-  await saveRules(rules);
+  await saveSettings({ rules, weekStart: weekEdited() ? weekDraft : undefined });
   markSaved(rules);
+  savedWeek = (await loadSettings()).week;
+  weekDraft = savedWeek.startDay;
   validating = false;
   errors = new Map();
   // The background has now forgotten any deleted rule's usage, so its id is
@@ -608,6 +667,7 @@ function revert() {
   const keep = selected?.id;
   drafts = saved.map(cloneRule);
   selected = drafts.find((d) => d.id && d.id === keep) ?? drafts[0] ?? null;
+  weekDraft = savedWeek.startDay;
   validating = false;
   errors = new Map();
   if (flagSavedInvalid() === 0) setStatus("Reverted to what is saved.");
@@ -617,8 +677,8 @@ function revert() {
 
 /** What is saved, not the drafts: an export must not carry unsaved edits. */
 async function exportRules() {
-  const rules = await loadRules();
-  const json = JSON.stringify(serializeRules(rules, Date.now()), null, 2);
+  const { rules, week } = await loadSettings();
+  const json = JSON.stringify(serializeRules(rules, Date.now(), week.startDay), null, 2);
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -634,7 +694,7 @@ async function exportRules() {
 const transferEl = document.getElementById("transfer");
 const transferSummaryEl = document.getElementById("transfer-summary");
 
-/** The parsed rules waiting for the user to confirm, or null. */
+/** The parsed file, `{ rules, weekStart }`, waiting for the user to confirm, or null. */
 let pendingImport = null;
 
 async function importFromFile(file) {
@@ -644,9 +704,12 @@ async function importFromFile(file) {
     return;
   }
   // Against what is saved, since that is whose history is at stake.
-  const current = await loadRules();
-  pendingImport = result.rules;
-  transferSummaryEl.textContent = describeImport(current, result.rules);
+  const { rules: current, week } = await loadSettings();
+  pendingImport = { rules: result.rules, weekStart: result.weekStart };
+  transferSummaryEl.textContent = describeImport(current, result.rules, {
+    weekStart: result.weekStart,
+    currentWeekStart: week.startDay,
+  });
   transferEl.hidden = false;
   message = null;
   updateSaveBar();
@@ -660,7 +723,9 @@ function cancelImport() {
 /** Replace the drafts and go through the ordinary save path, validation included. */
 async function confirmImport() {
   if (!pendingImport) return;
-  drafts = pendingImport.map(cloneRule);
+  drafts = pendingImport.rules.map(cloneRule);
+  // A file without a week start leaves the one set alone.
+  if (pendingImport.weekStart !== null) weekDraft = pendingImport.weekStart;
   selected = drafts[0] ?? null;
   cancelImport();
   render();
@@ -720,7 +785,9 @@ revertEl.addEventListener("click", revert);
 // actually installed.
 document.getElementById("version").textContent = `v${browser.runtime.getManifest().version}`;
 
-const loaded = await loadRules();
+const { rules: loaded, week: loadedWeek } = await loadSettings();
+savedWeek = loadedWeek;
+weekDraft = savedWeek.startDay;
 markSaved(loaded);
 drafts = loaded.map(cloneRule);
 selected = drafts[0] ?? null;

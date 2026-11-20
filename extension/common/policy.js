@@ -5,8 +5,12 @@
 //
 //   rolling   the budget over the rolling window (DESIGN.md §5, §8)
 //   daily     a calendar-day cap, local time, back at midnight
-//   weekly    a calendar-week cap, local time, back on Monday
+//   weekly    a calendar-week cap, local time, back on the week's start day
 //   pass      a single-use unlock that suspends the rolling cap (DESIGN.md §17)
+//
+// The week is the stored week setting (calendar.js, DESIGN.md §14), passed in
+// as `week` wherever a weekly cap or the pass allowance is involved; Monday
+// when it is left out.
 //
 // A budget of zero overrides all of them: the rule blocks outright, with no
 // unlock instant at all (DESIGN.md §22).
@@ -29,7 +33,7 @@ import {
   usedMs,
   windowOf,
 } from "./accountant.js";
-import { startOfDay, startOfNextDay, startOfNextWeek, startOfWeek } from "./calendar.js";
+import { DEFAULT_WEEK, startOfDay, startOfNextDay, weekOf } from "./calendar.js";
 import { blocksOutright } from "./rules.js";
 
 /** Tie-break order when several constraints release at the same instant: the
@@ -105,10 +109,11 @@ function calendarCap(budgetSec, usage, nowMs, startMs, nextStartMs, includePass)
  * will flip when its smallest remainder runs out; an idle one will not flip
  * on its own, so there is nothing to wake up for.
  */
-export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
+export function evaluate(rule, usage, nowMs, { counting = false, week = DEFAULT_WEEK } = {}) {
   if (blocksOutright(rule)) return outright();
 
   const includePass = rule.passes?.countsTowardCaps ?? true;
+  const thisWeek = weekOf(nowMs, week);
 
   const caps = {
     rolling: rollingCap(rule, usage, nowMs),
@@ -124,8 +129,8 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
       rule.weeklyBudgetSec,
       usage,
       nowMs,
-      startOfWeek(nowMs),
-      startOfNextWeek(nowMs),
+      thisWeek.startMs,
+      thisWeek.endMs,
       includePass,
     ),
   };
@@ -134,7 +139,7 @@ export function evaluate(rule, usage, nowMs, { counting = false } = {}) {
   const pass = {
     active,
     endsAtMs: active ? usage.pass.to : null,
-    leftThisWeek: passesLeft(rule, usage, nowMs),
+    leftThisWeek: passesLeft(rule, usage, nowMs, week),
   };
 
   // --- exhausted: any constraint, released when the last of them releases.
@@ -243,11 +248,11 @@ const MAX_STEPS = 10_000;
  * credited stands, but whether the rule ran out after it was never asked, so
  * there is no hold and the caller should say so.
  */
-export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity, maxSteps = MAX_STEPS } = {}) {
+export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity, maxSteps = MAX_STEPS, week = DEFAULT_WEEK } = {}) {
   if (!(toMs > fromMs)) return { creditedMs: 0, ranOutAtMs: null };
   const startMs = Math.max(fromMs, toMs - maxChunkMs);
 
-  if (evaluate(rule, usage, startMs).exhausted) {
+  if (evaluate(rule, usage, startMs, { week }).exhausted) {
     commit(usage, startMs, toMs, { pass: usage.pass });
     return { creditedMs: toMs - startMs, ranOutAtMs: null };
   }
@@ -257,7 +262,7 @@ export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity, 
   // keeps a bug there from hanging the event page.
   let at = startMs;
   for (let step = 0; at < toMs && step < maxSteps; step++) {
-    const decision = evaluate(rule, usage, at, { counting: true });
+    const decision = evaluate(rule, usage, at, { counting: true, week });
     if (decision.exhausted) {
       const hold = holdAfter(decision);
       if (hold !== undefined) usage.blockedUntil = hold;
@@ -279,20 +284,20 @@ export function creditInUse(rule, usage, fromMs, toMs, { maxChunkMs = Infinity, 
  * is, whether or not pass time counts toward the caps, because the cap is
  * already spent.
  */
-export function canUsePass(rule, usage, nowMs) {
+export function canUsePass(rule, usage, nowMs, { week = DEFAULT_WEEK } = {}) {
   // Its passes are kept for when the budget is raised, but ignored until then.
   if (blocksOutright(rule)) return false;
   if (!(rule.passes?.perWeek > 0)) return false;
-  if (passActive(usage, nowMs) || passesLeft(rule, usage, nowMs) <= 0) return false;
-  const { caps } = evaluate(rule, usage, nowMs);
+  if (passActive(usage, nowMs) || passesLeft(rule, usage, nowMs, week) <= 0) return false;
+  const { caps } = evaluate(rule, usage, nowMs, { week });
   return !caps.weekly?.exhausted && !caps.daily?.exhausted;
 }
 
 // --- lock in (DESIGN.md §16) ---------------------------------------------
 
 /** Whether lock-in is offered right now: not on a rule already blocked. */
-export function canLockIn(rule, usage, nowMs) {
-  return !evaluate(rule, usage, nowMs).exhausted;
+export function canLockIn(rule, usage, nowMs, { week = DEFAULT_WEEK } = {}) {
+  return !evaluate(rule, usage, nowMs, { week }).exhausted;
 }
 
 /**
@@ -300,8 +305,8 @@ export function canLockIn(rule, usage, nowMs) {
  * taken over every cap regardless of a pass (a pass suspends the rolling
  * cap, but lockIn ends the pass first). Zero when already blocked.
  */
-export function lockInAmount(rule, usage, nowMs) {
-  const e = evaluate(rule, usage, nowMs);
+export function lockInAmount(rule, usage, nowMs, { week = DEFAULT_WEEK } = {}) {
+  const e = evaluate(rule, usage, nowMs, { week });
   if (e.exhausted) return 0;
   let least = Infinity;
   for (const cap of Object.values(e.caps)) {
@@ -314,9 +319,9 @@ export function lockInAmount(rule, usage, nowMs) {
  * What the popup's confirm step shows: how much would be spent and until
  * when the rule would then be blocked. Null when lock-in is not available.
  */
-export function lockInPreview(rule, usage, nowMs) {
-  if (!canLockIn(rule, usage, nowMs)) return null;
-  const ms = lockInAmount(rule, usage, nowMs);
-  const after = evaluate(rule, lockIn(structuredClone(usage), nowMs, ms), nowMs);
+export function lockInPreview(rule, usage, nowMs, { week = DEFAULT_WEEK } = {}) {
+  if (!canLockIn(rule, usage, nowMs, { week })) return null;
+  const ms = lockInAmount(rule, usage, nowMs, { week });
+  const after = evaluate(rule, lockIn(structuredClone(usage), nowMs, ms), nowMs, { week });
   return { ms, unlockAtMs: after.unlockAtMs, reason: after.reason };
 }

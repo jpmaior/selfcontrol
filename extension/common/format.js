@@ -1,6 +1,8 @@
 // Shared by the background and the pages, so they cannot drift into formatting
 // durations, or wording a block, differently.
 
+import { addDays, startOfDay } from "./calendar.js";
+
 /** mm:ss, or h:mm:ss past an hour. */
 export function clock(ms) {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -28,19 +30,29 @@ export function countdown(ms) {
 }
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** In full, by `Date.getDay()` number: for the day the week starts. */
+export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const two = (n) => String(n).padStart(2, "0");
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
  * A wall-clock instant for "until 14:32": the time alone when it falls on
- * the same local day as `nowMs`, otherwise prefixed with the weekday. Fixed
- * 24-hour digits rather than the locale, so the popup, the block page and
- * the console logs all agree.
+ * the same local day as `nowMs`, otherwise prefixed with the weekday, and
+ * with the date too past a week from today, where the weekday alone would
+ * name an earlier day: a carried week can run thirteen days (DESIGN.md §14).
+ * Fixed 24-hour digits and English names rather than the locale, so the
+ * popup, the block page and the console logs all agree.
  */
 export function wallClock(ms, nowMs) {
   const at = new Date(ms);
   const time = `${two(at.getHours())}:${two(at.getMinutes())}`;
   const sameDay = at.toDateString() === new Date(nowMs).toDateString();
-  return sameDay ? time : `${DAY_NAMES[at.getDay()]} ${time}`;
+  if (sameDay) return time;
+  const day = DAY_NAMES[at.getDay()];
+  if (startOfDay(ms) <= addDays(startOfDay(nowMs), 7)) return `${day} ${time}`;
+  return `${day} ${at.getDate()} ${MONTH_NAMES[at.getMonth()]} ${time}`;
 }
 
 /**

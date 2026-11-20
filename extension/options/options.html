@@ -28,8 +28,8 @@
         resetting on the hour. A daily or weekly cap can sit on top of it.
       </p>
 
-      <!-- DOM order is the phone order: list, form, backup, save bar. On a wide
-           screen the grid moves backup up under the list. -->
+      <!-- DOM order is the phone order: list, form, week, backup, save bar. On
+           a wide screen the grid moves week and backup up under the list. -->
       <div class="layout">
         <nav class="panel rule-nav" aria-labelledby="rules-heading">
           <div class="panel-head">
@@ -47,6 +47,20 @@
         </nav>
 
         <main class="detail" id="detail"></main>
+
+        <!-- One start day for every rule, saved with the rules (DESIGN.md §14). -->
+        <section class="panel week" aria-labelledby="week-heading">
+          <h2 class="eyebrow" id="week-heading">Week</h2>
+          <label class="field">
+            <span>Weeks start on</span>
+            <select id="week-start"></select>
+          </label>
+          <p class="hint">
+            For every weekly cap and pass allowance. A change never cuts the week in progress
+            short.
+          </p>
+          <p class="hint week-carry" id="week-carry" hidden></p>
+        </section>
 
         <section class="panel backup" aria-labelledby="backup-heading">
           <h2 class="eyebrow" id="backup-heading">Backup</h2>
@@ -197,7 +211,8 @@
           <p class="notice" data-role="outright" hidden></p>
           <p class="hint" data-limit>
             Calendar caps on top of the rolling window: a day ends at local midnight, a week
-            on Sunday night. Leave blank for none. A budget of 0 blocks the site outright.
+            on <span data-role="week-end">Sunday</span> night. Leave blank for none. A budget
+            of 0 blocks the site outright.
           </p>
         </section>
 

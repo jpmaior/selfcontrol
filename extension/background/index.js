@@ -6,8 +6,8 @@
 
 import { log } from "./log.js";
 import { isCountingNow, modeOf, onTabUpdated, platform, setRules, start } from "./observers.js";
-import { clock, countdown, wallClock } from "../common/format.js";
-import { loadRules, onRulesChanged, saveRules, usageKey } from "../common/settings.js";
+import { WEEKDAYS, clock, countdown, wallClock } from "../common/format.js";
+import { loadRules, loadSettings, onRulesChanged, saveRules, saveSettings, usageKey } from "../common/settings.js";
 import { blocksOutright, ruleFrom, validateRule } from "../common/rules.js";
 import { clearRemovedAlarms, enforceRule, guardTab, ruleIdFromAlarm, syncRuleAlarm } from "./enforcer.js";
 import { lastTabClosesWindow } from "../common/platform.js";
@@ -25,6 +25,7 @@ import {
   loadNew,
   lockInRule,
   reconcile,
+  setWeek,
   settled,
   stats,
   status,
@@ -84,7 +85,9 @@ const primed = start({
  * so the promise exists before any listener can fire.
  */
 const ready = (async () => {
-  rules = await loadRules();
+  let week;
+  ({ rules, week } = await loadSettings());
+  setWeek(week);
   await load(rules);
   // Before any handler can write a ledger or sync an alarm, so nothing either
   // removes is live.
@@ -102,7 +105,7 @@ ready
     log(
       `ready on ${info.os} — ${rules.length} rule(s),`,
       `window focus events: ${platform.canTrackWindowFocus ? "yes" : "NO (Android)"}.`,
-      "dumpUsage(), dumpStats(), dumpPlatform(), dumpRaw(), addRule(), setLimits()",
+      "dumpUsage(), dumpStats(), dumpPlatform(), dumpRaw(), addRule(), setLimits(), setWeekStart()",
     );
   })
   .catch((error) => log("startup failed:", error));
@@ -164,9 +167,11 @@ async function settleAndArm(why) {
 
 // The options page writes storage; we react. No message protocol needed, and
 // it works the same whether the edit came from the options page or the console.
-onRulesChanged((next, previous) => inOrder(() => onSettingsChanged(next, previous)));
+onRulesChanged((next, previous, week, previousWeek) =>
+  inOrder(() => onSettingsChanged(next, previous, week, previousWeek)),
+);
 
-async function onSettingsChanged(next, previous) {
+async function onSettingsChanged(next, previous, week, previousWeek) {
   const now = Date.now();
 
   // The old set is the one the save replaced, not `rules`: when the save is
@@ -175,11 +180,14 @@ async function onSettingsChanged(next, previous) {
   // rule it holds that the stored old set does not.
   const before = [...previous, ...rules];
 
-  // Close out the old set before swapping, with the old limits, or an open
-  // interval would be credited against a rule that no longer exists. The
-  // first close of a rule wins; the rest find nothing open.
+  // Close out the old set before swapping, with the old limits and the old
+  // week, or an open interval would be credited against a rule that no longer
+  // exists. The first close of a rule wins; the rest find nothing open.
+  setWeek(previousWeek);
   for (const rule of before) stopCounting(rule, now);
   flush();
+  setWeek(week);
+  if (week.startDay !== previousWeek.startDay) log(`weeks now start on ${WEEKDAYS[week.startDay]}`);
 
   for (const id of forgetRemoved(before, next)) log(`rule removed: ${id} — usage discarded`);
   for (const id of await clearRemovedAlarms(next)) log(`rule removed: ${id} — alarm cleared`);
@@ -433,6 +441,23 @@ globalThis.resetRules = async () => {
   await ready;
   await saveRules([]);
   return "every rule deleted, with its usage";
+};
+
+/**
+ * The day the week starts, 0 (Sunday) to 6 (Saturday), as the options page
+ * sets it: through the same save, so the week in progress is carried
+ * (DESIGN.md §14).
+ */
+globalThis.setWeekStart = async (day) => {
+  await ready;
+  try {
+    await saveSettings({ weekStart: day });
+  } catch (error) {
+    return error.message;
+  }
+  const { week } = await loadSettings();
+  const carried = week.carry ? `; this week runs until ${new Date(week.carry.until).toString()}` : "";
+  return `weeks start on ${WEEKDAYS[week.startDay]}${carried}`;
 };
 
 globalThis.resetUsage = async () => {

@@ -101,12 +101,12 @@
   gap: 1.25rem;
 }
 
-/* Backup climbs into the left column under the list; the form spans both of
+/* Week and backup climb into the left column under the list; the form spans
    those rows, and the save bar follows the form. */
 @media (min-width: 60rem) {
   .layout {
     grid-template-columns: 17.5rem minmax(0, 1fr);
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto;
     align-items: start;
     gap: 1.5rem;
   }
@@ -115,16 +115,20 @@
     grid-area: 1 / 1;
   }
 
-  .backup {
+  .week {
     grid-area: 2 / 1;
   }
 
+  .backup {
+    grid-area: 3 / 1;
+  }
+
   .detail {
-    grid-area: 1 / 2 / 3 / 3;
+    grid-area: 1 / 2 / 4 / 3;
   }
 
   .savebar {
-    grid-area: 3 / 2;
+    grid-area: 4 / 2;
   }
 }
 
@@ -303,6 +307,19 @@
 
 .add-rule svg {
   color: var(--muted);
+}
+
+/* --- week ----------------------------------------------------------------- */
+
+.week {
+  padding: 0.9rem 1rem 1rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+/* Said before Save, and again while a carried week lasts. */
+.week-carry {
+  color: var(--ink);
 }
 
 /* --- backup --------------------------------------------------------------- */

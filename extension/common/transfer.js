@@ -2,7 +2,10 @@
 //
 // A file is an envelope around strip-clean rules:
 //
-//   { format: "selfcontrol-rules", version: 2, exportedAt: "...", rules: [...] }
+//   { format: "selfcontrol-rules", version: 2, exportedAt: "...", weekStart: 1, rules: [...] }
+//
+// `weekStart` is the day the week starts, 0 (Sunday) to 6 (Saturday). A file
+// from before it existed has none, and importing it leaves the setting alone.
 //
 // Import is all-or-nothing: one bad rule refuses the whole file, because a
 // half-applied rule set is worse than none. Ids are kept as they are in the
@@ -10,21 +13,25 @@
 
 import { SETTINGS_VERSION } from "./settings.js";
 import { isObject, strip, validateRule, withDefaults } from "./rules.js";
+import { MONDAY, isWeekStartDay } from "./calendar.js";
+import { WEEKDAYS } from "./format.js";
 
 export const FORMAT = "selfcontrol-rules";
 
-export function serializeRules(rules, nowMs) {
+export function serializeRules(rules, nowMs, weekStart = MONDAY) {
   return {
     format: FORMAT,
     version: SETTINGS_VERSION,
     exportedAt: new Date(nowMs).toISOString(),
+    weekStart,
     rules: rules.map(strip),
   };
 }
 
 /**
- * `{ ok: true, rules }` with defaults filled and every rule validated against
- * the others, or `{ ok: false, error }` naming the first problem.
+ * `{ ok: true, rules, weekStart }` with defaults filled and every rule
+ * validated against the others, or `{ ok: false, error }` naming the first
+ * problem. `weekStart` is null for a file that has none: keep what is set.
  */
 export function parseImport(text) {
   let file;
@@ -41,6 +48,9 @@ export function parseImport(text) {
   }
   if (!file.rules.every(isObject)) {
     return { ok: false, error: "The file has an entry that is not a rule." };
+  }
+  if ("weekStart" in file && !isWeekStartDay(file.weekStart)) {
+    return { ok: false, error: "The file's week start is not a day from 0 (Sunday) to 6 (Saturday)." };
   }
 
   const rules = file.rules.map((rule) => withDefaults(strip(withDefaults(rule))));
@@ -65,7 +75,7 @@ export function parseImport(text) {
     }
   }
 
-  return { ok: true, rules };
+  return { ok: true, rules, weekStart: "weekStart" in file ? file.weekStart : null };
 }
 
 /** What replacing `current` with `incoming` does to each rule's history. */
@@ -79,8 +89,11 @@ export function importSummary(current, incoming) {
   };
 }
 
-/** The import's confirm step, in words: what replacing `current` costs. */
-export function describeImport(current, incoming) {
+/**
+ * The import's confirm step, in words: what replacing `current` costs, and
+ * the new start of the week when the file brings one that differs.
+ */
+export function describeImport(current, incoming, { weekStart = null, currentWeekStart = MONDAY } = {}) {
   const { added, kept, removed } = importSummary(current, incoming);
   const n = (count) => `${count} rule${count === 1 ? "" : "s"}`;
   const replace = incoming.length === 1 ? "replaces" : "replace";
@@ -89,5 +102,7 @@ export function describeImport(current, incoming) {
   if (kept.length > 1) parts.push(`${kept.join(", ")} keep their history;`);
   if (removed.length > 0) parts.push(`${removed.join(", ")}: history discarded.`);
   if (added.length > 0) parts.push(`${added.join(", ")}: new.`);
-  return parts.join(" ").replace(/;$/, ".");
+  const text = parts.join(" ").replace(/;$/, ".");
+  if (weekStart === null || weekStart === currentWeekStart) return text;
+  return `${text} Weeks will start on ${WEEKDAYS[weekStart]}.`;
 }

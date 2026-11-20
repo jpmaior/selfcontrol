@@ -565,3 +565,51 @@ test("unlockCreditMs: the unlock threshold, at least 1ms and at most the budget"
   assert.equal(unlockCreditMs({ budgetSec: 600 }), 1, "missing means 0");
   assert.equal(unlockCreditMs({ budgetSec: 600, minUnlockCreditSec: 900 }), 600_000, "never more than the budget");
 });
+
+// --- the week's start day (DESIGN.md §14, §17) -----------------------------
+
+test("passesLeft: with a Sunday start, Saturday's uses are last week's from Sunday midnight", () => {
+  const r = { passes: { perWeek: 2, durationSec: 60, countsTowardCaps: true } };
+  const sunday = { startDay: 0, carry: null };
+  const saturday = new Date(2026, 8, 19, 20, 0).getTime();
+  const sundayMidnight = new Date(2026, 8, 20).getTime();
+  const u = createUsage();
+  u.passUses = [saturday];
+  assert.equal(passesLeft(r, u, saturday + HOUR, sunday), 1, "the same Sunday week");
+  assert.equal(passesLeft(r, u, sundayMidnight, sunday), 2, "a new week on Sunday");
+  // The Monday week the default gives still has it on Sunday.
+  assert.equal(passesLeft(r, u, sundayMidnight), 1, "Monday by default");
+});
+
+test("passesLeft: a carried week keeps every use since it began", () => {
+  const r = { passes: { perWeek: 2, durationSec: 60, countsTowardCaps: true } };
+  const monday = new Date(2026, 8, 14, 9, 0).getTime();
+  const carried = { startDay: 0, carry: { from: new Date(2026, 8, 14).getTime(), until: new Date(2026, 8, 27).getTime() } };
+  const u = createUsage();
+  u.passUses = [monday];
+  // Tuesday the 22nd: a new Monday week would have started on the 21st.
+  assert.equal(passesLeft(r, u, new Date(2026, 8, 22, 9).getTime(), carried), 1);
+});
+
+test("fold: prunes pass uses from before the week its start day gives", () => {
+  const saturday = new Date(2026, 8, 19, 20, 0).getTime();
+  const sundayMorning = new Date(2026, 8, 20, 9, 0).getTime();
+  const u = createUsage();
+  u.passUses = [saturday, sundayMorning];
+  fold(u, sundayMorning + HOUR, HOUR, { startDay: 0, carry: null });
+  assert.deepEqual(u.passUses, [sundayMorning], "Saturday is last week's");
+
+  const v = createUsage();
+  v.passUses = [saturday, sundayMorning];
+  fold(v, sundayMorning + HOUR, HOUR, { startDay: 6, carry: null });
+  assert.deepEqual(v.passUses, [saturday, sundayMorning], "both in a Saturday week");
+});
+
+test("fold: keeps the pass uses of a carried week", () => {
+  const monday = new Date(2026, 8, 14, 9, 0).getTime();
+  const carried = { startDay: 0, carry: { from: new Date(2026, 8, 14).getTime(), until: new Date(2026, 8, 27).getTime() } };
+  const u = createUsage();
+  u.passUses = [monday - 12 * HOUR, monday];
+  fold(u, new Date(2026, 8, 22, 9).getTime(), HOUR, carried);
+  assert.deepEqual(u.passUses, [monday]);
+});

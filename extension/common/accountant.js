@@ -18,7 +18,7 @@
 // Milliseconds rather than seconds so that many short intervals cannot
 // accumulate rounding drift; the JSON size difference is a few hundred bytes.
 
-import { addDays, dayKey, startOfWeek } from "./calendar.js";
+import { DEFAULT_WEEK, addDays, dayKey, weekOf } from "./calendar.js";
 import { isObject } from "./rules.js";
 
 export const BUCKET_MS = 60_000;
@@ -121,8 +121,11 @@ function liveBuckets(usage, oldest) {
  * belongs to exactly one local day because both buckets and time-zone offsets
  * are whole minutes, and deleting a bucket as it is folded is what makes
  * "folded days + live buckets" free of double counting.
+ *
+ * `week` is the stored week setting (calendar.js): pass uses from before the
+ * week that contains `nowMs` are pruned, since only this week's count.
  */
-export function fold(usage, nowMs, windowMs) {
+export function fold(usage, nowMs, windowMs, week = DEFAULT_WEEK) {
   const oldest = bucketOf(nowMs - windowMs);
   foldMap(usage, "b", "used", oldest);
   foldMap(usage, "p", "pass", oldest);
@@ -133,9 +136,9 @@ export function fold(usage, nowMs, windowMs) {
   }
 
   // Pass uses only matter for this week's allowance.
-  const week = startOfWeek(nowMs);
-  if (usage.passUses.some((at) => at < week)) {
-    usage.passUses = usage.passUses.filter((at) => at >= week);
+  const { startMs } = weekOf(nowMs, week);
+  if (usage.passUses.some((at) => at < startMs)) {
+    usage.passUses = usage.passUses.filter((at) => at >= startMs);
   }
   return usage;
 }
@@ -264,12 +267,12 @@ export function startPass(usage, rule, nowMs) {
   return usage;
 }
 
-/** The weekly allowance minus the uses since Monday, never negative. */
-export function passesLeft(rule, usage, nowMs) {
+/** The weekly allowance minus the uses since the week began, never negative. */
+export function passesLeft(rule, usage, nowMs, week = DEFAULT_WEEK) {
   const perWeek = rule.passes?.perWeek ?? 0;
   if (!(perWeek > 0)) return 0;
-  const week = startOfWeek(nowMs);
-  const used = usage.passUses.filter((at) => at >= week).length;
+  const { startMs } = weekOf(nowMs, week);
+  const used = usage.passUses.filter((at) => at >= startMs).length;
   return Math.max(0, perWeek - used);
 }
 
