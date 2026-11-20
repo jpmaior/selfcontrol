@@ -22,7 +22,7 @@ import { loadSettings, saveSettings, usageKey } from "../common/settings.js";
 import { HISTORY_DAYS, normalizeUsage, usedByDay } from "../common/accountant.js";
 import { DEFAULT_WEEK, addDays, changeWeekStart, dayKey, startOfDay, weekOf } from "../common/calendar.js";
 import { historyWeeks } from "../common/history.js";
-import { WEEKDAYS, clock, strong } from "../common/format.js";
+import { WEEKDAYS, clock, shortDuration, strong } from "../common/format.js";
 import { describeImport, parseImport, serializeRules } from "../common/transfer.js";
 import { reportsAudible } from "../common/platform.js";
 
@@ -387,16 +387,6 @@ function renderTotals(el, days) {
   el.replaceChildren(total("7 days", days.slice(-7)), sep, total(`${HISTORY_DAYS} days`, days));
 }
 
-/** "0", "30m", "1h", "1h30": short, for a scale or a chip. Values are whole minutes. */
-function shortDuration(ms) {
-  const min = Math.round(ms / 60_000);
-  if (min === 0) return "0";
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  if (h === 0) return `${m}m`;
-  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`;
-}
-
 const capMs = (sec) => (Number.isFinite(sec) && sec > 0 ? sec * 1000 : null);
 
 function dayLabel(day, today) {
@@ -651,7 +641,7 @@ function renderHistory(root, draft) {
   if (dailyCap !== null) legend.append(swatch("daily-cap", `Daily cap, ${shortDuration(dailyCap)}`));
   const peak = document.createElement("span");
   peak.className = "legend-peak";
-  peak.textContent = `Busiest: ${dayLabel(busiest, today)}, ${clock(busiest.used + busiest.pass)}`;
+  peak.textContent = `Busiest: ${dayLabel(busiest, today)}, ${shortDuration(busiest.used + busiest.pass)}`;
   legend.append(peak);
 
   body.replaceChildren(grid, legend);

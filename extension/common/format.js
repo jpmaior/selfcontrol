@@ -29,6 +29,23 @@ export function countdown(ms) {
   return `${Math.floor(rounded / DAY_MS)}d ${h > 0 ? tail : `0:${tail.padStart(5, "0")}`}`;
 }
 
+/**
+ * "0", "40s", "30m", "1h", "1h30": short, for a scale, a chip or a legend.
+ * Not clock(), whose "14:00" after a date reads as 2 pm (#74). Whole minutes
+ * from a minute on; below that seconds, so a day that was used, or a budget
+ * set in seconds, never reads as "0", and anything over nothing is at least 1s.
+ */
+export function shortDuration(ms) {
+  if (!(ms > 0)) return "0";
+  const sec = Math.max(1, Math.round(ms / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round(ms / 60_000);
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`;
+}
+
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** In full, by `Date.getDay()` number: for the day the week starts. */
