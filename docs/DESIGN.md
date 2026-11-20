@@ -238,17 +238,17 @@ timestamps*, and do arithmetic:
 
 ```js
 function startCounting(rule) {
-  if (open[rule.id]) return;
-  open[rule.id] = { since: Date.now() };
-  scheduleExhaustionAlarm(rule);
+  if (open[rule.id] !== undefined) return;
+  open[rule.id] = Date.now();
+  syncRuleAlarm(rule);
 }
 
 function stopCounting(rule) {
-  const o = open[rule.id];
-  if (!o) return;
-  commit(rule, o.since, Date.now());
+  const since = open[rule.id];
+  if (since === undefined) return;
+  commit(rule, since, Date.now());
   delete open[rule.id];
-  flush(rule);
+  flush();
 }
 ```
 
@@ -325,8 +325,10 @@ minutes while counting and does `commit(since, now); since = now; flush()`. Cost
 hour of continuous watching instead of 240.
 
 The same checkpoint handles **laptop sleep**, which would otherwise silently eat the whole
-budget. Each committed chunk is clamped to `1.5 × checkpointInterval`: a three-hour suspend
-counts as 7.5 minutes, not 180.
+budget. Each committed chunk is clamped to `1.5 × CHECKPOINT_MS` (`MAX_CHUNK_MS` in `store.js`,
+which passes it to `policy.creditInUse()`): a three-hour suspend counts as 7.5 minutes, not 180.
+An interval longer than that means the checkpoint did not run, so the machine was asleep or
+Firefox was frozen; the extra half checkpoint leaves room for a checkpoint that fires late.
 
 The checkpoint interval is the single tuning knob, trading write volume against crash loss and
 sleep over-count. Default: 5 minutes.
@@ -417,7 +419,7 @@ right for "which rules are counting and since when". The event page can be kille
 `storage.session`, and resume mid-interval without a single disk write.
 
 ```
-open:youtube      → { since: 1755975000000 }         // RAM only
+open:youtube      → 1755975000000                    // RAM only: when the interval opened
 ```
 
 ### Flush points
@@ -717,7 +719,7 @@ background/ (event page — the only stateful component)
   ├─ index.js       wiring, lifecycle, the one queue, alarms, messaging
   ├─ observers.js   tabs/windows events  →  "is rule R counting right now?"
   ├─ enforcer.js    over-budget → block or close; guards new navigations
-  ├─ store.js       ledgers, debounced flush, storage.session for open intervals
+  ├─ store.js       ledgers, batched flush, storage.session for open intervals
   └─ log.js         the prefixed console logger
 
 common/ (shared by the background and the UI pages)
@@ -1076,7 +1078,7 @@ weekly budget, stay in hours.
 
 Because a calendar cap returns whole at the boundary, the drip-feed of §8 cannot happen to
 it, so `minUnlockCreditSec` applies to the rolling cap only and its clamp stays in
-`accountant.unlockAt()`.
+`accountant.unlockCreditMs()`, which `unlockAt()` calls.
 
 ### The day the week starts
 
