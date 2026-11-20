@@ -3,18 +3,21 @@
 //
 // Sending a message wakes the background if it was unloaded, so opening the
 // popup is always enough to get a fresh answer. Between answers the popup
-// counts by itself, as the block page does: one reading, a local tick every
-// second, and a fresh reading every few seconds, after an action and when a
-// countdown reaches zero (DESIGN.md §19). Asking every second built every
+// counts by itself, as the block page does: one reading, a local tick on each
+// second of its countdowns, and a fresh reading every few seconds, after an
+// action and when a countdown reaches zero (DESIGN.md §19). Asking every second built every
 // rule's full status each time, for numbers the popup can work out alone.
 // Rows are built once and then mutated in place — rebuilding the list every
 // second would restart the CSS transitions and make the meters stutter.
 
-import { BLOCKED, clock, countdown, wallClock } from "../common/format.js";
+import { BLOCKED, clock, countdown, nextCountdownStep, wallClock } from "../common/format.js";
 import { MODES, effectiveMode } from "../common/rules.js";
 import { reportsAudible } from "../common/platform.js";
 
-/** The local tick, which moves the countdowns and a counting rule's numbers. */
+/**
+ * The longest the local tick waits. It moves the countdowns and a counting
+ * rule's numbers, and a countdown's next second usually comes sooner (tick()).
+ */
 const TICK_MS = 1000;
 
 /**
@@ -354,27 +357,36 @@ function projected(status, elapsedMs) {
 }
 
 /**
- * The instants after `atMs` at which a reading stops being true on its own,
- * and the popup should ask again: an unlock, a pass ending, a counting rule
- * running out. The earliest of them, or null.
+ * The instants a reading taken at `atMs` counts down to: an unlock, a pass
+ * ending, a counting rule running out. At each, the reading stops being true
+ * on its own, and the popup should ask again.
  */
-function firstZero(statuses, atMs) {
-  let first = null;
-  for (const s of statuses) {
-    const zeros = [
-      s.exhausted ? s.unlockAtMs : null,
-      s.pass?.active ? s.pass.endsAtMs : null,
-      s.counting && !s.exhausted ? atMs + s.remainingMs : null,
-    ];
-    for (const at of zeros) {
-      if (at !== null && at > atMs && (first === null || at < first)) first = at;
-    }
-  }
-  return first;
+function zeros(statuses, atMs) {
+  return statuses.flatMap((s) => [
+    s.exhausted ? s.unlockAtMs : null,
+    s.pass?.active ? s.pass.endsAtMs : null,
+    s.counting && !s.exhausted ? atMs + s.remainingMs : null,
+  ]).filter((at) => at !== null);
 }
 
-/** Every second: the last reading, moved on to now. */
+/** The earliest of them after `atMs`, or null. */
+function firstZero(statuses, atMs) {
+  const ahead = zeros(statuses, atMs).filter((at) => at > atMs);
+  return ahead.length ? Math.min(...ahead) : null;
+}
+
+/** The next tick, aimed at the instant something on show next changes. */
+let tickTimer = null;
+
+/**
+ * The last reading, moved on to now; then a wait for the next whole second
+ * before one of its zeros, and never more than TICK_MS (DESIGN.md §19, "On the
+ * second"). So an unlock or a pass counts down in step with the block page,
+ * and a zero is acted on at the instant it comes. Aimed afresh on every call,
+ * a refresh's or an action's included, so a late timeout puts nothing off.
+ */
 function tick() {
+  clearTimeout(tickTimer);
   const now = Date.now();
   if (reading) {
     for (const status of reading.statuses) render(projected(status, now - reading.atMs), now);
@@ -392,6 +404,9 @@ function tick() {
     nextZeroMs = null;
     refresh();
   }
+
+  const deadlines = reading ? zeros(reading.statuses, reading.atMs) : [];
+  tickTimer = setTimeout(tick, nextCountdownStep(now, deadlines, TICK_MS));
 }
 
 function openRules() {
@@ -423,6 +438,6 @@ document.getElementById("edit").addEventListener("click", openRules);
 document.getElementById("settings").addEventListener("click", openRules);
 document.getElementById("add").addEventListener("click", addRule);
 
+// Every refresh ends in a tick, answered or not, and each tick sets the next.
 refresh();
-setInterval(tick, TICK_MS);
 setInterval(refresh, REFRESH_MS);

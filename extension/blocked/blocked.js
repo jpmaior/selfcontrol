@@ -1,11 +1,11 @@
 // The block page.
 //
-// The countdown ticks locally every second, but the truth comes from the
-// background: the rolling window can hand budget back early, so the page
-// re-reads its status periodically rather than trusting the timestamp it was
-// opened with.
+// The countdown ticks locally, on the whole seconds before the unlock, but the
+// truth comes from the background: the rolling window can hand budget back
+// early, so the page re-reads its status periodically rather than trusting the
+// timestamp it was opened with.
 
-import { BLOCKED, clock, countdown, strong } from "../common/format.js";
+import { BLOCKED, clock, countdown, nextCountdownStep, strong } from "../common/format.js";
 import { returnUrlFrom } from "../common/rules.js";
 import { blockPageIndex, describedReason, GO_BACK_STEPS, showsGoBack } from "../common/blockpage.js";
 
@@ -201,8 +201,15 @@ async function refresh() {
         ? "You have 1 pass left this week, in the toolbar popup."
         : `You have ${left} passes left this week, in the toolbar popup.`;
 
-    if (mine.exhausted) block();
-    else unlock();
+    if (mine.exhausted) {
+      block();
+      // Draw now, and aim the next tick at the steps of what may be a new
+      // unlock instant: one aimed at the old one would change the number at
+      // the wrong moments until the unlock.
+      tick();
+    } else {
+      unlock();
+    }
   } catch {
     // Background asleep or mid-restart; the local tick carries us until the
     // next refresh succeeds.
@@ -244,11 +251,21 @@ function block() {
   el.unlocked.hidden = true;
   setHeadline();
   renderReturn(false);
-  tick();
 }
 
+/** The next tick, aimed at the instant the countdown next changes. */
+let tickTimer = null;
+
+/**
+ * Draws the countdown, then waits for the moment its number next changes: the
+ * next whole second before the unlock (DESIGN.md §19, "On the second"), so it
+ * changes when the popup's does and reaches 0 at the unlock. Aimed afresh each
+ * time, so a timeout that fires late puts nothing off for the next one.
+ */
 function tick() {
-  if (outright()) return; // nothing to count down to
+  clearTimeout(tickTimer);
+  tickTimer = null;
+  if (outright()) return; // nothing to count down to; a refresh that finds an unlock instant starts it
   const now = Date.now();
   const remaining = unlockAtMs - now;
 
@@ -265,6 +282,8 @@ function tick() {
 
   const span = Math.max(1, unlockAtMs - blockedAtMs);
   el.meter.style.width = `${Math.min(100, ((now - blockedAtMs) / span) * 100)}%`;
+
+  tickTimer = setTimeout(tick, nextCountdownStep(now, [unlockAtMs]));
 }
 
 setUpGoBack();
@@ -272,7 +291,6 @@ setHeadline();
 el.quip.textContent = pickQuip();
 renderReturn(false);
 tick();
-setInterval(tick, 1000);
 
 // Polling wakes the event page, so only do it while someone is actually
 // looking — a block tab parked in the background must not pin the background

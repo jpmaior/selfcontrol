@@ -734,7 +734,8 @@ common/ (shared by the background and the UI pages)
   ├─ history.js     pure: the kept days as weeks of seven, for the history view (§13)
   ├─ settings.js    the `settings` key, rules and week: load, save, and watch for edits
   ├─ platform.js    which Firefox this is, for what feature detection cannot see (§12)
-  ├─ format.js      durations and times, how a block is worded, bold runs of text
+  ├─ format.js      durations and times, when a countdown next changes (§19), how a block
+  │                 is worded, bold runs of text
   └─ theme.css      colours, pills, captions, buttons: shared by every page
 
 options/   edit rules, the week's start day, history, export and import
@@ -1396,9 +1397,10 @@ then drop the blocked page from the tab's history.
 
 Decided 2026-11-19 (#58). The popup used to ask the background for every rule's status every
 second: a message a second, each building every rule's full status, for numbers the popup can
-mostly work out alone. It now does what the block page does: one reading, a local tick every
-second, and a fresh reading every 5 seconds, after an action, and when a countdown in the
-reading reaches zero (an unlock, a pass ending, a counting rule running out).
+mostly work out alone. It now does what the block page does: one reading, a local tick at least
+once a second (on the second, below), and a fresh reading every 5 seconds, after an action, and
+when a countdown in the reading reaches zero (an unlock, a pass ending, a counting rule running
+out).
 
 The tick counts down to the instants the reading gave and counts up what a counting rule spends:
 its rolling window's used time, the daily and weekly caps' unless a pass leaves them out
@@ -1407,6 +1409,32 @@ background's reading is. What time alone does not tell it waits for the next rea
 ageing out of the rolling window, a rule starting or stopping, the lock-in preview, anything done
 elsewhere. Only the newest request's answer is shown, so a slow one cannot undo a later one, and
 a failed one leaves the tick going on the last reading, as on the block page.
+
+### On the second
+
+Decided 2026-11-20 (#75). The popup and the block page count down to the same unlock instant
+with the same `countdown()`, which rounds up to the second, yet were seen a second apart: `1:40`
+in one and `1:41` in the other. Each ticked on a `setInterval` of a second from whenever it
+loaded, so each redrew at its own point within the second and went on showing the old number
+until then. Recorded in Firefox, the block page changed 0.7–0.9 s after the true remaining time
+crossed each second and the popup 0.5–0.6 s after, so for a fifth of the time they disagreed,
+and neither said 0 until well after the unlock.
+
+Both now tick when the number changes: a timeout aimed at the next instant the deadline is a
+whole number of seconds away, the last of them the deadline itself, where the countdown reaches
+0 and the page unlocks (`nextCountdownStep()` in `format.js`, beside the rounding it follows).
+Each tick aims the next one afresh from `Date.now()`, so a timeout that fires a few
+milliseconds late does not push the ones after it; ticking faster to catch the change sooner
+would only spend wake-ups. A refresh that moves the unlock instant re-aims the tick at once.
+
+The popup has more than one thing on show. Its tick aims at every instant its reading counts
+to (each unlock, each pass's end and each counting rule running out, the same instants that
+bring a fresh reading), whichever step comes first, and waits a second at most, so with nothing
+counting down the numbers still move every second. Two countdowns a fraction of a second out of
+phase cost a tick each per second, and each changes on its own second. The other side effect is
+that a reading's zero is acted on the instant it comes, where the one-second tick could leave the
+row up to a second behind. Its other timers keep their own clocks: the 5-second refresh, and the
+`Confirm` and error timeouts.
 
 ---
 

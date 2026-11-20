@@ -6,7 +6,7 @@ process.env.TZ = "Europe/Lisbon";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clock, countdown, shortDuration, wallClock } from "../extension/common/format.js";
+import { clock, countdown, nextCountdownStep, shortDuration, wallClock } from "../extension/common/format.js";
 
 test("clock: mm:ss, then h:mm:ss", () => {
   assert.equal(clock(0), "0:00");
@@ -27,6 +27,49 @@ test("countdown: a day or more is counted in days, not in hundreds of hours", ()
   assert.equal(countdown(24 * H), "1d 0:00:00");
   assert.equal(countdown(123 * H + 52 * 60_000 + 32_000), "5d 3:52:32", "a week's countdown");
   assert.equal(countdown(24 * H + 5 * 60_000 + 1), "1d 0:05:01", "still rounds up");
+});
+
+test("nextCountdownStep: the wait until the countdown to a deadline shows its next number", () => {
+  const d = 1_000_000;
+  assert.equal(nextCountdownStep(d - 2500, [d]), 500, "2.5 s left shows 0:03, and 0:02 at 2 s left");
+  assert.equal(nextCountdownStep(d - 2000, [d]), 1000, "just turned to 0:02: the next is a whole second away");
+  assert.equal(nextCountdownStep(d - 1999, [d]), 999);
+  assert.equal(nextCountdownStep(d - 1, [d]), 1, "0:01 for the last moment, then 0:00 at the deadline itself");
+  assert.equal(nextCountdownStep(d - 3_600_000 - 250, [d]), 250, "hours away, the same phase");
+});
+
+test("nextCountdownStep: a deadline that has come shows 0:00 for good, so nothing is left to wait for", () => {
+  const d = 1_000_000;
+  assert.equal(nextCountdownStep(d, [d]), null);
+  assert.equal(nextCountdownStep(d + 5, [d]), null);
+  assert.equal(nextCountdownStep(d, []), null, "no deadlines at all");
+});
+
+test("nextCountdownStep: lands where countdown() changes, never before it", () => {
+  // Whatever the remainder, the number holds until the step and changes on
+  // it: a page that ticks there shows each second the moment it is true.
+  const d = 50_000_000;
+  for (const left of [1, 999, 1000, 1001, 1500, 59_001, 60_000, 3_600_000, 86_400_250]) {
+    const now = d - left;
+    const step = nextCountdownStep(now, [d]);
+    assert.equal(countdown(d - (now + step - 1)), countdown(left), `${left} ms left: unchanged just before`);
+    assert.notEqual(countdown(d - (now + step)), countdown(left), `${left} ms left: changed on the step`);
+  }
+});
+
+test("nextCountdownStep: with several deadlines, the soonest step among them", () => {
+  const now = 10_000_000;
+  assert.equal(nextCountdownStep(now, [now + 5300, now + 2700]), 300, "each counts on its own phase");
+  assert.equal(nextCountdownStep(now, [now + 700, now + 90_200]), 200);
+  assert.equal(nextCountdownStep(now, [now - 400, now + 2600]), 600, "a deadline gone by takes no part");
+});
+
+test("nextCountdownStep: no later than the cap, which is all there is with no deadline ahead", () => {
+  const now = 10_000_000;
+  assert.equal(nextCountdownStep(now, [], 1000), 1000, "something else still moves every second");
+  assert.equal(nextCountdownStep(now, [now - 1], 1000), 1000);
+  assert.equal(nextCountdownStep(now, [now + 4800], 1000), 800, "a step sooner than the cap wins");
+  assert.equal(nextCountdownStep(now, [now + 4800], 300), 300);
 });
 
 test("clock: an amount of time keeps its hours", () => {
